@@ -8,7 +8,7 @@
 單一 .exe(PyInstaller onefile)
   └─ 啟動 → 內建 localhost 伺服器(FastAPI)
        ├─ 後端 API(Python)
-       ├─ 前端靜態檔(HTML/CSS/JS,不用前端框架)
+       ├─ 前端靜態檔(HTML/CSS/JS + Vue 無建置模式)
        └─ 自動開瀏覽器 → http://127.0.0.1:port
 資料落地(集中 data/ 一個資料夾):
   data/ ├─ pos.db(SQLite)
@@ -16,6 +16,8 @@
         └─ config.json(設定:埠號、條碼機等)
 ```
 
+- **前端:Vue 無建置模式**——`vue.js`(production 版)下載一份放專案內、包進 exe,離線可用;**不引入 npm/node/vite 建置鏈**(維護者「檔案不灑亂」需求)。前端依畫面拆多個 `.js` 檔,模板寫在 HTML `<template>` 標籤(保留語法高亮)。日後若規模成長到無建置模式難以維護,前端可單獨遷移 Vite 專案,API 層隔離、後端不動
+- **後端:FastAPI**;**DB:SQLite**(單機零安裝、單檔備份、完整 transaction)。未來多機:後端資料層換 PostgreSQL 即可,前端不動
 - 條碼掃描器＝鍵盤輸入,前端聚焦輸入框接字串,免驅動
 - 條碼列印:後端預留「列印服務」介面,先不接實體機,之後接特定條碼機只實作這層
 
