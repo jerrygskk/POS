@@ -2,6 +2,8 @@
 
 維護者最看重的部分。違反這些會直接消耗信任與時間。
 
+> **交接表：`docs/handover.md`**（不入庫）——記錄目前進度、待辦、已議定決策，新對話先讀。
+
 ## A. 溝通與節奏
 
 - **先思考再動手**：任何寫 code 的任務，先發想方案、整理成計畫給我看，經核可才寫 code；不要做完才說「其實有更好做法」。複雜或破壞性改動（多檔／改結構／改資料）先盤點影響範圍列清單。
@@ -19,11 +21,15 @@
 - **單元測試放 `tests/`**：`python -m unittest discover -s tests`，檔名 `test_*.py`。動到可單測的純邏輯（解析／資料 round-trip／狀態計算／權限判斷）**一併新增或更新測試**。
 - ⚠️ **權限／存取控制是每個新功能必檢項**：「受限身分不可做」的操作，只靠停用按鈕不夠——雙擊、行內編輯、Enter、右鍵、拖拉等替代路徑會繞過。① **所有**進入點補 guard（用便捷判斷函式，勿字串比較）② 以受限身分逐路徑驗證。
 - **UI 文字正式**不口語（「儲存目前排序後繼續編輯？」而非「要存嗎？」）。
+- **UI 從簡是硬性要求**：不新增分頁、無巢狀對話框、逐層解鎖；「一排喔，不要搞成兩排（除非有操作）」。
+- **前端驗證用 preview 工具**（launch 名 `pos`，port 8737），不要用 Bash 起 server；js 沒掛版號，改完請維護者 Ctrl+F5。css 有改就 bump `index.html` 的 `?v=`。
+- ⚠️ PowerShell 5.1：多行 python 寫 scratchpad 檔再跑；中文輸出寫 UTF-8 檔再讀。
+- ⚠️ 打包勿跑 `tools/build.ps1`（Bypass 被權限分類器擋），直接跑等效 pyinstaller 指令。
 
 ## C. 版本 / Git / 發布
 
 - **push＝commit + push**。**逐檔 add**（不要一次全加，跳過資料庫檔／含個資檔）；**叫你推才推**，沒說不要問。
 - ⚠️ 多行 commit 訊息用 Bash heredoc（`git commit -F - <<'EOF' … EOF`），**不要用 PowerShell here-string**（`@` 會黏進 subject）。
-- ⚠️ **push 前必確認無真實人名／個資**（測試 fixture、文件範例、資料庫檔）。
+- ⚠️ **公開 repo**（https://github.com/jerrygskk/POS）：push 前必確認無真實人名／個資（測試 fixture、文件範例、資料庫檔）；所有 xlsm/xlsx 已 gitignore，**絕不入庫**。
 - 發布順序鐵則：**文件／release note 要在版本 commit 之前寫好**，tag 才指向含完整文件的 commit；先打 tag 事後補文件＝退版重做。
 - ⚠️ tag 已 push 後要移動：本地 `git tag -f` 後，遠端**先刪再推**（`git push origin :refs/tags/v{版號}` 再 push）。
