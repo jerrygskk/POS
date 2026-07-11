@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+# data 目錄整批忽略,僅允許程式產生的空資料庫範本(無業務資料)
+data/*
+!data/pos_empty.db
+build/
+dist/
+*.spec
+
+# 含店內資料與人名,絕不入庫(公開 repo)
+*.xlsm
+*.xlsx
+
+# 跨對話交接,不入庫
+docs/handover.md
