@@ -622,6 +622,20 @@ def run_import(conn, records):
                 "INSERT OR IGNORE INTO VariantModel(variant_id,model_id) VALUES(?,?)",
                 (vid, model_ids[mkey]))
 
+    # 自取碼計數器:匯入的 TL 碼寫進 Barcode 後,把 Setting.next_store_barcode
+    # 更新為「匯入最大號+1」(只往前推不倒退,重跑安全);App 取號直接讀此值+1
+    max_tl = conn.execute(
+        "SELECT MAX(CAST(SUBSTR(barcode,3) AS INTEGER)) FROM Barcode "
+        "WHERE barcode LIKE 'TL%' AND SUBSTR(barcode,3) GLOB '[0-9]*'").fetchone()[0]
+    if max_tl is not None:
+        row = conn.execute(
+            "SELECT value FROM Setting WHERE key='next_store_barcode'").fetchone()
+        cur = int(row[0]) if row else 0
+        if max_tl + 1 > cur:
+            conn.execute(
+                "INSERT OR REPLACE INTO Setting(key,value) "
+                "VALUES('next_store_barcode',?)", (str(max_tl + 1),))
+
     stats = {
         "categories": conn.execute("SELECT COUNT(*) FROM Category").fetchone()[0],
         "brands": conn.execute("SELECT COUNT(*) FROM Brand").fetchone()[0],

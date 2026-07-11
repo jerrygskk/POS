@@ -241,6 +241,42 @@ def display_attrs(conn, variant_ids):
         out[vid] = _FIELD_SEP.join(parts)
     return out
 
+def variant_sort_keys(conn, variant_ids):
+    """批次算變體排序鍵 {variant_id: key}。供資料庫頁變體列排序,依材質組合分節:
+    ① 材質數(multi 值個數)少者在前:單一材質各自成節,複合材質(霧面+防窺)排全部單材質之後
+    ② 抗AR 特例(維護者指定):帶「抗AR」詞條者整塊移到同材質數的素身/一般詞條之後,
+       塊內主材質排序照舊(亮,霧,藍,窺,亮|AR,窺|AR)
+    ③ 依欄 sort、選項 sort(材質序);其他詞條照舊跟著自己的材質、依詞條序
+    無屬性=最前。"""
+    keys = {vid: [0, 0, [], []] for vid in variant_ids}  # [材質數,抗AR,材質序,詞條序]
+    if not variant_ids:
+        return {}
+    qs = ",".join("?" * len(variant_ids))
+    for r in conn.execute(
+            f"SELECT va.variant_id, f.field_type, f.sort AS fsort, "
+            f"f.field_id, o.sort AS osort, o.option_id, o.value AS oval "
+            f"FROM VariantAttribute va "
+            f"JOIN AttributeField f ON va.field_id=f.field_id "
+            f"LEFT JOIN AttributeOption o ON va.option_id=o.option_id "
+            f"WHERE va.variant_id IN ({qs}) "
+            f"ORDER BY va.variant_id, f.sort, f.field_id, o.sort, o.option_id",
+            variant_ids):
+        k = keys[r["variant_id"]]
+        if r["field_type"] == "tags":
+            if r["oval"] == "抗AR":
+                k[1] = 1
+            if r["osort"] is not None:
+                k[3].append((r["fsort"] or 0, r["field_id"],
+                             r["osort"], r["option_id"]))
+            continue
+        if r["field_type"] == "multi":
+            k[0] += 1
+        if r["osort"] is not None:
+            k[2].append((r["fsort"] or 0, r["field_id"],
+                         r["osort"], r["option_id"]))
+    return {vid: (k[0], k[1], tuple(k[2]), tuple(k[3]))
+            for vid, k in keys.items()}
+
 def attrs_of(conn, variant_id):
     """單一變體規格 dict(便捷包裝)。"""
     return attrs_by_variant(conn, [variant_id]).get(variant_id, {})
@@ -263,12 +299,20 @@ def _has_records(conn, variant_ids):
         variant_ids).fetchone()
     return bool(r)
 
+def _reject_manual_tl(barcode):
+    """TL 開頭為自取碼保留字頭,禁止手動輸入(只能由系統取號或匯入工具寫入),
+    避免與流水號撞號。"""
+    if barcode and barcode.upper().startswith("TL"):
+        raise HTTPException(422, "TL 開頭為系統保留，如有需求請按自取條碼")
+
 def next_store_barcode(conn):
+    """自取碼取號:TL+流水號。號碼只存 Setting.next_store_barcode(取用後+1),
+    單調遞增、刪除條碼不回收號碼;匯入工具寫入既有 TL 碼後會更新此值。"""
     row = conn.execute("SELECT value FROM Setting WHERE key='next_store_barcode'").fetchone()
-    n = int(row["value"]) if row else 1
+    n = int(row["value"]) if row else 100000001
     conn.execute("INSERT OR REPLACE INTO Setting(key,value) VALUES('next_store_barcode',?)",
                  (str(n + 1),))
-    return f"SP{n:08d}"
+    return f"TL{n}"
 
 def stock_of(conn, variant_id):
     r = conn.execute("SELECT COALESCE(SUM(qty),0) s FROM StockMovement WHERE variant_id=?",
@@ -296,6 +340,7 @@ def create_product(body: ProductIn, request: Request):
             set_variant_attributes(conn, vid, body.category_id, v.attributes)
             _set_variant_models(conn, vid, v.model_ids)
             for b in v.barcodes:
+                _reject_manual_tl(b.barcode)
                 code = b.barcode or next_store_barcode(conn)
                 conn.execute("INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",
                              (code, vid, b.source))
@@ -329,6 +374,7 @@ def scan(code: str, request: Request):
 def add_barcode(variant_id: int, body: BarcodeIn, request: Request):
     conn = get_conn(request.app.state.db_path)
     try:
+        _reject_manual_tl(body.barcode)
         code = body.barcode or next_store_barcode(conn)
         conn.execute("INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",
                      (code, variant_id, body.source))
@@ -433,9 +479,13 @@ def catalog(request: Request, q: str = "", include_inactive: bool = False,
         attrs_map = attrs_by_variant(conn, all_vids)
         disp_map = display_attrs(conn, all_vids)
         models_map = _models_by_variant(conn, all_vids)
+        sort_keys = variant_sort_keys(conn, all_vids)
         vrows_by_pid = {}
         for v in vrows:
             vrows_by_pid.setdefault(v["product_id"], []).append(v)
+        # 變體列排序:單一材質在前(依選項 sort)、combo 在後,同鍵依建檔序
+        for vs in vrows_by_pid.values():
+            vs.sort(key=lambda v: (sort_keys[v["variant_id"]], v["variant_id"]))
 
         out = []
         for p in prods:
@@ -553,6 +603,7 @@ def add_variant(pid: int, body: NewVariantIn, request: Request):
         _set_variant_models(conn, vid, body.model_ids)
         codes = []
         for b in body.barcodes:
+            _reject_manual_tl(b.barcode)
             code = b.barcode or next_store_barcode(conn)
             conn.execute("INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",
                          (code, vid, b.source))

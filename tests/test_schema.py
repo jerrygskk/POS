@@ -50,6 +50,12 @@ class TestSchema(unittest.TestCase):
             "SELECT COUNT(*) c FROM AttributeField WHERE category_id IS NULL").fetchone()["c"]
         self.assertEqual(n, 2)
 
+    def test_phonemodel_has_series_column(self):
+        # 全新 DB 建表即含 series 欄
+        conn = get_conn(self.db)
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(PhoneModel)")}
+        self.assertIn("series", cols)
+
 
 class TestPhoneBrandMigration(unittest.TestCase):
     """v1→v2:舊 PhoneModel.brand 字串升級為 PhoneBrand FK,回填不失資料。"""
@@ -176,6 +182,49 @@ class TestVariantAttributeMigration(unittest.TestCase):
             self.assertEqual(conn.execute(
                 "SELECT COUNT(*) c FROM VariantAttribute").fetchone()["c"], 0)
             # 版號升至最新
+            ver = int(conn.execute(
+                "SELECT value FROM Setting WHERE key='schema_version'").fetchone()["value"])
+            self.assertEqual(ver, db_schema.SCHEMA_VERSION)
+        finally:
+            conn.close()
+
+
+class TestModelSeriesMigration(unittest.TestCase):
+    """v5→v6:PhoneModel 加 series 欄;舊 DB 升級後有欄、既有型號資料保留。"""
+
+    def _make_v5_db(self):
+        db = os.path.join(tempfile.mkdtemp(), "v5.db")
+        conn = sqlite3.connect(db)
+        # 模擬 v5:PhoneModel 已有 alias 欄但無 series 欄
+        conn.executescript("""
+          CREATE TABLE PhoneBrand(phone_brand_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE, sort INTEGER NOT NULL DEFAULT 0,
+            active INTEGER NOT NULL DEFAULT 1);
+          CREATE TABLE PhoneModel(model_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone_brand_id INTEGER NOT NULL, name TEXT NOT NULL, alias TEXT,
+            sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(phone_brand_id, name));
+          CREATE TABLE Setting(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        """)
+        conn.execute("INSERT INTO PhoneBrand(name) VALUES('iPhone')")
+        conn.execute("INSERT INTO PhoneModel(phone_brand_id,name,alias) "
+                     "VALUES(1,'iPhone 17 Pro Max','17PM')")
+        conn.execute("INSERT INTO Setting(key,value) VALUES('schema_version','5')")
+        conn.commit(); conn.close()
+        return db
+
+    def test_v5_to_v6_upgrade(self):
+        db = self._make_v5_db()
+        init_db(db)  # 開檔自動升級
+        conn = get_conn(db)
+        try:
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(PhoneModel)")}
+            self.assertIn("series", cols)
+            # 既有型號保留、新欄預設 NULL
+            row = conn.execute(
+                "SELECT alias, series FROM PhoneModel WHERE name='iPhone 17 Pro Max'").fetchone()
+            self.assertEqual(row["alias"], "17PM")
+            self.assertIsNone(row["series"])
             ver = int(conn.execute(
                 "SELECT value FROM Setting WHERE key='schema_version'").fetchone()["value"])
             self.assertEqual(ver, db_schema.SCHEMA_VERSION)

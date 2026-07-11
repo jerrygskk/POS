@@ -142,6 +142,26 @@ class TestCatalogApi(unittest.TestCase):
         self.assertEqual(self.c.get("/api/catalog").json()[0]["variants"][0]["models"],
                          ["iPhone 17 Pro Max"])
 
+    def test_model_series_roundtrip(self):
+        pbid = self._add_phone_brand("iPhone")
+        # 建檔帶系列
+        mid = self.c.post("/api/models", json={
+            "phone_brand_id": pbid, "name": "17 Pro Max",
+            "series": "17 系列"}).json()["model_id"]
+        rows = self.c.get("/api/models").json()
+        self.assertEqual(rows[0]["series"], "17 系列")
+        # 更新系列
+        self.c.patch(f"/api/models/{mid}", json={"series": "17 Pro 系列"})
+        self.assertEqual(self.c.get("/api/models").json()[0]["series"], "17 Pro 系列")
+        # 空字串存 NULL
+        self.c.patch(f"/api/models/{mid}", json={"series": "  "})
+        self.assertIsNone(self.c.get("/api/models").json()[0]["series"])
+        # 未帶系列建檔 → NULL
+        m2 = self.c.post("/api/models", json={
+            "phone_brand_id": pbid, "name": "16"}).json()["model_id"]
+        row2 = next(r for r in self.c.get("/api/models").json() if r["model_id"] == m2)
+        self.assertIsNone(row2["series"])
+
     def test_model_add_with_missing_brand_422(self):
         r = self.c.post("/api/models", json={"phone_brand_id": 999, "name": "15"})
         self.assertEqual(r.status_code, 422)

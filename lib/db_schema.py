@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS PhoneModel(
   phone_brand_id INTEGER NOT NULL REFERENCES PhoneBrand(phone_brand_id),
   name TEXT NOT NULL,
   alias TEXT,                       -- 顯示別名(空=顯示全名)
+  series TEXT,                      -- 系列(自由文字,如「17 系列」;空=未分系列)
   sort INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
   UNIQUE(phone_brand_id, name)
@@ -293,11 +294,18 @@ def _mig_model_alias(conn):
     if "alias" not in cols:
         conn.execute("ALTER TABLE PhoneModel ADD COLUMN alias TEXT")
 
+def _mig_model_series(conn):
+    """v5→v6:PhoneModel 加系列欄(自由文字,空=未分系列)。"""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(PhoneModel)")}
+    if "series" not in cols:
+        conn.execute("ALTER TABLE PhoneModel ADD COLUMN series TEXT")
+
 MIGRATIONS = [
     (BASE_VERSION + 1, _mig_phone_brand),
     (BASE_VERSION + 2, _mig_variant_attributes),
     (BASE_VERSION + 3, _mig_field_multi),
     (BASE_VERSION + 4, _mig_model_alias),
+    (BASE_VERSION + 5, _mig_model_series),
 ]
 
 # 最新版號 = 初版 + 遷移筆數;全新 DB 建 SCHEMA 即為此版

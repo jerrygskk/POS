@@ -37,12 +37,14 @@ class ModelNew(BaseModel):
     phone_brand_id: int
     name: str
     alias: str | None = None
+    series: str | None = None
     sort: int | None = None
 
 class ModelPatch(BaseModel):
     phone_brand_id: int | None = None
     name: str | None = None
     alias: str | None = None
+    series: str | None = None
     sort: int | None = None
     active: int | None = None
 
@@ -310,8 +312,8 @@ def list_models(request: Request, all: int = 0, phone_brand_id: int | None = Non
     conn = get_conn(request.app.state.db_path)
     try:
         # 回傳同時帶品牌名稱方便前端;建檔下拉(all=0)排除停用品牌之型號
-        sql = ("SELECT m.model_id, m.phone_brand_id, m.name, m.alias, m.sort, m.active, "
-               "pb.name AS brand_name "
+        sql = ("SELECT m.model_id, m.phone_brand_id, m.name, m.alias, m.series, "
+               "m.sort, m.active, pb.name AS brand_name "
                "FROM PhoneModel m JOIN PhoneBrand pb "
                "ON m.phone_brand_id=pb.phone_brand_id")
         clauses, args = [], []
@@ -336,9 +338,11 @@ def add_model(body: ModelNew, request: Request):
                            (body.phone_brand_id,)).fetchone():
             raise HTTPException(422, "手機品牌不存在")
         sort = body.sort if body.sort is not None else _next_sort(conn, "PhoneModel")
+        series = (body.series or "").strip() or None
         cur = conn.execute(
-            "INSERT INTO PhoneModel(phone_brand_id, name, alias, sort) VALUES(?,?,?,?)",
-            (body.phone_brand_id, body.name, body.alias, sort))
+            "INSERT INTO PhoneModel(phone_brand_id, name, alias, series, sort) "
+            "VALUES(?,?,?,?,?)",
+            (body.phone_brand_id, body.name, body.alias, series, sort))
         conn.commit()
         return {"model_id": cur.lastrowid}
     finally:
@@ -351,6 +355,9 @@ def patch_model(mid: int, body: ModelPatch, request: Request):
         fields = body.model_dump(exclude_unset=True)
         if not fields:
             return {"ok": True}
+        if "series" in fields:  # 空字串存 NULL
+            s = (fields["series"] or "").strip()
+            fields["series"] = s or None
         cols = ", ".join(f"{k}=?" for k in fields)
         cur = conn.execute(f"UPDATE PhoneModel SET {cols} WHERE model_id=?",
                           list(fields.values()) + [mid])
