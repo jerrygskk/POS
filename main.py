@@ -4,7 +4,7 @@ from lib.db import init_db
 from lib.backup import run_auto_backup
 from api import create_app
 
-PORT = 8737
+PORT = int(os.environ.get("PORT", "8737"))
 
 def data_dir():
     base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) \

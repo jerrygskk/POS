@@ -5,7 +5,8 @@
       "name": "pos",
       "runtimeExecutable": "python",
       "runtimeArgs": ["main.py"],
-      "port": 8737
+      "port": 8737,
+      "autoPort": true
     }
   ]
 }
