@@ -11,5 +11,5 @@ dist/
 *.xlsm
 *.xlsx
 
-# 跨對話交接,不入庫
-docs/handover.md
+# docs 整個資料夾不入庫(交接、spec、店內資料)
+docs/
