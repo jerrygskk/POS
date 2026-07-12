@@ -22,7 +22,7 @@
 - ⚠️ **權限／存取控制是每個新功能必檢項**：「受限身分不可做」的操作，只靠停用按鈕不夠——雙擊、行內編輯、Enter、右鍵、拖拉等替代路徑會繞過。① **所有**進入點補 guard（用便捷判斷函式，勿字串比較）② 以受限身分逐路徑驗證。
 - **UI 文字正式**不口語（「儲存目前排序後繼續編輯？」而非「要存嗎？」）。
 - **UI 從簡是硬性要求**：不新增分頁、無巢狀對話框、逐層解鎖；「一排喔，不要搞成兩排（除非有操作）」。
-- **前端驗證用 preview 工具**（launch 名 `pos`，port 8737），不要用 Bash 起 server；js 沒掛版號，改完請維護者 Ctrl+F5。css 有改就 bump `index.html` 的 `?v=`。
+- **前端驗證用 preview 工具**（launch 名 `pos`，port 8737），不要用 Bash 起 server；css／js 有改就 bump `index.html` 的 `?v=`（css、全部 js 共用同一版號，一起 bump）。
 - ⚠️ PowerShell 5.1：多行 python 寫 scratchpad 檔再跑；中文輸出寫 UTF-8 檔再讀。
 - ⚠️ 打包勿跑 `tools/build.ps1`（Bypass 被權限分類器擋），直接跑等效 pyinstaller 指令。
 

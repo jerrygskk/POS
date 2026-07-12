@@ -67,7 +67,15 @@ powershell -ExecutionPolicy Bypass -File tools/build.ps1
 
 **`sys._MEIPASS` 雷**:PyInstaller onefile 模式執行時會把打包內容解壓至暫存目錄 `sys._MEIPASS`,原本用 `__file__` 推算的 `static/` 路徑在打包後會失效(該目錄不存在於暫存路徑下)。因此 `api/__init__.py` 新增 `_static_dir()`:`getattr(sys, "frozen", False)` 為真(即在 PyInstaller 環境執行)時改回傳 `os.path.join(sys._MEIPASS, "static")`,開發環境不受影響。
 
-## 5. 版本記錄
+## 5. 版號控制
+
+- 版號單一來源 `lib/version.py`(`__version__`),顯示版本一律 `from lib.version import __version__`,不寫死第二份。
+- 進版一律跑 `python tools/bump_version.py {新版號}`,不手改 `version.py`(否則 `version_info.txt` 脫鉤)。
+- `version_info.txt` 由工具自動產生(PyInstaller `--version-file` 用),勿手改,已入庫。
+- 版號三碼 主.次.修,日常進第三碼;接受 1~4 碼,`version_info.txt` 自動補 0。
+- tag 順序鐵則:文件/release note 先寫好 → 進版 commit → `git tag v{版號}` → push tag;tag 已 push 要移動:本地 `git tag -f` 後,遠端先刪(`git push origin :refs/tags/v{版號}`)再推。
+
+## 6. 版本記錄
 
 | 版本 | 說明 |
 |---|---|
