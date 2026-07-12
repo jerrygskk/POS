@@ -8,21 +8,9 @@ window.PosPages["page-receive"] = {
       createdVid: null,
       categories: [], brands: [], models: [], fields: [],
       fieldOptions: {},
-      modelSearch: "",
       form: { name: "", price: null, category_id: null, brand_id: null,
               model_ids: [], attrs: {} },
     };
-  },
-  computed: {
-    filteredModelGroups() {
-      const kw = this.modelSearch.trim().toLowerCase();
-      const g = {};
-      for (const m of this.models) {
-        if (kw && !(`${m.brand_name} ${m.name}`.toLowerCase().includes(kw))) continue;
-        (g[m.brand_name] = g[m.brand_name] || []).push(m);
-      }
-      return Object.keys(g).map(brand => ({ brand, items: g[brand] }));
-    },
   },
   async mounted() {
     try {
@@ -43,7 +31,7 @@ window.PosPages["page-receive"] = {
     },
     startCreate(code) {
       this.hit = null; this.creating = true; this.newBarcode = code;
-      this.createdVid = null; this.modelSearch = "";
+      this.createdVid = null;
       this.brands = []; this.fields = []; this.fieldOptions = {};
       this.form = { name: "", price: null, category_id: null, brand_id: null,
                     model_ids: [], attrs: {} };

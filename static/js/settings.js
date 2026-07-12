@@ -14,7 +14,7 @@ window.PosPages["page-settings"] = {
     return {
       categories: [], brands: [], models: [], phoneBrands: [],
       newCat: "", newBrand: "", newPhoneBrand: "",
-      newModel: { phone_brand_id: null, name: "" },
+      newModel: { phone_brand_id: null, name: "", series: "" },
       newSeq: { categories: "", brands: "", phoneBrands: "", models: "" },
       // 種類規格欄設定
       openCat: null, openCatName: "",
@@ -49,8 +49,10 @@ window.PosPages["page-settings"] = {
     // ---- 通用清單維護(種類/廠牌/型號)----
     _itemBody(kind, item) {
       const body = { name: (item.name || "").trim() };
-      if (kind === "models")   // 型號同時儲存顯示別名(空=顯示全名)
+      if (kind === "models") {  // 型號同時儲存顯示別名(空=顯示全名)與系列
         body.alias = (item.alias || "").trim() || null;
+        body.series = (item.series || "").trim() || null;
+      }
       return body;
     },
     _takeSnap() {
@@ -144,9 +146,10 @@ window.PosPages["page-settings"] = {
     async addModel() {
       const pbid = this.newModel.phone_brand_id, name = this.newModel.name.trim();
       if (!pbid || !name) { this.showError("請選擇手機品牌並輸入型號名稱"); return; }
+      const series = (this.newModel.series || "").trim() || null;
       try {
-        const r = await API.post("/api/models", { phone_brand_id: pbid, name });
-        this.newModel = { phone_brand_id: null, name: "" };
+        const r = await API.post("/api/models", { phone_brand_id: pbid, name, series });
+        this.newModel = { phone_brand_id: null, name: "", series: "" };
         await this.reloadAll();
         const grp = this.models.filter(m => m.phone_brand_id === pbid);
         await this._applyNewSeq("models", grp, r.model_id);

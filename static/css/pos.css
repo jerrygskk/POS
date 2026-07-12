@@ -3,13 +3,22 @@ body { font-family: "Microsoft JhengHei", sans-serif; font-size: 16px; backgroun
 nav { display: flex; gap: 8px; padding: 10px; background: #1f2937; }
 nav button { padding: 12px 24px; font-size: 18px; border: 0; border-radius: 8px;
   background: #374151; color: #e5e7eb; cursor: pointer; }
-nav button.active { background: #2563eb; color: #fff; }
+nav button:hover { background: #4b5563; }
+nav button:active { background: #111827; }
+nav button.active:active { background: #1d4ed8; }
+nav button.active, nav button.active:hover { background: #2563eb; color: #fff; }
 .error-bar { background: #dc2626; color: #fff; padding: 10px 16px; }
 .page { padding: 16px; }
 table { width: 100%; border-collapse: collapse; background: #fff; }
 th, td { border: 1px solid #d1d5db; padding: 8px 10px; text-align: left; }
-button.primary { background: #2563eb; color: #fff; border: 0; padding: 12px 20px;
-  border-radius: 8px; font-size: 18px; cursor: pointer; }
+/* 按鈕基準:一般鈕(次要,灰白)與 primary(主要,藍)同尺寸;chip/bc 迷你鈕各自覆寫 */
+button { font-size: 15px; padding: 8px 16px; border-radius: 6px;
+  border: 1px solid #d1d5db; background: #fff; color: #374151; cursor: pointer;
+  font-family: inherit; }
+button:hover { background: #f3f4f6; }
+button.primary { background: #2563eb; color: #fff; border: 0; padding: 8px 16px;
+  border-radius: 6px; font-size: 15px; cursor: pointer; }
+button:active { background: #e5e7eb; transform: translateY(1px); }
 input, select { padding: 8px 10px; font-size: 16px; border: 1px solid #d1d5db;
   border-radius: 6px; }
 .neg { color: #dc2626; font-weight: bold; }
@@ -47,6 +56,7 @@ tr.inactive > td { opacity: 0.55; }
   font-size: 13px; padding: 0 4px; }
 .bc-del:hover { text-decoration: underline; }
 .bc-gen { font-size: 13px; padding: 2px 10px; }
+.bc-err { color: #dc2626; font-size: 13px; margin-top: 4px; white-space: normal; }
 
 /* 設定頁維護卡片 */
 .card { background: #fff; padding: 16px; border-radius: 8px; margin-bottom: 18px;
@@ -80,10 +90,49 @@ tr.inactive > td { opacity: 0.55; }
   color: #2563eb; text-decoration: underline; }
 .opt-chip.inactive .chip-act { color: #9ca3af; }
 button.maint-btn { background: #2563eb; color: #fff; cursor: pointer;
-  padding: 1px 6px; font-size: 13.3333px; border-radius: 4px;
-  border: 2px solid #2563eb; }
+  padding: 8px 16px; font-size: 15px; border-radius: 6px; border: 0; }
 button.chip-btn { margin-left: 6px; padding: 0 6px; font-size: 12px;
   line-height: 16px; border: 0; }
+/* 藍色主要鈕的滑鼠移入/按下回饋(置於 primary/maint-btn 之後以覆寫) */
+button.primary:hover, button.maint-btn:hover { background: #1d4ed8; }
+button.primary:active, button.maint-btn:active { background: #1e3a8a;
+  transform: translateY(1px); }
+
+/* 小型次要鈕(條碼區:刪／新增原廠碼／產生自取碼／自取) */
+.btn-sm { font-size: 13px; padding: 4px 10px; border-radius: 5px;
+  border: 1px solid #d1d5db; background: #fff; color: #374151; cursor: pointer;
+  font-family: inherit; }
+.btn-sm:hover { background: #f3f4f6; }
+.btn-sm:active { background: #e5e7eb; transform: translateY(1px); }
+.btn-sm.danger { color: #dc2626; }
+
+/* 切換式 chip(材質／詞條／型號選取) */
+.chip-wrap { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.chip { display: inline-flex; align-items: center; white-space: nowrap;
+  border: 1px solid #cbd5e1; background: #fff; color: #374151;
+  border-radius: 14px; padding: 4px 12px; font-size: 13px; cursor: pointer;
+  user-select: none; font-family: inherit; line-height: 1.4; }
+.chip:hover { background: #f3f4f6; }
+.chip input { display: none; }
+.chip.on { background: #2563eb; color: #fff; border-color: #2563eb; }
+.chip.on:hover { background: #1d4ed8; }
+
+/* 已選型號即時列表(選取清單上方) */
+.mp-selected { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  min-height: 30px; max-width: 420px; }
+
+/* 變體編輯:型號選取清單(廠牌分組收合,固定高度可捲動) */
+.model-picker { max-height: 200px; overflow-y: auto; border: 1px solid #d1d5db;
+  border-radius: 6px; padding: 6px 8px; margin-top: 6px; max-width: 420px; }
+.mp-brand { display: flex; align-items: center; gap: 6px; cursor: pointer;
+  font-weight: bold; color: #374151; padding: 4px 2px; user-select: none; }
+.mp-caret { width: 1em; display: inline-block; text-align: center; color: #6b7280; }
+.mp-has-sel { color: #2563eb; }
+.mp-series { font-size: 12px; color: #9ca3af; padding: 4px 0 0 18px; }
+.mp-items { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 8px 18px; }
+
+/* 編輯中的變體列:淡藍底 */
+.sub tr.editing > td { background: #eff6ff; }
 
 /* 建檔逐層解鎖 */
 .step { margin-bottom: 14px; }

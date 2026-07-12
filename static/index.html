@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="/css/pos.css?v=6">
+<link rel="stylesheet" href="/css/pos.css?v=16">
 </head>
 <body>
 <div id="app">
@@ -88,17 +88,7 @@
     <!-- ② 手機型號(可複選,非手機類可留空) -->
     <div class="step" :class="{locked: !form.category_id}">
       <div class="step-title">② 適用手機型號(可複選,非手機配件可略過)</div>
-      <input v-model="modelSearch" placeholder="搜尋型號" class="w160">
-      <div class="chk-list">
-        <template v-for="g in filteredModelGroups" :key="g.brand">
-          <div class="grp-title">{{ g.brand }}</div>
-          <label v-for="m in g.items" :key="m.model_id" class="chk">
-            <input type="checkbox" :value="m.model_id" v-model="form.model_ids">
-            {{ m.alias || m.name }}
-          </label>
-        </template>
-        <div v-if="!filteredModelGroups.length" class="hint">查無型號</div>
-      </div>
+      <model-picker :models="models" v-model:model_ids="form.model_ids"></model-picker>
     </div>
 
     <!-- ③ 廠牌(依種類過濾) -->
@@ -250,8 +240,8 @@
     <label class="chk"><input type="checkbox" v-model="includeInactive" @change="reload"> 顯示已停用</label>
   </div>
   <table>
-    <thead><tr><th></th><th>名稱</th><th>種類</th><th>廠牌</th><th>預設售價</th>
-      <th>變體數</th><th>狀態</th><th>操作</th></tr></thead>
+    <thead><tr><th></th><th>名稱</th><th>種類</th><th>廠牌</th>
+      <th>子產品數</th><th>狀態</th><th>操作</th></tr></thead>
     <tbody>
       <template v-for="p in products" :key="p.product_id">
         <tr :class="{inactive: !p.active}">
@@ -266,7 +256,6 @@
               <option :value="null">(無)</option>
               <option v-for="b in brands" :key="b.brand_id" :value="b.brand_id">{{ b.name }}</option>
             </select></td>
-            <td><input type="number" v-model.number="editProduct.default_price" min="0" class="w80"></td>
             <td>{{ p.variants.length }}</td>
             <td>{{ p.active ? '啟用' : '已停用' }}</td>
             <td>
@@ -279,7 +268,6 @@
             <td>{{ p.name }}</td>
             <td>{{ p.category_name || '—' }}</td>
             <td>{{ p.brand_name || '—' }}</td>
-            <td>{{ p.default_price === null ? '—' : p.default_price }}</td>
             <td>{{ p.variants.length }}</td>
             <td>{{ p.active ? '啟用' : '已停用' }}</td>
             <td>
@@ -291,31 +279,40 @@
         </tr>
         <tr v-if="expanded[p.product_id]">
           <td></td>
-          <td colspan="7">
+          <td colspan="6">
             <table class="sub">
-              <thead><tr><th>規格</th><th>適用型號</th><th>庫存</th><th>條碼</th>
+              <thead><tr><th>型號</th><th>規格</th><th>庫存</th><th>條碼</th>
                 <th>自身售價</th><th>有效售價</th><th>狀態</th><th>操作</th></tr></thead>
               <tbody>
-                <tr v-for="v in p.variants" :key="v.variant_id" :class="{inactive: !v.active}">
+                <tr v-for="{ v, showModel, rowspan } in groupedVariants(p)" :key="v.variant_id" :class="{inactive: !v.active, editing: editVariant && editVariant.variant_id === v.variant_id}">
+                  <td v-if="showModel" :rowspan="rowspan">
+                    <template v-if="editVariant && editVariant.variant_id === v.variant_id">
+                      <model-picker :models="models" v-model:model_ids="editVariant.model_ids"></model-picker>
+                    </template>
+                    <template v-else>{{ v.models.length ? v.models.join('、') : '—' }}</template>
+                  </td>
                   <td>
                     <template v-if="editVariant && editVariant.variant_id === v.variant_id">
                       <div v-for="f in (fieldsByCat[p.category_id] || [])" :key="f.field_id" class="attr-row">
                         <template v-if="f.field_type === 'multi'">
                           <div class="attr-name">{{ f.name }}</div>
-                          <div class="chk-inline">
-                            <label v-for="o in optionsFor(f, editVariant.model_ids)" :key="o.option_id" class="chk">
+                          <div class="chip-wrap">
+                            <label v-for="o in optionsFor(f, editVariant.model_ids)" :key="o.option_id" class="chip"
+                                   :class="{ on: editVariant.attrs[f.name].includes(o.value) }">
                               <input type="checkbox" :value="o.value" v-model="editVariant.attrs[f.name]">
                               {{ o.value }}
                             </label>
                           </div>
                         </template>
-                        <label v-else-if="f.field_type === 'tags'">{{ f.name }}
-                          <input v-model="editVariant.attrs[f.name]" :list="'edl-' + f.field_id"
-                                 placeholder="以逗號分隔,可自由新增">
-                          <datalist :id="'edl-' + f.field_id">
-                            <option v-for="o in (f.options || [])" :key="o.option_id" :value="o.value"></option>
-                          </datalist>
-                        </label>
+                        <template v-else-if="f.field_type === 'tags'">
+                          <div class="attr-name">{{ f.name }}</div>
+                          <div class="chip-wrap">
+                            <button type="button" v-for="o in (f.options || [])" :key="o.option_id" class="chip"
+                                    :class="{ on: tagHas(editVariant.attrs[f.name], o.value) }"
+                                    @click="toggleTag(editVariant.attrs, f.name, o.value)">{{ o.value }}</button>
+                          </div>
+                          <input v-model="editVariant.attrs[f.name]" placeholder="以逗號分隔,可自由新增">
+                        </template>
                         <label v-else-if="f.field_type === 'select'">{{ f.name }}
                           <input :list="'edl-' + f.field_id" v-model="editVariant.attrs[f.name]">
                           <datalist :id="'edl-' + f.field_id">
@@ -329,40 +326,28 @@
                     </template>
                     <template v-else>{{ attrText(v) }}</template>
                   </td>
-                  <td>
-                    <template v-if="editVariant && editVariant.variant_id === v.variant_id">
-                      <input v-model="modelSearch" placeholder="搜尋型號" class="w120">
-                      <div class="chk-list">
-                        <template v-for="g in filteredModelGroups" :key="g.brand">
-                          <div class="grp-title">{{ g.brand }}</div>
-                          <label v-for="m in g.items" :key="m.model_id" class="chk">
-                            <input type="checkbox" :value="m.model_id" v-model="editVariant.model_ids">
-                            {{ m.alias || m.name }}
-                          </label>
-                        </template>
-                      </div>
-                    </template>
-                    <template v-else>{{ v.models.length ? v.models.join('、') : '—' }}</template>
-                  </td>
                   <td :class="{neg: v.stock < 0}">{{ v.stock }}</td>
                   <td>
                     <template v-if="editVariant && editVariant.variant_id === v.variant_id">
                       <div v-for="b in v.barcodes" :key="b.barcode" class="bc-line">
                         {{ b.barcode }}<span class="bc-tag">{{ b.source === 'factory' ? '' : '(自)' }}</span>
-                        <button class="bc-del" @click="removeBarcode(p, b.barcode)">刪</button>
+                        <button class="btn-sm danger" @click="removeBarcode(p, b.barcode)">刪</button>
                       </div>
                       <div class="bc-add">
-                        <input v-model="bcInput[v.variant_id]" placeholder="原廠條碼" class="w120">
-                        <button @click="addFactoryBarcode(p, v)">新增原廠碼</button>
-                        <button @click="addStoreBarcode(p, v)">產生自取碼</button>
+                        <input v-model="bcInput[v.variant_id]" placeholder="原廠條碼" class="w120"
+                               @input="bcError[v.variant_id] = ''"
+                               @keyup.enter="addFactoryBarcode(p, v)">
+                        <button class="btn-sm" @click="addFactoryBarcode(p, v)">新增條碼</button>
+                        <button class="btn-sm" @click="addStoreBarcode(p, v)">自取條碼</button>
                       </div>
+                      <div v-if="bcError[v.variant_id]" class="bc-err">{{ bcError[v.variant_id] }}</div>
                     </template>
                     <template v-else>
                       <span v-if="mainBarcode(v)" class="bc-line">
                         {{ mainBarcode(v).barcode }}<span class="bc-tag">{{ mainBarcode(v).source === 'store' ? '(自)' : '' }}</span><span
                           v-if="v.barcodes.length > 1" class="bc-more">+{{ v.barcodes.length - 1 }}</span>
                       </span>
-                      <button v-else class="bc-gen" @click="addStoreBarcode(p, v)">自取</button>
+                      <button v-else class="btn-sm" @click="addStoreBarcode(p, v)">自取</button>
                     </template>
                   </td>
                   <td>
@@ -416,16 +401,7 @@
                         </label>
                       </div>
                       <div class="step-title">適用手機型號(可略過)</div>
-                      <input v-model="modelSearch" placeholder="搜尋型號" class="w160">
-                      <div class="chk-list">
-                        <template v-for="g in filteredModelGroups" :key="g.brand">
-                          <div class="grp-title">{{ g.brand }}</div>
-                          <label v-for="m in g.items" :key="m.model_id" class="chk">
-                            <input type="checkbox" :value="m.model_id" v-model="newVariant.model_ids">
-                            {{ m.alias || m.name }}
-                          </label>
-                        </template>
-                      </div>
+                      <model-picker :models="models" v-model:model_ids="newVariant.model_ids"></model-picker>
                       <label>售價（可留空） <input type="number" v-model.number="newVariant.price" min="0"></label>
                       <label>原廠條碼（可留空） <input v-model="newVariant.barcode"></label>
                       <div>
@@ -604,6 +580,7 @@
         <template #row="{ item: m }">
           <input class="name" v-model="m.name">
           <input class="w120" v-model="m.alias" placeholder="別名(選填)">
+          <input class="w120" v-model="m.series" placeholder="系列(選填)">
           <button @click="toggleActive('models', m)">{{ m.active ? '停用' : '啟用' }}</button>
           <button @click="deleteItem('models', m)">刪除</button>
         </template>
@@ -616,6 +593,7 @@
                 :value="pb.phone_brand_id">{{ pb.name }}</option>
       </select>
       <input v-model="newModel.name" placeholder="型號名稱" @keyup.enter="addModel">
+      <input class="w120" v-model="newModel.series" placeholder="系列(選填)" @keyup.enter="addModel">
       <input class="w60" v-model="newSeq.models" placeholder="序號">
       <button class="primary" @click="addModel">新增</button>
     </div>
@@ -623,15 +601,16 @@
 
 </div>
 </template>
-<script src="/js/vue.global.prod.js"></script>
-<script src="/js/api.js"></script>
-<script src="/js/checkout.js"></script>
-<script src="/js/receive.js"></script>
-<script src="/js/stocktake.js"></script>
-<script src="/js/records.js"></script>
-<script src="/js/catalog.js"></script>
-<script src="/js/sortable.js"></script>
-<script src="/js/settings.js"></script>
-<script src="/js/app.js"></script>
+<script src="/js/vue.global.prod.js?v=16"></script>
+<script src="/js/api.js?v=16"></script>
+<script src="/js/checkout.js?v=16"></script>
+<script src="/js/receive.js?v=16"></script>
+<script src="/js/stocktake.js?v=16"></script>
+<script src="/js/records.js?v=16"></script>
+<script src="/js/catalog.js?v=16"></script>
+<script src="/js/sortable.js?v=16"></script>
+<script src="/js/modelpicker.js?v=16"></script>
+<script src="/js/settings.js?v=16"></script>
+<script src="/js/app.js?v=16"></script>
 </body>
 </html>
