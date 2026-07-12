@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="/css/pos.css?v=16">
+<link rel="stylesheet" href="/css/pos.css?v=23">
 </head>
 <body>
 <div id="app">
@@ -337,8 +337,8 @@
                         <input v-model="bcInput[v.variant_id]" placeholder="原廠條碼" class="w120"
                                @input="bcError[v.variant_id] = ''"
                                @keyup.enter="addFactoryBarcode(p, v)">
-                        <button class="btn-sm" @click="addFactoryBarcode(p, v)">新增條碼</button>
-                        <button class="btn-sm" @click="addStoreBarcode(p, v)">自取條碼</button>
+                        <button class="btn-sm" @click="addFactoryBarcode(p, v)">新增</button>
+                        <button class="btn-sm" @click="addStoreBarcode(p, v)">自取</button>
                       </div>
                       <div v-if="bcError[v.variant_id]" class="bc-err">{{ bcError[v.variant_id] }}</div>
                     </template>
@@ -372,7 +372,7 @@
                 <tr v-if="addingFor === p.product_id">
                   <td colspan="8">
                     <div class="create-form">
-                      <h3>新增變體</h3>
+                      <h3>新增子產品</h3>
                       <div v-for="f in (fieldsByCat[p.category_id] || [])" :key="f.field_id" class="attr-row">
                         <template v-if="f.field_type === 'multi'">
                           <div class="attr-name">{{ f.name }}</div>
@@ -412,7 +412,7 @@
                   </td>
                 </tr>
                 <tr v-if="addingFor !== p.product_id">
-                  <td colspan="8"><button @click="startAddVariant(p)">新增變體</button></td>
+                  <td colspan="8"><button @click="startAddVariant(p)">新增子產品</button></td>
                 </tr>
               </tbody>
             </table>
@@ -601,16 +601,16 @@
 
 </div>
 </template>
-<script src="/js/vue.global.prod.js?v=16"></script>
-<script src="/js/api.js?v=16"></script>
-<script src="/js/checkout.js?v=16"></script>
-<script src="/js/receive.js?v=16"></script>
-<script src="/js/stocktake.js?v=16"></script>
-<script src="/js/records.js?v=16"></script>
-<script src="/js/catalog.js?v=16"></script>
-<script src="/js/sortable.js?v=16"></script>
-<script src="/js/modelpicker.js?v=16"></script>
-<script src="/js/settings.js?v=16"></script>
-<script src="/js/app.js?v=16"></script>
+<script src="/js/vue.global.prod.js?v=23"></script>
+<script src="/js/api.js?v=23"></script>
+<script src="/js/checkout.js?v=23"></script>
+<script src="/js/receive.js?v=23"></script>
+<script src="/js/stocktake.js?v=23"></script>
+<script src="/js/records.js?v=23"></script>
+<script src="/js/catalog.js?v=23"></script>
+<script src="/js/sortable.js?v=23"></script>
+<script src="/js/modelpicker.js?v=23"></script>
+<script src="/js/settings.js?v=23"></script>
+<script src="/js/app.js?v=23"></script>
 </body>
 </html>

@@ -84,12 +84,23 @@ window.PosPages["page-catalog"] = {
     },
   },
   async mounted() {
+    // ESC 取消行內編輯(款/子產品),不存檔
+    this._escHandler = (ev) => {
+      if (ev.key !== "Escape") return;
+      if (this.editVariant || this.editProduct) {
+        this.editVariant = null; this.editProduct = null;
+      }
+    };
+    document.addEventListener("keydown", this._escHandler);
     try {
       this.categories = await API.get("/api/categories");
       this.brands = await API.get("/api/brands");
       this.models = await API.get("/api/models");
     } catch (e) { this.showError(e.message); }
     await this.reload();
+  },
+  unmounted() {
+    document.removeEventListener("keydown", this._escHandler);
   },
   methods: {
     attrText(row) { return window.fmtAttr(row) || "（無規格）"; },
@@ -232,7 +243,7 @@ window.PosPages["page-catalog"] = {
       } catch (e) { this.showError(e.message); }
     },
     async deleteVariant(p, v) {
-      if (!confirm("確定刪除此變體?刪除後無法復原。")) return;
+      if (!confirm("確定刪除此子產品?刪除後無法復原。")) return;
       try {
         await API.del("/api/variants/" + v.variant_id);
         await this.reload();
@@ -255,7 +266,7 @@ window.PosPages["page-catalog"] = {
       const code = (this.bcInput[v.variant_id] || "").trim();
       if (!code) { this.bcError[v.variant_id] = "請輸入原廠條碼"; return; }
       if (code.toUpperCase().startsWith("TL")) {
-        this.bcError[v.variant_id] = "TL 開頭為系統保留，如有需求請按自取條碼";
+        this.bcError[v.variant_id] = "TL 開頭為系統保留，如有需求請按自取";
         return;
       }
       try {

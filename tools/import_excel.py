@@ -52,6 +52,15 @@ SHARED_DESC_FIELD = "商品描述"
 WANTED_COLS = [COL_CODE, COL_CATEGORY, COL_BRAND, COL_SPEC, COL_DESC,
                COL_CAT1, COL_CAT2, COL_PHONE_BRAND, COL_PHONE_MODEL, COL_NOTE]
 
+# 各商品種類名(規格拆解規則依種類分派)
+CASE_CATEGORY = "手機殼"
+LENS_CATEGORY = "鏡頭貼"
+SOCKET_CATEGORY = "插座"
+EARPHONE_CATEGORY = "藍芽耳機"
+POWERBANK_CATEGORY = "行動電源"
+CABLE_CATEGORY = "充電線"
+WATCH_CATEGORY = "AppleWatch玻璃"
+
 
 # ================= 純函式(可單測、不碰 DB)=================
 
@@ -87,8 +96,12 @@ BRAND_ALIASES = {
     "Mageasy手機殼": "Mageasy",
     "DEVILCASE手機殼": "DEVILCASE",
     "AI空壓殼": "AI空壓殼",
-    "COZY五倍強化": "COZY",
-    "COZY微晶盾": "COZY",
+    # AppleWatch玻璃/充電線 尾綴無法以通則還原純廠牌,顯式對照:
+    "ETON_Watch玻璃": "ETON",
+    "ACEICE_Ai_Watch玻璃": "ACEICE",
+    "犀牛盾充電線": "RS犀牛盾",     # 通則會得「犀牛盾」,須併入既有 RS犀牛盾
+    # 註:NAVJack手機殼 由通則去尾綴即得 NAVJack,不必列。
+    # 註:COZY五倍強化/COZY微晶盾/硬派6倍強化 改走 GLASS_BRAND_TAGS(廠牌+詞條)。
 }
 
 # 敘述而非廠牌,無法還原純廠牌,保留原字串並記警告
@@ -113,6 +126,8 @@ def normalize_brand(brand_str, category):
         return None
     if s in NON_BRANDS:
         return s
+    if category == GLASS_CATEGORY and s in GLASS_BRAND_TAGS:
+        return GLASS_BRAND_TAGS[s][0]        # 廠牌尾綴→詞條:回傳純廠牌
     if s in BRAND_ALIASES:
         return BRAND_ALIASES[s]
     out = s
@@ -216,14 +231,21 @@ def parse_row(raw):
     record 欄位:
       barcode, category, brand_raw, brand, brand_resolvable,
       phone_brand, models(list), model_warnings(list),
-      select_attrs({欄名:值}), desc, note
+      select_attrs({欄名:值}), desc, note,
+      earphone_model(藍芽耳機型號 text or None), earphone_suspicious(bool)
     """
     barcode = clean(raw.get(COL_CODE))
     if barcode is None:
         return None
     category = clean(raw.get(COL_CATEGORY))
     brand_raw = clean(raw.get(COL_BRAND))
-    brand = normalize_brand(brand_raw, category)
+    # 藍芽耳機廠牌欄為「品牌+型號」髒值:拆廠牌/型號,不走通用正規化。
+    earphone_model = None
+    earphone_suspicious = False
+    if category == EARPHONE_CATEGORY:
+        brand, earphone_model, earphone_suspicious = split_earphone_brand(brand_raw)
+    else:
+        brand = normalize_brand(brand_raw, category)
     phone_brand = clean(raw.get(COL_PHONE_BRAND))
     model_str = clean(raw.get(COL_PHONE_MODEL))
     if model_str and phone_brand:
@@ -247,6 +269,8 @@ def parse_row(raw):
         "select_attrs": select_attrs,
         "desc": clean(raw.get(COL_DESC)),
         "note": clean(raw.get(COL_NOTE)),
+        "earphone_model": earphone_model,
+        "earphone_suspicious": earphone_suspicious,
     }
 
 
@@ -299,6 +323,21 @@ GLASS_SPEC_MAP = {
     "低藍光防窺": (["藍光", "防窺"], ["低藍光"]),
     "藍寶石低藍光": (["藍光"], ["藍寶石", "低藍光"]),
 }
+
+# 廠牌尾綴→特性詞條(僅鋼化玻璃生效):原始廠牌字串 → (純廠牌, [詞條...])。
+# 詞條寫進鋼化玻璃的「特性詞條」tags 欄。取代舊 BRAND_ALIASES 的 COZY 兩筆。
+GLASS_BRAND_TAGS = {
+    "硬派6倍強化": ("硬派", ["6倍強化"]),
+    "COZY五倍強化": ("COZY", ["五倍強化"]),
+    "COZY微晶盾": ("COZY", ["微晶盾"]),
+}
+
+
+def glass_brand_tags(brand_raw):
+    """原始廠牌字串 → 該廠牌尾綴帶出的鋼化玻璃特性詞條 list(無則空)。"""
+    if brand_raw is None:
+        return []
+    return list(GLASS_BRAND_TAGS.get(str(brand_raw).strip(), (None, []))[1])
 
 
 def _glass_fallback(s):
@@ -359,6 +398,208 @@ def glass_attrs(spec_value, cat1_value):
             tags.append(t)
     return {GLASS_SPEC_FIELD: bases, GLASS_TAGS_FIELD: tags,
             GLASS_LAYOUT_FIELD: layout}
+
+
+# ================= 其餘七類規格模型 =================
+#
+# 每種類的專屬欄以 CATEGORY_FIELDS 宣告(欄名, 欄型),依序建立→決定欄顯示順位。
+# 各類的規格/分類1/廠牌拆解寫成純函式(可單測),run_import 依種類分派後
+# 用 category_attr_writes(rec) 取得該列要寫的選項/文字欄與警告。
+
+# 手機殼/鏡頭貼/插座:規格、分類1 僅換欄名的純 select。
+CATEGORY_SELECT_RENAME = {
+    CASE_CATEGORY:   [(COL_SPEC, "款式"), (COL_CAT1, "顏色")],
+    LENS_CATEGORY:   [(COL_SPEC, "材質"), (COL_CAT1, "框色")],
+    SOCKET_CATEGORY: [(COL_SPEC, "規格"), (COL_CAT1, "顏色")],
+}
+
+# 種類 → [(欄名, 欄型)];依序建立(欄 sort 遞增),第一次遇到該種類時全建。
+CATEGORY_FIELDS = {
+    CASE_CATEGORY:     [("款式", "select"), ("顏色", "select")],
+    LENS_CATEGORY:     [("材質", "select"), ("框色", "select")],
+    SOCKET_CATEGORY:   [("規格", "select"), ("顏色", "select")],
+    EARPHONE_CATEGORY: [("型號", "text"), ("顏色", "select")],
+    POWERBANK_CATEGORY: [("規格", "select"), ("顏色", "select")],
+    CABLE_CATEGORY:    [("接頭", "select"), ("長度", "select"),
+                        ("顏色", "select"), ("特性詞條", "tags")],
+    WATCH_CATEGORY:    [("款式", "select"), ("尺寸", "select")],
+}
+
+
+# ---- 藍芽耳機:廠牌欄「品牌+型號」髒值拆解 ----
+
+def split_earphone_brand(brand_raw):
+    """藍芽耳機廠牌欄 → (廠牌, 型號 or None, 廠牌可疑 bool)。
+
+    取第一個空白前的 token 當廠牌(去尾端「-」),其餘字串進型號。連續空白吞掉。
+    廠牌含數字視為可疑(如「T6」),另列警告供對帳,不改拆法。
+    """
+    if brand_raw is None:
+        return None, None, False
+    s = str(brand_raw).strip()
+    if not s:
+        return None, None, False
+    parts = s.split(None, 1)                 # 依任意空白切一刀,吞連續空白
+    brand = parts[0].rstrip("-")             # 「DA-」→「DA」
+    model = parts[1].strip() if len(parts) > 1 else None
+    if not model:
+        model = None
+    suspicious = bool(re.search(r"\d", brand))
+    return brand, model, suspicious
+
+
+# ---- 行動電源:規格含「-」時拆出顏色 ----
+
+def split_powerbank_spec(spec_value):
+    """行動電源規格 → (規格值, 顏色 or None)。
+
+    含「-」時以最後一個「-」為界:前=規格、後=顏色(「4代 CC-柔霧白」→
+    「4代 CC」+「柔霧白」);無「-」則整串為規格、顏色 None。
+    """
+    if spec_value is None:
+        return None, None
+    s = str(spec_value).strip()
+    if not s:
+        return None, None
+    if "-" in s:
+        i = s.rfind("-")
+        return s[:i].strip() or None, s[i + 1:].strip() or None
+    return s, None
+
+
+# ---- 充電線:接頭/長度/特性詞條拆解 ----
+
+CABLE_PREFIXES = ["5A", "騎士"]              # 規格前綴 → 特性詞條
+# 接頭正規化:iPhone→Lightning、USB-Type-C→Type-C;其餘可接受值原樣。
+CABLE_CONNECTOR_MAP = {"iPhone": "Lightning", "USB-Type-C": "Type-C",
+                       "Lightning": "Lightning"}
+CABLE_KNOWN_CONNECTORS = {"Lightning", "Type-C", "PD", "雙C"}
+
+
+def is_cable_length(value):
+    """字串是否為長度(/^\\d+公分$/)。"""
+    if value is None:
+        return False
+    return bool(re.match(r"^\d+公分$", str(value).strip()))
+
+
+def normalize_connector(value):
+    """接頭值正規化 → (接頭, 可辨識 bool)。無法辨識回 (原值, False)。"""
+    t = str(value).strip()
+    if t in CABLE_CONNECTOR_MAP:
+        return CABLE_CONNECTOR_MAP[t], True
+    if t in CABLE_KNOWN_CONNECTORS:
+        return t, True
+    return t, False
+
+
+def parse_cable(spec_value, desc_value):
+    """充電線 規格 + 商品描述 → {接頭, 長度, 特性詞條:[...], warnings:[...]}。
+
+    兩套寫法:規格=長度且描述=接頭;或規格=接頭(可帶前綴 5A/騎士)且描述=長度。
+    判斷:符合 /^\\d+公分$/ 者=長度,其餘=接頭;前綴 5A/騎士 進特性詞條。
+    ⚠️ 商品描述已在此消化為接頭/長度,呼叫端不得再寫進共用「商品描述」欄。
+    """
+    length = None
+    connector_raw = None
+    warnings = []
+    for val in (spec_value, desc_value):
+        v = clean(val)
+        if v is None:
+            continue
+        if is_cable_length(v):
+            length = v
+        else:
+            connector_raw = v
+    tags = []
+    connector = None
+    if connector_raw is not None:
+        parts = connector_raw.split(None, 1)
+        if len(parts) == 2 and parts[0] in CABLE_PREFIXES:
+            tags.append(parts[0])
+            core = parts[1].strip()
+        else:
+            core = connector_raw
+        connector, ok = normalize_connector(core)
+        if not ok:
+            warnings.append(f"充電線接頭無法辨識,原樣入接頭欄:「{core}」")
+    else:
+        warnings.append(
+            f"充電線無法辨識接頭(規格「{clean(spec_value)}」描述「{clean(desc_value)}」)")
+    return {"接頭": connector, "長度": length, "特性詞條": tags,
+            "warnings": warnings}
+
+
+# ---- AppleWatch玻璃:款式 + 尺寸 拆解 ----
+
+def split_watch_glass(spec_value):
+    """AppleWatch玻璃規格 → (款式, 尺寸 or None, 需警告 bool)。
+
+    以最後一個空白拆,尾段符合 /^\\d+mm$/ 才拆出尺寸;否則整串為款式並列警告。
+    """
+    if spec_value is None:
+        return None, None, False
+    s = str(spec_value).strip()
+    if not s:
+        return None, None, False
+    if " " in s:
+        head, tail = s.rsplit(" ", 1)
+        if re.match(r"^\d+mm$", tail):
+            return head.strip() or None, tail, False
+    return s, None, True
+
+
+def category_attr_writes(rec):
+    """依種類拆 rec → (option_writes, text_writes, warnings)。
+
+    option_writes / text_writes 皆為 [(欄名, 值)];欄型由 CATEGORY_FIELDS 決定
+    (tags/multi 同欄多筆即多個 (欄名,值))。鋼化玻璃另走 glass_attrs,不在此。
+    """
+    cat = rec["category"]
+    spec = rec["select_attrs"].get(COL_SPEC)
+    cat1 = rec["select_attrs"].get(COL_CAT1)
+    opts, texts, warns = [], [], []
+    if cat in CATEGORY_SELECT_RENAME:
+        for col, fname in CATEGORY_SELECT_RENAME[cat]:
+            v = rec["select_attrs"].get(col)
+            if v is not None:
+                opts.append((fname, v))
+    elif cat == EARPHONE_CATEGORY:
+        if rec.get("earphone_model"):
+            texts.append(("型號", rec["earphone_model"]))
+        if cat1 is not None:
+            opts.append(("顏色", cat1))
+        if rec.get("earphone_suspicious"):
+            warns.append(
+                f"藍芽耳機廠牌可疑(對帳用):原值「{rec['brand_raw']}」"
+                f"→ 廠牌「{rec['brand']}」型號「{rec.get('earphone_model')}」")
+    elif cat == POWERBANK_CATEGORY:
+        pspec, pcolor = split_powerbank_spec(spec)
+        if pspec is not None:
+            opts.append(("規格", pspec))
+        color = cat1 if cat1 is not None else pcolor   # 分類1 優先(實務不併存)
+        if color is not None:
+            opts.append(("顏色", color))
+    elif cat == CABLE_CATEGORY:
+        info = parse_cable(spec, rec["desc"])
+        if info["接頭"] is not None:
+            opts.append(("接頭", info["接頭"]))
+        if info["長度"] is not None:
+            opts.append(("長度", info["長度"]))
+        if cat1 is not None:
+            opts.append(("顏色", cat1))
+        for t in info["特性詞條"]:
+            opts.append(("特性詞條", t))
+        warns.extend(info["warnings"])
+    elif cat == WATCH_CATEGORY:
+        style, size, need_warn = split_watch_glass(spec)
+        if style is not None:
+            opts.append(("款式", style))
+        if size is not None:
+            opts.append(("尺寸", size))
+        if need_warn:
+            warns.append(f"AppleWatch玻璃規格無法拆出尺寸,整串入款式:「{spec}」")
+    return opts, texts, warns
 
 
 # ================= Excel 讀取 =================
@@ -494,24 +735,134 @@ def _ensure_glass_fields(conn, cid):
     return spec_fid, tags_fid, layout_fid
 
 
+def _ensure_category_fields(conn, cid, category, field_fids):
+    """第一次遇到該種類時,依 CATEGORY_FIELDS 順序建立專屬欄(決定欄顯示順位),
+    快取 (cid, 欄名) → field_id。"""
+    for name, ftype in CATEGORY_FIELDS.get(category, []):
+        key = (cid, name)
+        if key not in field_fids:
+            field_fids[key] = _get_or_create_field(conn, name, cid, ftype)
+
+
+def _resolve_product(conn, products, rec, cid, bid):
+    """款(Product):同 種類+廠牌 歸一款;快取於 products。"""
+    pkey = product_key(rec)
+    if pkey not in products:
+        pname = product_name(rec)
+        existing = conn.execute(
+            "SELECT product_id FROM Product WHERE name=? AND category_id IS ? "
+            "AND brand_id IS ?", (pname, cid, bid)).fetchone()
+        products[pkey] = existing["product_id"] if existing else conn.execute(
+            "INSERT INTO Product(name,category_id,brand_id,note) VALUES(?,?,?,?)",
+            (pname, cid, bid, rec["note"])).lastrowid
+    return products[pkey]
+
+
+def _create_variant(conn, pid, barcode, source, va_options, va_texts, model_id_list):
+    """建變體 + 條碼 + 屬性(option/text)+ 適用型號,回傳 variant_id。"""
+    vid = conn.execute("INSERT INTO Variant(product_id) VALUES(?)", (pid,)).lastrowid
+    conn.execute("INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",
+                 (barcode, vid, source))
+    for fid, oid in va_options:
+        conn.execute(
+            "INSERT OR IGNORE INTO VariantAttribute(variant_id,field_id,option_id) "
+            "VALUES(?,?,?)", (vid, fid, oid))
+    for fid, tv in va_texts:
+        conn.execute(
+            "INSERT INTO VariantAttribute(variant_id,field_id,text_value) "
+            "VALUES(?,?,?)", (vid, fid, tv))
+    for mid in model_id_list:
+        conn.execute(
+            "INSERT OR IGNORE INTO VariantModel(variant_id,model_id) VALUES(?,?)",
+            (vid, mid))
+    return vid
+
+
+def _target_signature(va_options, va_texts, model_id_list):
+    """由待寫入屬性/型號組出判重簽章(與 _variant_signature 對齊)。"""
+    attrs = frozenset([(fid, oid, None) for fid, oid in va_options]
+                      + [(fid, None, tv) for fid, tv in va_texts])
+    return attrs, frozenset(model_id_list)
+
+
+def _variant_signature(conn, vid):
+    """既有變體的屬性/型號簽章:{(field_id,option_id,text_value)} × {model_id}。"""
+    attrs = frozenset(
+        (r["field_id"], r["option_id"], r["text_value"])
+        for r in conn.execute(
+            "SELECT field_id, option_id, text_value FROM VariantAttribute "
+            "WHERE variant_id=?", (vid,)))
+    models = frozenset(
+        r["model_id"] for r in conn.execute(
+            "SELECT model_id FROM VariantModel WHERE variant_id=?", (vid,)))
+    return attrs, models
+
+
+def _find_matching_variant(conn, pid, target_sig):
+    """該款下是否已有「完全相同屬性+型號組合」的變體;有回 variant_id,否則 None。"""
+    for r in conn.execute("SELECT variant_id FROM Variant WHERE product_id=?", (pid,)):
+        if _variant_signature(conn, r["variant_id"]) == target_sig:
+            return r["variant_id"]
+    return None
+
+
+def _next_store_barcode(conn):
+    """自取碼取號:讀 Setting.next_store_barcode → 用 TL{n} → 寫回 n+1
+    (與 api.products.next_store_barcode 邏輯一致)。"""
+    row = conn.execute(
+        "SELECT value FROM Setting WHERE key='next_store_barcode'").fetchone()
+    n = int(row["value"]) if row else 100000001
+    conn.execute("INSERT OR REPLACE INTO Setting(key,value) "
+                 "VALUES('next_store_barcode',?)", (str(n + 1),))
+    return f"TL{n}"
+
+
+def _seed_store_counter(conn, records):
+    """匯入前先把 next_store_barcode 推到「既有 TL 最大號+1」,確保檔內重覆條碼
+    改發的 TL 碼不與 Excel 既有 TL 碼相撞。(全匯時 records 已含所有 Excel TL 碼;
+    分種類匯入時輔以 DB 既有 TL 碼。)"""
+    nums = []
+    for rec in records:
+        b = rec["barcode"]
+        if b and b.startswith("TL") and b[2:].isdigit():
+            nums.append(int(b[2:]))
+    for row in conn.execute("SELECT barcode FROM Barcode WHERE barcode LIKE 'TL%'"):
+        b = row["barcode"]
+        if b[2:].isdigit():
+            nums.append(int(b[2:]))
+    if not nums:
+        return
+    target = max(nums) + 1
+    row = conn.execute(
+        "SELECT value FROM Setting WHERE key='next_store_barcode'").fetchone()
+    cur = int(row["value"]) if row else 0
+    if target > cur:
+        conn.execute("INSERT OR REPLACE INTO Setting(key,value) "
+                     "VALUES('next_store_barcode',?)", (str(target),))
+
+
 # ================= 匯入主流程 =================
 
 def run_import(conn, records):
     """回傳 (stats dict, warnings list)。可重跑:條碼判重,已存在整列跳過。"""
     warnings = []
     desc_fid = _shared_field_id(conn, SHARED_DESC_FIELD)
+    _seed_store_counter(conn, records)        # 改發 TL 前先讓計數器越過既有 TL 碼
 
     cat_ids = {}          # 種類名 → category_id
     brand_ids = {}        # 純廠牌名 → brand_id
     pbrand_ids = {}       # 手機品牌名 → phone_brand_id
-    select_fids = {}      # (category_id, 欄名) → field_id(非鋼化玻璃種類用)
+    select_fids = {}      # (category_id, 欄名) → field_id(通用兜底 select 用)
+    field_fids = {}       # (category_id, 欄名) → field_id(CATEGORY_FIELDS 專屬欄)
     glass_fids = {}       # category_id → (規格,特性詞條,版型) field_id
     model_ids = {}        # (phone_brand_id, 型號名) → model_id
     products = {}         # (種類名, 廠牌名) → product_id
+    barcode_occurrence = {}   # 條碼 → 本次匯入已出現次數(判「檔內重覆」)
 
     added_variants = 0
     added_barcodes = 0
     skipped = 0
+    reassigned = 0
 
     for rec in records:
         category = rec["category"] or "未分類"
@@ -540,87 +891,90 @@ def run_import(conn, records):
             warnings.append(
                 f"型號拆解失敗,保留原片段:品牌「{rec['phone_brand']}」值「{w}」")
 
-        # 規格欄 → 待寫入的 (field_id, option_id) 清單。
-        # 鋼化玻璃走 spec §3 對照表(規格 multi + 特性詞條 tags + 版型 select);
-        # 其他種類維持既有 select 邏輯(本輪不匯,但保留)。
-        va_inserts = []
+        # 規格欄 → 待寫入清單:va_options [(fid,oid)]、va_texts [(fid,text)]。
+        # 鋼化玻璃走 spec §3 對照表 + 廠牌尾綴詞條;其餘七類走 category_attr_writes;
+        # 未涵蓋的種類仍以通用 select 兜底。
+        va_options = []
+        va_texts = []
         if category == GLASS_CATEGORY:
             if cid not in glass_fids:
                 glass_fids[cid] = _ensure_glass_fields(conn, cid)
             spec_fid, tags_fid, layout_fid = glass_fids[cid]
             ga = glass_attrs(rec["select_attrs"].get(COL_SPEC),
                              rec["select_attrs"].get(COL_CAT1))
+            gtags = list(ga[GLASS_TAGS_FIELD])
+            for t in glass_brand_tags(rec["brand_raw"]):   # 廠牌尾綴帶出的特性詞條
+                if t not in gtags:
+                    gtags.append(t)
             for w in ga[GLASS_SPEC_FIELD]:
-                va_inserts.append((spec_fid, _get_or_create_option(conn, spec_fid, w)))
-            for t in ga[GLASS_TAGS_FIELD]:
-                va_inserts.append((tags_fid, _get_or_create_option(conn, tags_fid, t)))
+                va_options.append((spec_fid, _get_or_create_option(conn, spec_fid, w)))
+            for t in gtags:
+                va_options.append((tags_fid, _get_or_create_option(conn, tags_fid, t)))
             if ga[GLASS_LAYOUT_FIELD]:
-                va_inserts.append((layout_fid, _get_or_create_option(
+                va_options.append((layout_fid, _get_or_create_option(
                     conn, layout_fid, ga[GLASS_LAYOUT_FIELD])))
+        elif category in CATEGORY_FIELDS:
+            _ensure_category_fields(conn, cid, category, field_fids)
+            opt_writes, text_writes, cat_warns = category_attr_writes(rec)
+            warnings.extend(cat_warns)
+            for name, val in opt_writes:
+                fid = field_fids[(cid, name)]
+                va_options.append((fid, _get_or_create_option(conn, fid, val)))
+            for name, val in text_writes:
+                va_texts.append((field_fids[(cid, name)], val))
         else:
             for col, val in rec["select_attrs"].items():
                 fkey = (cid, col)
                 if fkey not in select_fids:
                     select_fids[fkey] = _get_or_create_field(conn, col, cid, "select")
-                va_inserts.append((select_fids[fkey],
+                va_options.append((select_fids[fkey],
                                    _get_or_create_option(conn, select_fids[fkey], val)))
 
-        # 商品描述(共用 text 欄)+ 啟用 CategoryField
-        if rec["desc"] and desc_fid is not None:
+        # 商品描述(共用 text 欄)+ 啟用 CategoryField。
+        # ⚠️ 充電線的商品描述已消化為接頭/長度,不再入共用欄。
+        if rec["desc"] and desc_fid is not None and category != CABLE_CATEGORY:
             _link_category_field(conn, cid, desc_fid)
+            va_texts.append((desc_fid, rec["desc"]))
 
-        # 條碼判重(可重跑)——已存在整列跳過
-        if conn.execute("SELECT 1 FROM Barcode WHERE barcode=?",
-                        (rec["barcode"],)).fetchone():
-            skipped += 1
-            continue
+        # 適用型號 id 清單(供變體掛載與判重簽章)
+        model_id_list = []
+        pbid = pbrand_ids.get(rec["phone_brand"])
+        if pbid is not None:
+            for nm in rec["models"]:
+                mkey = (pbid, nm)
+                if mkey not in model_ids:
+                    model_ids[mkey] = _get_or_create_model(conn, pbid, nm)
+                model_id_list.append(model_ids[mkey])
 
-        # 款(Product):同 種類+廠牌 歸一款
-        pkey = product_key(rec)
-        if pkey not in products:
-            pname = product_name(rec)
-            existing = conn.execute(
-                "SELECT product_id FROM Product WHERE name=? AND category_id IS ? "
-                "AND brand_id IS ?", (pname, cid, bid)).fetchone()
-            products[pkey] = existing["product_id"] if existing else conn.execute(
-                "INSERT INTO Product(name,category_id,brand_id,note) VALUES(?,?,?,?)",
-                (pname, cid, bid, rec["note"])).lastrowid
-        pid = products[pkey]
-
-        # 變體(價格 NULL)
-        vid = conn.execute(
-            "INSERT INTO Variant(product_id) VALUES(?)", (pid,)).lastrowid
-        added_variants += 1
-
-        # 條碼:TL 開頭=自取條碼(store),其餘=原廠碼(factory)
-        src = "store" if rec["barcode"].startswith("TL") else "factory"
-        conn.execute(
-            "INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",
-            (rec["barcode"], vid, src))
-        added_barcodes += 1
-
-        # 規格欄 VariantAttribute:存 option_id(multi/tags 多筆、select 單筆)
-        for fid, oid in va_inserts:
-            conn.execute(
-                "INSERT OR IGNORE INTO VariantAttribute(variant_id,field_id,option_id) "
-                "VALUES(?,?,?)", (vid, fid, oid))
-        # 商品描述:text 存 text_value
-        if rec["desc"] and desc_fid is not None:
-            conn.execute(
-                "INSERT INTO VariantAttribute(variant_id,field_id,text_value) "
-                "VALUES(?,?,?)", (vid, desc_fid, rec["desc"]))
-
-        # 型號掛變體
-        for nm in rec["models"]:
-            pbid = pbrand_ids.get(rec["phone_brand"])
-            if pbid is None:
+        # 條碼處理:同一次匯入中首次出現走原條碼;第二次(含)出現=檔內重覆,改發 TL。
+        bc = rec["barcode"]
+        occ = barcode_occurrence.get(bc, 0) + 1
+        barcode_occurrence[bc] = occ
+        if occ == 1:
+            # 首次出現:條碼判重(可重跑)——DB 已存在整列跳過
+            if conn.execute("SELECT 1 FROM Barcode WHERE barcode=?", (bc,)).fetchone():
+                skipped += 1
                 continue
-            mkey = (pbid, nm)
-            if mkey not in model_ids:
-                model_ids[mkey] = _get_or_create_model(conn, pbid, nm)
-            conn.execute(
-                "INSERT OR IGNORE INTO VariantModel(variant_id,model_id) VALUES(?,?)",
-                (vid, model_ids[mkey]))
+            pid = _resolve_product(conn, products, rec, cid, bid)
+            src = "store" if bc.startswith("TL") else "factory"
+            _create_variant(conn, pid, bc, src, va_options, va_texts, model_id_list)
+            added_variants += 1
+            added_barcodes += 1
+        else:
+            # 檔內重覆條碼:改發系統自取碼(TL)。重跑安全——同 Product +
+            # 完全相同屬性/型號組合已有變體則跳過,不重覆建變體。
+            pid = _resolve_product(conn, products, rec, cid, bid)
+            target_sig = _target_signature(va_options, va_texts, model_id_list)
+            if _find_matching_variant(conn, pid, target_sig) is not None:
+                skipped += 1
+                continue
+            tl = _next_store_barcode(conn)
+            _create_variant(conn, pid, tl, "store", va_options, va_texts, model_id_list)
+            added_variants += 1
+            added_barcodes += 1
+            reassigned += 1
+            warnings.append(
+                f"檔內重覆條碼:原條碼「{bc}」已用於前一列,本列改發自取碼「{tl}」")
 
     # 自取碼計數器:匯入的 TL 碼寫進 Barcode 後,把 Setting.next_store_barcode
     # 更新為「匯入最大號+1」(只往前推不倒退,重跑安全);App 取號直接讀此值+1
@@ -652,6 +1006,7 @@ def run_import(conn, records):
         "added_variants": added_variants,
         "added_barcodes": added_barcodes,
         "skipped": skipped,
+        "reassigned": reassigned,
     }
     return stats, warnings
 
@@ -664,7 +1019,8 @@ def _print_report(stats, warnings):
     print(f"款(Product) {stats['products']}、變體 {stats['variants_total']}、"
           f"條碼 {stats['barcodes_total']}、選項 {stats['options']}")
     print(f"本次新增:變體 {stats['added_variants']}、條碼 {stats['added_barcodes']};"
-          f"跳過(條碼已存在){stats['skipped']}")
+          f"跳過(條碼已存在或重覆){stats['skipped']};"
+          f"檔內重覆改發自取碼 {stats['reassigned']}")
     counts = Counter(warnings)
     print(f"=== 警告 {len(warnings)} 筆({len(counts)} 種)===")
     for w, c in counts.items():

@@ -119,11 +119,11 @@ button.primary:active, button.maint-btn:active { background: #1e3a8a;
 
 /* 已選型號即時列表(選取清單上方) */
 .mp-selected { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-  min-height: 30px; max-width: 420px; }
+  min-height: 30px; max-width: 350px; }
 
 /* 變體編輯:型號選取清單(廠牌分組收合,固定高度可捲動) */
 .model-picker { max-height: 200px; overflow-y: auto; border: 1px solid #d1d5db;
-  border-radius: 6px; padding: 6px 8px; margin-top: 6px; max-width: 420px; }
+  border-radius: 6px; padding: 6px 8px; margin-top: 6px; max-width: 350px; }
 .mp-brand { display: flex; align-items: center; gap: 6px; cursor: pointer;
   font-weight: bold; color: #374151; padding: 4px 2px; user-select: none; }
 .mp-caret { width: 1em; display: inline-block; text-align: center; color: #6b7280; }
@@ -133,6 +133,14 @@ button.primary:active, button.maint-btn:active { background: #1e3a8a;
 
 /* 編輯中的變體列:淡藍底 */
 .sub tr.editing > td { background: #eff6ff; }
+
+/* 子產品表規格欄:固定 300px,內容(chip)自行換行,不擠壓其他欄
+   (只設在 th:型號欄 rowspan 合併後,後續列的 td 序位會位移,不能用 td:nth-child) */
+table.sub th:nth-child(2) { width: 300px; }
+
+/* 子產品表操作欄:小尺寸鈕、同列不換行,避免撐爆列高 */
+table.sub td:last-child { white-space: nowrap; }
+table.sub td:last-child button { font-size: 13px; padding: 4px 10px; }
 
 /* 建檔逐層解鎖 */
 .step { margin-bottom: 14px; }

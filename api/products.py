@@ -563,7 +563,7 @@ def update_variant(vid: int, body: VariantPatch, request: Request):
         cat = _variant_category(conn, vid)
         if cat is None and not conn.execute(
                 "SELECT 1 FROM Variant WHERE variant_id=?", (vid,)).fetchone():
-            raise HTTPException(404, "查無此變體")
+            raise HTTPException(404, "查無此子產品")
         if fields:
             cols = ", ".join(f"{k}=?" for k in fields)
             args = list(fields.values()) + [vid]
@@ -581,7 +581,7 @@ def set_variant_models(vid: int, body: ModelIdList, request: Request):
     try:
         if not conn.execute("SELECT 1 FROM Variant WHERE variant_id=?",
                            (vid,)).fetchone():
-            raise HTTPException(404, "查無此變體")
+            raise HTTPException(404, "查無此子產品")
         _set_variant_models(conn, vid, body.model_ids)
         conn.commit()
         return {"ok": True}
@@ -630,9 +630,9 @@ def delete_variant(vid: int, request: Request):
     conn = get_conn(request.app.state.db_path)
     try:
         if not conn.execute("SELECT 1 FROM Variant WHERE variant_id=?", (vid,)).fetchone():
-            raise HTTPException(404, "查無此變體")
+            raise HTTPException(404, "查無此子產品")
         if _has_records(conn, [vid]):
-            raise HTTPException(409, "該變體已有交易或庫存紀錄,無法刪除,請改用停用")
+            raise HTTPException(409, "該子產品已有交易或庫存紀錄,無法刪除,請改用停用")
         conn.execute("DELETE FROM VariantAttribute WHERE variant_id=?", (vid,))
         conn.execute("DELETE FROM VariantModel WHERE variant_id=?", (vid,))
         conn.execute("DELETE FROM Barcode WHERE variant_id=?", (vid,))
