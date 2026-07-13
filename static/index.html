@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="/css/pos.css?v=23">
+<link rel="stylesheet" href="/css/pos.css?v=35">
 </head>
 <body>
 <div id="app">
@@ -109,12 +109,15 @@
         <!-- 複選:勾選框列 -->
         <template v-if="f.field_type === 'multi'">
           <div class="attr-name">{{ f.name }}</div>
-          <div class="chk-inline">
-            <label v-for="o in optionsFor(f)" :key="o.option_id" class="chk">
-              <input type="checkbox" :value="o.value" v-model="form.attrs[f.name]">
-              {{ o.value }}
-            </label>
-            <span v-if="!optionsFor(f).length" class="hint">尚無選項</span>
+          <div class="chip-box">
+            <div class="chip-wrap">
+              <label v-for="o in optionsFor(f)" :key="o.option_id" class="chip"
+                     :class="{ on: form.attrs[f.name].includes(o.value) }">
+                <input type="checkbox" :value="o.value" v-model="form.attrs[f.name]">
+                {{ o.value }}
+              </label>
+              <span v-if="!optionsFor(f).length" class="hint">尚無選項</span>
+            </div>
           </div>
         </template>
         <!-- 特性詞條:逗號輸入 + 既有詞條建議 -->
@@ -296,22 +299,26 @@
                       <div v-for="f in (fieldsByCat[p.category_id] || [])" :key="f.field_id" class="attr-row">
                         <template v-if="f.field_type === 'multi'">
                           <div class="attr-name">{{ f.name }}</div>
-                          <div class="chip-wrap">
-                            <label v-for="o in optionsFor(f, editVariant.model_ids)" :key="o.option_id" class="chip"
-                                   :class="{ on: editVariant.attrs[f.name].includes(o.value) }">
-                              <input type="checkbox" :value="o.value" v-model="editVariant.attrs[f.name]">
-                              {{ o.value }}
-                            </label>
+                          <div class="chip-box">
+                            <div class="chip-wrap">
+                              <label v-for="o in optionsFor(f, editVariant.model_ids)" :key="o.option_id" class="chip"
+                                     :class="{ on: editVariant.attrs[f.name].includes(o.value) }">
+                                <input type="checkbox" :value="o.value" v-model="editVariant.attrs[f.name]">
+                                {{ o.value }}
+                              </label>
+                            </div>
                           </div>
                         </template>
                         <template v-else-if="f.field_type === 'tags'">
                           <div class="attr-name">{{ f.name }}</div>
-                          <div class="chip-wrap">
-                            <button type="button" v-for="o in (f.options || [])" :key="o.option_id" class="chip"
-                                    :class="{ on: tagHas(editVariant.attrs[f.name], o.value) }"
-                                    @click="toggleTag(editVariant.attrs, f.name, o.value)">{{ o.value }}</button>
+                          <div class="chip-box">
+                            <div class="chip-wrap">
+                              <button type="button" v-for="o in (f.options || [])" :key="o.option_id" class="chip"
+                                      :class="{ on: tagHas(editVariant.attrs[f.name], o.value) }"
+                                      @click="toggleTag(editVariant.attrs, f.name, o.value)">{{ o.value }}</button>
+                            </div>
+                            <input v-model="editVariant.attrs[f.name]" placeholder="以逗號分隔,可自由新增">
                           </div>
-                          <input v-model="editVariant.attrs[f.name]" placeholder="以逗號分隔,可自由新增">
                         </template>
                         <label v-else-if="f.field_type === 'select'">{{ f.name }}
                           <input :list="'edl-' + f.field_id" v-model="editVariant.attrs[f.name]">
@@ -334,11 +341,13 @@
                         <button class="btn-sm danger" @click="removeBarcode(p, b.barcode)">刪</button>
                       </div>
                       <div class="bc-add">
-                        <input v-model="bcInput[v.variant_id]" placeholder="原廠條碼" class="w120"
+                        <input v-model="bcInput[v.variant_id]" placeholder="原廠條碼" class="w160"
                                @input="bcError[v.variant_id] = ''"
                                @keyup.enter="addFactoryBarcode(p, v)">
-                        <button class="btn-sm" @click="addFactoryBarcode(p, v)">新增</button>
-                        <button class="btn-sm" @click="addStoreBarcode(p, v)">自取</button>
+                        <div class="bc-add-btns">
+                          <button class="btn-sm" @click="addFactoryBarcode(p, v)">新增</button>
+                          <button class="btn-sm" @click="addStoreBarcode(p, v)">自取</button>
+                        </div>
                       </div>
                       <div v-if="bcError[v.variant_id]" class="bc-err">{{ bcError[v.variant_id] }}</div>
                     </template>
@@ -373,14 +382,19 @@
                   <td colspan="8">
                     <div class="create-form">
                       <h3>新增子產品</h3>
+                      <div class="spec-box">
+                      <div class="step-title">規格</div>
                       <div v-for="f in (fieldsByCat[p.category_id] || [])" :key="f.field_id" class="attr-row">
                         <template v-if="f.field_type === 'multi'">
                           <div class="attr-name">{{ f.name }}</div>
-                          <div class="chk-inline">
-                            <label v-for="o in optionsFor(f, newVariant.model_ids)" :key="o.option_id" class="chk">
-                              <input type="checkbox" :value="o.value" v-model="newVariant.attrs[f.name]">
-                              {{ o.value }}
-                            </label>
+                          <div class="chip-box">
+                            <div class="chip-wrap">
+                              <label v-for="o in optionsFor(f, newVariant.model_ids)" :key="o.option_id" class="chip"
+                                     :class="{ on: newVariant.attrs[f.name].includes(o.value) }">
+                                <input type="checkbox" :value="o.value" v-model="newVariant.attrs[f.name]">
+                                {{ o.value }}
+                              </label>
+                            </div>
                           </div>
                         </template>
                         <label v-else-if="f.field_type === 'tags'">{{ f.name }}
@@ -399,6 +413,7 @@
                         <label v-else>{{ f.name }}
                           <input v-model="newVariant.attrs[f.name]">
                         </label>
+                      </div>
                       </div>
                       <div class="step-title">適用手機型號(可略過)</div>
                       <model-picker :models="models" v-model:model_ids="newVariant.model_ids"></model-picker>
@@ -601,16 +616,16 @@
 
 </div>
 </template>
-<script src="/js/vue.global.prod.js?v=23"></script>
-<script src="/js/api.js?v=23"></script>
-<script src="/js/checkout.js?v=23"></script>
-<script src="/js/receive.js?v=23"></script>
-<script src="/js/stocktake.js?v=23"></script>
-<script src="/js/records.js?v=23"></script>
-<script src="/js/catalog.js?v=23"></script>
-<script src="/js/sortable.js?v=23"></script>
-<script src="/js/modelpicker.js?v=23"></script>
-<script src="/js/settings.js?v=23"></script>
-<script src="/js/app.js?v=23"></script>
+<script src="/js/vue.global.prod.js?v=35"></script>
+<script src="/js/api.js?v=35"></script>
+<script src="/js/checkout.js?v=35"></script>
+<script src="/js/receive.js?v=35"></script>
+<script src="/js/stocktake.js?v=35"></script>
+<script src="/js/records.js?v=35"></script>
+<script src="/js/catalog.js?v=35"></script>
+<script src="/js/sortable.js?v=35"></script>
+<script src="/js/modelpicker.js?v=35"></script>
+<script src="/js/settings.js?v=35"></script>
+<script src="/js/app.js?v=35"></script>
 </body>
 </html>

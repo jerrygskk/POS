@@ -47,13 +47,28 @@ main.py → uvicorn(127.0.0.1:8737) → FastAPI app(api/create_app) → static/(
 - **有效售價**:`Variant.price` 不為 NULL 時採用,否則退回 `Product.default_price`,兩者皆 NULL 則售價為 `null`。
 - **共用欄 NULL 去重提醒**:`AttributeField` 的共用欄 `category_id` 為 NULL;SQLite 的 `UNIQUE` 對 NULL 不視為相等,故去重不能單靠資料庫唯一鍵,需靠應用層先查再插。
 
+### UI 風格規範(源自維護者 theme_guide,Apple HIG 風;定義於 `static/css/pos.css` 檔頭)
+
+- **色票**:背景 `#f2f2f7`|元件底 `#fff`|主文字 `#1c1c1e`|次要 `#636366`|佔位/停用字 `#aeaeb2`|邊框 `#c6c6c8`|hover 底/停用底 `#e5e5ea`|pressed 底/停用框 `#d1d1d6`|強調(焦點/選中/chip.on) `#8fa8c8`|主要鈕 `#a1b4cb`/hover `#4977b1`/pressed `#39649a`|危險 `#e74c3c`/hover `#c0392b`。換主色時全域搜尋一起換。
+- **焦點一律 2px 藍灰框**:input/select 用 `border-color + inset box-shadow` 疊出 2px(不位移版面),button 用 `:focus-visible` outline;不用瀏覽器預設藍。
+- **停用態統一**:底 `#e5e5ea`、字 `#aeaeb2`、框 `#d1d1d6`(primary 停用 `#d1d9e3`)。
+- **圓角 8px**(chip/tag 圓膠囊除外);一般鈕 `min-width: 80px` 保持等寬,小型鈕(`.btn-sm`/chip/表格操作鈕)歸零。
+- **表單對齊**:「標籤(固定寬 `--label-w`,預設 9em)＋輸入框」兩欄 grid,同表單內全部欄位對齊同一垂直線,列距 10px;label 內文字+輸入框靠 grid 匿名項對齊,html 不需加 span。巢狀框(如 `.spec-box`)在框內覆寫 `--label-w` 扣掉 padding+border,維持框內外同線。新表單一律照此規則。
+
 ## 3. 測試
 
 ```powershell
 python -m unittest discover -s tests
 ```
 
-目前 128 個測試,涵蓋 schema/migration、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份等模組,檔名皆 `test_*.py`。
+目前 206 個測試,涵蓋 schema/migration、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、匯入規則(七類拆解/透明填補/括號補齊)等模組,檔名皆 `test_*.py`。
+
+### 匯入工具(`tools/import_excel.py`)規則補充
+
+- **鋼化玻璃複選欄名為「材質」**(常數 `GLASS_SPEC_FIELD`;非「規格」)。
+- **手機殼款式/顏色兩欄皆空**(空壓殼等透明殼)→ 款式自動填「透明」,避免無規格。
+- **規格類欄位補齊未閉合括號**(`close_unbalanced_parens`,套在 `select_attrs`):來源缺右括號(如「磁吸(附掛環扣」)自動補成「…環扣)」,全/半形皆處理。
+- 工具可重跑;現有 `data/pos.db` 上線前會依最新規則重匯。
 
 ## 4. 打包
 

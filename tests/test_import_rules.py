@@ -178,6 +178,25 @@ class TestCategoryAttrWrites(unittest.TestCase):
              COL_CAT1: "黑色"})
         self.assertEqual(opts, [("款式", "透明磁吸"), ("顏色", "黑色")])
 
+    def test_case_both_empty_fills_transparent(self):
+        # 手機殼款式/顏色兩欄皆空 → 款式填「透明」
+        opts, _, _ = self._writes(
+            {COL_CODE: "X", COL_CATEGORY: "手機殼"})
+        self.assertEqual(opts, [("款式", "透明")])
+
+    def test_case_partial_not_filled(self):
+        # 只缺一欄(有顏色)→ 不補透明
+        opts, _, _ = self._writes(
+            {COL_CODE: "X", COL_CATEGORY: "手機殼", COL_CAT1: "黑色"})
+        self.assertEqual(opts, [("顏色", "黑色")])
+
+    def test_case_close_unbalanced_paren(self):
+        # 來源缺右括號:匯入自動補齊(「磁吸(附掛環扣」→「磁吸(附掛環扣)」)
+        opts, _, _ = self._writes(
+            {COL_CODE: "X", COL_CATEGORY: "手機殼",
+             COL_SPEC: "荒野廢土磁吸(附掛環扣", COL_CAT1: "黑色"})
+        self.assertEqual(opts[0], ("款式", "荒野廢土磁吸(附掛環扣)"))
+
     def test_lens_rename(self):
         opts, _, _ = self._writes(
             {COL_CODE: "X", COL_CATEGORY: "鏡頭貼", COL_SPEC: "藍寶石",

@@ -457,7 +457,8 @@ def catalog(request: Request, q: str = "", include_inactive: bool = False,
             "FROM Product p "
             "LEFT JOIN Category c ON p.category_id=c.category_id "
             "LEFT JOIN Brand b ON p.brand_id=b.brand_id"
-            + p_where + " ORDER BY p.product_id", p_args).fetchall()
+            + p_where + " ORDER BY c.sort, p.category_id, b.sort, "
+            "p.name, p.product_id", p_args).fetchall()
 
         # 依 model_id 篩選的變體白名單(None=不篩)
         model_vids = None

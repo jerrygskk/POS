@@ -74,6 +74,24 @@ def clean(value):
     return s
 
 
+# 補齊未閉合括號(來源缺字修正):左括號多於右括號時,依序補上對應右括號。
+# 全/半形皆處理,支援巢狀;多餘右括號不動(屬另類錯誤,不在此範圍)。
+_PAREN_CLOSE = {"(": ")", "（": "）"}
+_PAREN_OPEN = set(_PAREN_CLOSE)
+_PAREN_CLOSERS = set(_PAREN_CLOSE.values())
+
+
+def close_unbalanced_parens(s):
+    """字串尾端補齊未閉合的左括號(如「磁吸(附掛環扣」→「磁吸(附掛環扣)」)。"""
+    stack = []
+    for ch in s:
+        if ch in _PAREN_OPEN:
+            stack.append(ch)
+        elif ch in _PAREN_CLOSERS and stack:
+            stack.pop()
+    return s + "".join(_PAREN_CLOSE[c] for c in reversed(stack))
+
+
 # ---- 廠牌正規化 ----
 # 中英並列品牌全名保留原樣;尾綴為種類/子類/產品線者去除。
 BRAND_ALIASES = {
@@ -256,7 +274,7 @@ def parse_row(raw):
     for col in CATEGORY_SELECT_COLS:
         v = clean(raw.get(col))
         if v is not None:
-            select_attrs[col] = v
+            select_attrs[col] = close_unbalanced_parens(v)
     return {
         "barcode": barcode,
         "category": category,
@@ -289,7 +307,7 @@ def product_name(rec):
 # ================= 鋼化玻璃規格模型(spec §2、§3 內建對照表)=================
 
 GLASS_CATEGORY = "鋼化玻璃"
-GLASS_SPEC_FIELD = "規格"          # multi:亮面/霧面/藍光/防窺
+GLASS_SPEC_FIELD = "材質"          # multi:亮面/霧面/藍光/防窺
 GLASS_TAGS_FIELD = "特性詞條"      # tags:自動長
 GLASS_LAYOUT_FIELD = "版型"        # select:滿版/9分滿,預設滿版(原分類1改名)
 GLASS_BASE_WORDS = ["亮面", "霧面", "藍光", "防窺"]
@@ -564,6 +582,9 @@ def category_attr_writes(rec):
             v = rec["select_attrs"].get(col)
             if v is not None:
                 opts.append((fname, v))
+        # 手機殼款式/顏色兩欄皆空(空壓殼等透明殼)→ 款式填「透明」,避免無規格
+        if cat == CASE_CATEGORY and not opts:
+            opts.append(("款式", "透明"))
     elif cat == EARPHONE_CATEGORY:
         if rec.get("earphone_model"):
             texts.append(("型號", rec["earphone_model"]))
