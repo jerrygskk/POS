@@ -6,6 +6,8 @@ data/*
 build/
 dist/
 *.spec
+# 由 tools/bump_version.py 自動產生,build 時才需要
+version_info.txt
 
 # 含店內資料與人名,絕不入庫(公開 repo)
 *.xlsm
@@ -13,3 +15,6 @@ dist/
 
 # docs 整個資料夾不入庫(交接、spec、店內資料)
 docs/
+
+# 一次性匯入工具(店內資料相關,不入庫)
+tools/import_excel.py
