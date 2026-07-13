@@ -1,17 +1,8 @@
-import unittest, tempfile, os, sqlite3
-from lib.db import get_conn, init_db
+import unittest, sqlite3
+from base import ConnTestCase
 
 
-class TestCatalogTables(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
-        self.conn = get_conn(self.db)
-
-    def tearDown(self):
-        self.conn.close()
-
+class TestCatalogTables(ConnTestCase):
     # 新表都建齊
     def test_new_tables_exist(self):
         names = {r["name"] for r in self.conn.execute(

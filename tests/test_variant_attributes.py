@@ -1,33 +1,19 @@
-import unittest, tempfile, os
-from fastapi.testclient import TestClient
-from lib.db import init_db
-from api import create_app
+import unittest
+from base import ApiTestCase
 
 
-class TestVariantAttributes(unittest.TestCase):
+class TestVariantAttributes(ApiTestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
-        self.c = TestClient(create_app(self.db))
-        self.cid = self.c.post("/api/categories",
-                               json={"name": "鋼化玻璃"}).json()["category_id"]
+        super().setUp()
         # 專屬 select 欄「規格」+ 選項;共用 text 欄「商品描述」為種子
-        self.fid = self.c.post("/api/fields",
-            json={"name": "規格", "category_id": self.cid}).json()["field_id"]
-        self.opt_bright = self.c.post("/api/options",
-            json={"field_id": self.fid, "value": "亮面"})
-        self.c.post("/api/options", json={"field_id": self.fid, "value": "霧面"})
+        self.make_category_with_field("規格", options=("亮面", "霧面"))
 
     def _opt_id(self, value):
         return [o for o in self.c.get(f"/api/options?field_id={self.fid}").json()
                 if o["value"] == value][0]["option_id"]
 
     def _create(self, attrs):
-        return self.c.post("/api/products", json={
-            "name": "膜", "category_id": self.cid, "default_price": 100,
-            "variants": [{"attributes": attrs,
-                          "barcodes": [{"barcode": "B1", "source": "store"}]}]}).json()
+        return self.create_product(attrs)
 
     # select 欄 round-trip:寫入值字串 → 存 option_id → 讀回同值
     def test_select_roundtrip(self):
@@ -95,12 +81,9 @@ class TestVariantAttributes(unittest.TestCase):
         self.assertEqual(self.c.get("/api/barcode/B1").json()["attributes"], {})
 
 
-class TestOptionModel(unittest.TestCase):
+class TestOptionModel(ApiTestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
-        self.c = TestClient(create_app(self.db))
+        super().setUp()
         self.cid = self.c.post("/api/categories",
                                json={"name": "手機殼"}).json()["category_id"]
         self.fid = self.c.post("/api/fields",

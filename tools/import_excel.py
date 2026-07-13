@@ -428,23 +428,29 @@ def glass_attrs(spec_value, cat1_value):
 # 各類的規格/分類1/廠牌拆解寫成純函式(可單測),run_import 依種類分派後
 # 用 category_attr_writes(rec) 取得該列要寫的選項/文字欄與警告。
 
+# 欄名常數:宣告表(CATEGORY_SELECT_RENAME/CATEGORY_FIELDS)與寫入邏輯
+# (category_attr_writes 各 writer)共用同一來源,避免欄名字串各處各拼而 drift。
+F_STYLE = "款式"; F_COLOR = "顏色"; F_MATERIAL = "材質"; F_FRAME = "框色"
+F_SPEC = "規格"; F_MODEL = "型號"; F_CONNECTOR = "接頭"; F_LENGTH = "長度"
+F_TAGS = "特性詞條"; F_SIZE = "尺寸"
+
 # 手機殼/鏡頭貼/插座:規格、分類1 僅換欄名的純 select。
 CATEGORY_SELECT_RENAME = {
-    CASE_CATEGORY:   [(COL_SPEC, "款式"), (COL_CAT1, "顏色")],
-    LENS_CATEGORY:   [(COL_SPEC, "材質"), (COL_CAT1, "框色")],
-    SOCKET_CATEGORY: [(COL_SPEC, "規格"), (COL_CAT1, "顏色")],
+    CASE_CATEGORY:   [(COL_SPEC, F_STYLE), (COL_CAT1, F_COLOR)],
+    LENS_CATEGORY:   [(COL_SPEC, F_MATERIAL), (COL_CAT1, F_FRAME)],
+    SOCKET_CATEGORY: [(COL_SPEC, F_SPEC), (COL_CAT1, F_COLOR)],
 }
 
 # 種類 → [(欄名, 欄型)];依序建立(欄 sort 遞增),第一次遇到該種類時全建。
 CATEGORY_FIELDS = {
-    CASE_CATEGORY:     [("款式", "select"), ("顏色", "select")],
-    LENS_CATEGORY:     [("材質", "select"), ("框色", "select")],
-    SOCKET_CATEGORY:   [("規格", "select"), ("顏色", "select")],
-    EARPHONE_CATEGORY: [("型號", "text"), ("顏色", "select")],
-    POWERBANK_CATEGORY: [("規格", "select"), ("顏色", "select")],
-    CABLE_CATEGORY:    [("接頭", "select"), ("長度", "select"),
-                        ("顏色", "select"), ("特性詞條", "tags")],
-    WATCH_CATEGORY:    [("款式", "select"), ("尺寸", "select")],
+    CASE_CATEGORY:     [(F_STYLE, "select"), (F_COLOR, "select")],
+    LENS_CATEGORY:     [(F_MATERIAL, "select"), (F_FRAME, "select")],
+    SOCKET_CATEGORY:   [(F_SPEC, "select"), (F_COLOR, "select")],
+    EARPHONE_CATEGORY: [(F_MODEL, "text"), (F_COLOR, "select")],
+    POWERBANK_CATEGORY: [(F_SPEC, "select"), (F_COLOR, "select")],
+    CABLE_CATEGORY:    [(F_CONNECTOR, "select"), (F_LENGTH, "select"),
+                        (F_COLOR, "select"), (F_TAGS, "tags")],
+    WATCH_CATEGORY:    [(F_STYLE, "select"), (F_SIZE, "select")],
 }
 
 
@@ -575,60 +581,96 @@ def split_watch_glass(spec_value):
     return s, None, True
 
 
+# 各類 writer:(rec, spec, cat1) → (option_writes, text_writes, warnings);
+# option_writes/text_writes 皆為 [(欄名, 值)]。經 CATEGORY_WRITERS 分派。
+
+def _writes_rename(rec, spec, cat1):
+    """手機殼/鏡頭貼/插座:規格、分類1 換欄名的純 select。"""
+    cat = rec["category"]
+    opts = []
+    for col, fname in CATEGORY_SELECT_RENAME[cat]:
+        v = rec["select_attrs"].get(col)
+        if v is not None:
+            opts.append((fname, v))
+    # 手機殼款式/顏色兩欄皆空(空壓殼等透明殼)→ 款式填「透明」,避免無規格
+    if cat == CASE_CATEGORY and not opts:
+        opts.append((F_STYLE, "透明"))
+    return opts, [], []
+
+
+def _writes_earphone(rec, spec, cat1):
+    opts, texts, warns = [], [], []
+    if rec.get("earphone_model"):
+        texts.append((F_MODEL, rec["earphone_model"]))
+    if cat1 is not None:
+        opts.append((F_COLOR, cat1))
+    if rec.get("earphone_suspicious"):
+        warns.append(
+            f"藍芽耳機廠牌可疑(對帳用):原值「{rec['brand_raw']}」"
+            f"→ 廠牌「{rec['brand']}」型號「{rec.get('earphone_model')}」")
+    return opts, texts, warns
+
+
+def _writes_powerbank(rec, spec, cat1):
+    opts = []
+    pspec, pcolor = split_powerbank_spec(spec)
+    if pspec is not None:
+        opts.append((F_SPEC, pspec))
+    color = cat1 if cat1 is not None else pcolor   # 分類1 優先(實務不併存)
+    if color is not None:
+        opts.append((F_COLOR, color))
+    return opts, [], []
+
+
+def _writes_cable(rec, spec, cat1):
+    opts = []
+    info = parse_cable(spec, rec["desc"])
+    if info[F_CONNECTOR] is not None:
+        opts.append((F_CONNECTOR, info[F_CONNECTOR]))
+    if info[F_LENGTH] is not None:
+        opts.append((F_LENGTH, info[F_LENGTH]))
+    if cat1 is not None:
+        opts.append((F_COLOR, cat1))
+    for t in info[F_TAGS]:
+        opts.append((F_TAGS, t))
+    return opts, [], list(info["warnings"])
+
+
+def _writes_watch(rec, spec, cat1):
+    opts, warns = [], []
+    style, size, need_warn = split_watch_glass(spec)
+    if style is not None:
+        opts.append((F_STYLE, style))
+    if size is not None:
+        opts.append((F_SIZE, size))
+    if need_warn:
+        warns.append(f"AppleWatch玻璃規格無法拆出尺寸,整串入款式:「{spec}」")
+    return opts, [], warns
+
+
+CATEGORY_WRITERS = {
+    EARPHONE_CATEGORY: _writes_earphone,
+    POWERBANK_CATEGORY: _writes_powerbank,
+    CABLE_CATEGORY: _writes_cable,
+    WATCH_CATEGORY: _writes_watch,
+}
+
+
 def category_attr_writes(rec):
     """依種類拆 rec → (option_writes, text_writes, warnings)。
 
-    option_writes / text_writes 皆為 [(欄名, 值)];欄型由 CATEGORY_FIELDS 決定
-    (tags/multi 同欄多筆即多個 (欄名,值))。鋼化玻璃另走 glass_attrs,不在此。
+    先查 rename 表(純換欄名的三類),再查 CATEGORY_WRITERS(各自邏輯);
+    欄型由 CATEGORY_FIELDS 決定。鋼化玻璃另走 glass_attrs,不在此。
     """
     cat = rec["category"]
     spec = rec["select_attrs"].get(COL_SPEC)
     cat1 = rec["select_attrs"].get(COL_CAT1)
-    opts, texts, warns = [], [], []
     if cat in CATEGORY_SELECT_RENAME:
-        for col, fname in CATEGORY_SELECT_RENAME[cat]:
-            v = rec["select_attrs"].get(col)
-            if v is not None:
-                opts.append((fname, v))
-        # 手機殼款式/顏色兩欄皆空(空壓殼等透明殼)→ 款式填「透明」,避免無規格
-        if cat == CASE_CATEGORY and not opts:
-            opts.append(("款式", "透明"))
-    elif cat == EARPHONE_CATEGORY:
-        if rec.get("earphone_model"):
-            texts.append(("型號", rec["earphone_model"]))
-        if cat1 is not None:
-            opts.append(("顏色", cat1))
-        if rec.get("earphone_suspicious"):
-            warns.append(
-                f"藍芽耳機廠牌可疑(對帳用):原值「{rec['brand_raw']}」"
-                f"→ 廠牌「{rec['brand']}」型號「{rec.get('earphone_model')}」")
-    elif cat == POWERBANK_CATEGORY:
-        pspec, pcolor = split_powerbank_spec(spec)
-        if pspec is not None:
-            opts.append(("規格", pspec))
-        color = cat1 if cat1 is not None else pcolor   # 分類1 優先(實務不併存)
-        if color is not None:
-            opts.append(("顏色", color))
-    elif cat == CABLE_CATEGORY:
-        info = parse_cable(spec, rec["desc"])
-        if info["接頭"] is not None:
-            opts.append(("接頭", info["接頭"]))
-        if info["長度"] is not None:
-            opts.append(("長度", info["長度"]))
-        if cat1 is not None:
-            opts.append(("顏色", cat1))
-        for t in info["特性詞條"]:
-            opts.append(("特性詞條", t))
-        warns.extend(info["warnings"])
-    elif cat == WATCH_CATEGORY:
-        style, size, need_warn = split_watch_glass(spec)
-        if style is not None:
-            opts.append(("款式", style))
-        if size is not None:
-            opts.append(("尺寸", size))
-        if need_warn:
-            warns.append(f"AppleWatch玻璃規格無法拆出尺寸,整串入款式:「{spec}」")
-    return opts, texts, warns
+        return _writes_rename(rec, spec, cat1)
+    writer = CATEGORY_WRITERS.get(cat)
+    if writer:
+        return writer(rec, spec, cat1)
+    return [], [], []
 
 
 # ================= Excel 讀取 =================
@@ -665,19 +707,31 @@ def load_rows(xlsm_path, category=None):
 
 # ================= DB find-or-create 輔助 =================
 
-def _get_or_create_category(conn, name):
-    row = conn.execute("SELECT category_id FROM Category WHERE name=?",
-                       (name,)).fetchone()
+def _get_or_create(conn, table, id_col, keys, extra_cols=None):
+    """單鍵/多鍵 find-or-create 通則:以 keys(欄→值)查,無則插入。
+
+    extra_cols:僅插入時附加的欄(不參與查詢),供有預設值等需求。
+    回傳既有或新建列的 id_col。"""
+    where = " AND ".join(f"{k}=?" for k in keys)
+    row = conn.execute(f"SELECT {id_col} FROM {table} WHERE {where}",
+                       tuple(keys.values())).fetchone()
     if row:
-        return row["category_id"]
-    return conn.execute("INSERT INTO Category(name) VALUES(?)", (name,)).lastrowid
+        return row[id_col]
+    ins = dict(keys)
+    if extra_cols:
+        ins.update(extra_cols)
+    cols = ",".join(ins)
+    placeholders = ",".join("?" for _ in ins)
+    return conn.execute(f"INSERT INTO {table}({cols}) VALUES({placeholders})",
+                        tuple(ins.values())).lastrowid
+
+
+def _get_or_create_category(conn, name):
+    return _get_or_create(conn, "Category", "category_id", {"name": name})
 
 
 def _get_or_create_brand(conn, name):
-    row = conn.execute("SELECT brand_id FROM Brand WHERE name=?", (name,)).fetchone()
-    if row:
-        return row["brand_id"]
-    return conn.execute("INSERT INTO Brand(name) VALUES(?)", (name,)).lastrowid
+    return _get_or_create(conn, "Brand", "brand_id", {"name": name})
 
 
 def _link_brand_category(conn, brand_id, category_id):
@@ -807,8 +861,12 @@ def _create_variant(conn, pid, barcode, source, va_options, va_texts, model_id_l
     return vid
 
 
+# 判重簽章的屬性元組一律為 (field_id, option_id, text_value):
+#   option 列 → text_value=None;text 列 → option_id=None。
+# _target_signature 與 _variant_signature 必須產出「完全同形」的 frozenset,
+# 判重(_find_matching_variant 的 ==)才成立;改任一端務必同步另一端。
 def _target_signature(va_options, va_texts, model_id_list):
-    """由待寫入屬性/型號組出判重簽章(與 _variant_signature 對齊)。"""
+    """由待寫入屬性/型號組出判重簽章(與 _variant_signature 對齊,見上方契約)。"""
     attrs = frozenset([(fid, oid, None) for fid, oid in va_options]
                       + [(fid, None, tv) for fid, tv in va_texts])
     return attrs, frozenset(model_id_list)
@@ -835,14 +893,28 @@ def _find_matching_variant(conn, pid, target_sig):
     return None
 
 
+def _read_setting_int(conn, key, default):
+    """讀 Setting[key] 轉 int;查無回 default。"""
+    row = conn.execute("SELECT value FROM Setting WHERE key=?", (key,)).fetchone()
+    return int(row["value"]) if row else default
+
+
+def _write_setting(conn, key, value):
+    conn.execute("INSERT OR REPLACE INTO Setting(key,value) VALUES(?,?)",
+                 (key, str(value)))
+
+
+def _bump_setting_min(conn, key, target):
+    """只前進不倒退:target 大於現值時才把 Setting[key] 推到 target(重跑安全)。"""
+    if target > _read_setting_int(conn, key, 0):
+        _write_setting(conn, key, target)
+
+
 def _next_store_barcode(conn):
     """自取碼取號:讀 Setting.next_store_barcode → 用 TL{n} → 寫回 n+1
     (與 api.products.next_store_barcode 邏輯一致)。"""
-    row = conn.execute(
-        "SELECT value FROM Setting WHERE key='next_store_barcode'").fetchone()
-    n = int(row["value"]) if row else 100000001
-    conn.execute("INSERT OR REPLACE INTO Setting(key,value) "
-                 "VALUES('next_store_barcode',?)", (str(n + 1),))
+    n = _read_setting_int(conn, "next_store_barcode", 100000001)
+    _write_setting(conn, "next_store_barcode", n + 1)
     return f"TL{n}"
 
 
@@ -861,13 +933,7 @@ def _seed_store_counter(conn, records):
             nums.append(int(b[2:]))
     if not nums:
         return
-    target = max(nums) + 1
-    row = conn.execute(
-        "SELECT value FROM Setting WHERE key='next_store_barcode'").fetchone()
-    cur = int(row["value"]) if row else 0
-    if target > cur:
-        conn.execute("INSERT OR REPLACE INTO Setting(key,value) "
-                     "VALUES('next_store_barcode',?)", (str(target),))
+    _bump_setting_min(conn, "next_store_barcode", max(nums) + 1)
 
 
 # ================= 匯入主流程 =================
@@ -1011,13 +1077,7 @@ def run_import(conn, records):
         "SELECT MAX(CAST(SUBSTR(barcode,3) AS INTEGER)) FROM Barcode "
         "WHERE barcode LIKE 'TL%' AND SUBSTR(barcode,3) GLOB '[0-9]*'").fetchone()[0]
     if max_tl is not None:
-        row = conn.execute(
-            "SELECT value FROM Setting WHERE key='next_store_barcode'").fetchone()
-        cur = int(row[0]) if row else 0
-        if max_tl + 1 > cur:
-            conn.execute(
-                "INSERT OR REPLACE INTO Setting(key,value) "
-                "VALUES('next_store_barcode',?)", (str(max_tl + 1),))
+        _bump_setting_min(conn, "next_store_barcode", max_tl + 1)
 
     stats = {
         "categories": conn.execute("SELECT COUNT(*) FROM Category").fetchone()[0],

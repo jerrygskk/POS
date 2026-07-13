@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
-from lib.db import get_conn
+from lib.db import db_conn, in_clause, next_sort, stock_map
+from lib.dbutil import require_exists, update_by_id, replace_links
 
 router = APIRouter(prefix="/api")
 
@@ -63,18 +64,15 @@ def _check_brand(conn, brand_id):
         raise HTTPException(422, "廠牌已停用,無法建檔")
 
 def _set_variant_models(conn, variant_id, model_ids):
-    conn.execute("DELETE FROM VariantModel WHERE variant_id=?", (variant_id,))
-    for mid in dict.fromkeys(model_ids):
-        conn.execute(
-            "INSERT OR IGNORE INTO VariantModel(variant_id, model_id) VALUES(?,?)",
-            (variant_id, mid))
+    replace_links(conn, "VariantModel", "variant_id", variant_id,
+                  "model_id", model_ids)
 
 def _models_by_variant(conn, variant_ids):
     """回傳 {variant_id: [型號顯示名, ...]}(有別名顯示別名,否則全名)"""
     out = {}
     if not variant_ids:
         return out
-    qs = ",".join("?" * len(variant_ids))
+    qs = in_clause(variant_ids)
     for r in conn.execute(
             f"SELECT vm.variant_id, COALESCE(NULLIF(m.alias,''), m.name) AS name "
             f"FROM VariantModel vm "
@@ -130,10 +128,10 @@ def _find_option(conn, field_id, value):
 
 def _create_option(conn, field_id, value):
     """tags 欄未見過的詞條自動建選項(冪等)。"""
+    sort = next_sort(conn, "AttributeOption", "field_id=?", (field_id,))
     conn.execute(
         "INSERT OR IGNORE INTO AttributeOption(field_id, value, sort) "
-        "VALUES(?,?,(SELECT COALESCE(MAX(sort),0)+1 FROM AttributeOption "
-        "WHERE field_id=?))", (field_id, value, field_id))
+        "VALUES(?,?,?)", (field_id, value, sort))
     return _find_option(conn, field_id, value)
 
 def set_variant_attributes(conn, variant_id, category_id, attributes):
@@ -184,7 +182,7 @@ def _attr_rows(conn, variant_ids):
     """撈變體規格關聯列(依欄 sort、選項 sort 排序),供 dict/顯示字串共用。"""
     if not variant_ids:
         return []
-    qs = ",".join("?" * len(variant_ids))
+    qs = in_clause(variant_ids)
     return conn.execute(
         f"SELECT va.variant_id, f.name AS field_name, f.field_type, "
         f"o.value AS option_value, va.text_value, "
@@ -251,7 +249,7 @@ def variant_sort_keys(conn, variant_ids):
     keys = {vid: [0, 0, [], []] for vid in variant_ids}  # [材質數,抗AR,材質序,詞條序]
     if not variant_ids:
         return {}
-    qs = ",".join("?" * len(variant_ids))
+    qs = in_clause(variant_ids)
     for r in conn.execute(
             f"SELECT va.variant_id, f.field_type, f.sort AS fsort, "
             f"f.field_id, o.sort AS osort, o.option_id, o.value AS oval "
@@ -288,7 +286,7 @@ def display_of(conn, variant_id):
 def _has_records(conn, variant_ids):
     if not variant_ids:
         return False
-    qs = ",".join("?" * len(variant_ids))
+    qs = in_clause(variant_ids)
     r = conn.execute(
         f"SELECT 1 FROM SaleItem WHERE variant_id IN ({qs}) LIMIT 1",
         variant_ids).fetchone()
@@ -321,8 +319,7 @@ def stock_of(conn, variant_id):
 
 @router.post("/products")
 def create_product(body: ProductIn, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         _check_category(conn, body.category_id)
         _check_brand(conn, body.brand_id)
         cur = conn.execute(
@@ -346,13 +343,10 @@ def create_product(body: ProductIn, request: Request):
                              (code, vid, b.source))
         conn.commit()
         return {"product_id": pid, "variant_ids": vids}
-    finally:
-        conn.close()
 
 @router.get("/barcode/{code}")
 def scan(code: str, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         row = conn.execute(
             "SELECT v.variant_id, v.product_id, "
             "COALESCE(v.price, p.default_price) AS price, p.name, "
@@ -367,27 +361,21 @@ def scan(code: str, request: Request):
                 "attr_display": display_of(conn, row["variant_id"]),
                 "price": row["price"], "stock": stock_of(conn, row["variant_id"]),
                 "active": bool(row["active"])}
-    finally:
-        conn.close()
 
 @router.post("/variants/{variant_id}/barcodes")
 def add_barcode(variant_id: int, body: BarcodeIn, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         _reject_manual_tl(body.barcode)
         code = body.barcode or next_store_barcode(conn)
         conn.execute("INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",
                      (code, variant_id, body.source))
         conn.commit()
         return {"barcode": code}
-    finally:
-        conn.close()
 
 @router.get("/products")
 def search(request: Request, q: str = "", category_id: int | None = None,
            brand_id: int | None = None, model_id: int | None = None):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         # 先以 SQL 撈符合種類/廠牌/型號的啟用變體,再於 Python 端以 q 比對
         # 款名或組回的規格值(正規化後屬性不再是欄,不能直接 LIKE)
         sql = (
@@ -417,23 +405,22 @@ def search(request: Request, q: str = "", category_id: int | None = None,
                     or any(like in str(val).lower()
                            for val in attrs.get(r["variant_id"], {}).values())]
         rows = rows[:100]
-        models = _models_by_variant(conn, [r["variant_id"] for r in rows])
-        disp = display_attrs(conn, [r["variant_id"] for r in rows])
+        vids = [r["variant_id"] for r in rows]
+        models = _models_by_variant(conn, vids)
+        disp = display_attrs(conn, vids)
+        smap = stock_map(conn, vids)
         return [{"variant_id": r["variant_id"], "name": r["name"],
                  "attributes": attrs.get(r["variant_id"], {}),
                  "attr_display": disp.get(r["variant_id"], ""), "price": r["price"],
                  "category_name": r["category_name"], "brand_name": r["brand_name"],
                  "models": models.get(r["variant_id"], []),
-                 "stock": stock_of(conn, r["variant_id"])} for r in rows]
-    finally:
-        conn.close()
+                 "stock": smap.get(r["variant_id"], 0)} for r in rows]
 
 @router.get("/catalog")
 def catalog(request: Request, q: str = "", include_inactive: bool = False,
             category_id: int | None = None, brand_id: int | None = None,
             model_id: int | None = None):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         # 條碼:先撈全部,依 variant_id 分組
         bc = {}
         for b in conn.execute(
@@ -471,7 +458,7 @@ def catalog(request: Request, q: str = "", include_inactive: bool = False,
         vrows = []
         if prod_ids:
             v_active = "" if include_inactive else " AND active=1"
-            qs = ",".join("?" * len(prod_ids))
+            qs = in_clause(prod_ids)
             vrows = conn.execute(
                 f"SELECT variant_id, product_id, price, active FROM Variant "
                 f"WHERE product_id IN ({qs})" + v_active +
@@ -481,6 +468,7 @@ def catalog(request: Request, q: str = "", include_inactive: bool = False,
         disp_map = display_attrs(conn, all_vids)
         models_map = _models_by_variant(conn, all_vids)
         sort_keys = variant_sort_keys(conn, all_vids)
+        smap = stock_map(conn, all_vids)
         vrows_by_pid = {}
         for v in vrows:
             vrows_by_pid.setdefault(v["product_id"], []).append(v)
@@ -500,7 +488,7 @@ def catalog(request: Request, q: str = "", include_inactive: bool = False,
                     "attributes": attrs_map.get(v["variant_id"], {}),
                     "attr_display": disp_map.get(v["variant_id"], ""),
                     "price": v["price"], "effective_price": eff,
-                    "stock": stock_of(conn, v["variant_id"]),
+                    "stock": smap.get(v["variant_id"], 0),
                     "active": bool(v["active"]),
                     "models": models_map.get(v["variant_id"], []),
                     "barcodes": bc.get(v["variant_id"], [])})
@@ -529,13 +517,10 @@ def catalog(request: Request, q: str = "", include_inactive: bool = False,
                     filtered.append(p)
             out = filtered
         return out
-    finally:
-        conn.close()
 
 @router.put("/products/{pid}")
 def update_product(pid: int, body: ProductPatch, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         fields = body.model_dump(exclude_unset=True)
         if not fields:
             return {"ok": True}
@@ -543,20 +528,13 @@ def update_product(pid: int, body: ProductPatch, request: Request):
             _check_category(conn, fields["category_id"])
         if fields.get("brand_id") is not None:
             _check_brand(conn, fields["brand_id"])
-        cols = ", ".join(f"{k}=?" for k in fields)
-        args = list(fields.values()) + [pid]
-        cur = conn.execute(f"UPDATE Product SET {cols} WHERE product_id=?", args)
-        if cur.rowcount == 0:
-            raise HTTPException(404, "查無此商品")
+        update_by_id(conn, "Product", "product_id", pid, fields, "查無此商品")
         conn.commit()
         return {"ok": True}
-    finally:
-        conn.close()
 
 @router.put("/variants/{vid}")
 def update_variant(vid: int, body: VariantPatch, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         fields = body.model_dump(exclude_unset=True)
         has_attrs = "attributes" in fields
         attributes = fields.pop("attributes", None)
@@ -566,33 +544,23 @@ def update_variant(vid: int, body: VariantPatch, request: Request):
                 "SELECT 1 FROM Variant WHERE variant_id=?", (vid,)).fetchone():
             raise HTTPException(404, "查無此子產品")
         if fields:
-            cols = ", ".join(f"{k}=?" for k in fields)
-            args = list(fields.values()) + [vid]
-            conn.execute(f"UPDATE Variant SET {cols} WHERE variant_id=?", args)
+            update_by_id(conn, "Variant", "variant_id", vid, fields)
         if has_attrs:
             set_variant_attributes(conn, vid, cat, attributes)
         conn.commit()
         return {"ok": True}
-    finally:
-        conn.close()
 
 @router.put("/variants/{vid}/models")
 def set_variant_models(vid: int, body: ModelIdList, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
-        if not conn.execute("SELECT 1 FROM Variant WHERE variant_id=?",
-                           (vid,)).fetchone():
-            raise HTTPException(404, "查無此子產品")
+    with db_conn(request.app.state.db_path) as conn:
+        require_exists(conn, "Variant", "variant_id", vid, "查無此子產品")
         _set_variant_models(conn, vid, body.model_ids)
         conn.commit()
         return {"ok": True}
-    finally:
-        conn.close()
 
 @router.post("/products/{pid}/variants")
 def add_variant(pid: int, body: NewVariantIn, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         cat = _product_category(conn, pid)
         if cat is None and not conn.execute(
                 "SELECT 1 FROM Product WHERE product_id=?", (pid,)).fetchone():
@@ -611,27 +579,20 @@ def add_variant(pid: int, body: NewVariantIn, request: Request):
             codes.append(code)
         conn.commit()
         return {"variant_id": vid, "barcodes": codes}
-    finally:
-        conn.close()
 
 @router.delete("/barcodes/{code}")
 def delete_barcode(code: str, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         cur = conn.execute("DELETE FROM Barcode WHERE barcode=?", (code,))
         if cur.rowcount == 0:
             raise HTTPException(404, "查無此條碼")
         conn.commit()
         return {"ok": True}
-    finally:
-        conn.close()
 
 @router.delete("/variants/{vid}")
 def delete_variant(vid: int, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
-        if not conn.execute("SELECT 1 FROM Variant WHERE variant_id=?", (vid,)).fetchone():
-            raise HTTPException(404, "查無此子產品")
+    with db_conn(request.app.state.db_path) as conn:
+        require_exists(conn, "Variant", "variant_id", vid, "查無此子產品")
         if _has_records(conn, [vid]):
             raise HTTPException(409, "該子產品已有交易或庫存紀錄,無法刪除,請改用停用")
         conn.execute("DELETE FROM VariantAttribute WHERE variant_id=?", (vid,))
@@ -640,21 +601,17 @@ def delete_variant(vid: int, request: Request):
         conn.execute("DELETE FROM Variant WHERE variant_id=?", (vid,))
         conn.commit()
         return {"ok": True}
-    finally:
-        conn.close()
 
 @router.delete("/products/{pid}")
 def delete_product(pid: int, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
-        if not conn.execute("SELECT 1 FROM Product WHERE product_id=?", (pid,)).fetchone():
-            raise HTTPException(404, "查無此商品")
+    with db_conn(request.app.state.db_path) as conn:
+        require_exists(conn, "Product", "product_id", pid, "查無此商品")
         vids = [r["variant_id"] for r in conn.execute(
             "SELECT variant_id FROM Variant WHERE product_id=?", (pid,))]
         if _has_records(conn, vids):
             raise HTTPException(409, "該商品已有交易或庫存紀錄,無法刪除,請改用停用")
         if vids:
-            qs = ",".join("?" * len(vids))
+            qs = in_clause(vids)
             conn.execute(f"DELETE FROM VariantAttribute WHERE variant_id IN ({qs})", vids)
             conn.execute(f"DELETE FROM VariantModel WHERE variant_id IN ({qs})", vids)
             conn.execute(f"DELETE FROM Barcode WHERE variant_id IN ({qs})", vids)
@@ -662,5 +619,3 @@ def delete_product(pid: int, request: Request):
         conn.execute("DELETE FROM Product WHERE product_id=?", (pid,))
         conn.commit()
         return {"ok": True}
-    finally:
-        conn.close()

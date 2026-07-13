@@ -1,13 +1,9 @@
 import unittest, tempfile, os, sqlite3
 from lib.db import get_conn, init_db
 from lib import db_schema
+from base import ConnTestCase
 
-class TestSchema(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
-
+class TestSchema(ConnTestCase):
     def test_tables_exist(self):
         conn = get_conn(self.db)
         names = {r["name"] for r in conn.execute(

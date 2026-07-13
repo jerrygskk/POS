@@ -5,12 +5,10 @@
 """
 import os
 import sys
-import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from lib.db import get_conn, init_db
 from tools.import_excel import (
     split_earphone_brand, split_powerbank_spec, is_cable_length,
     normalize_connector, parse_cable, split_watch_glass, glass_brand_tags,
@@ -18,14 +16,7 @@ from tools.import_excel import (
     COL_CODE, COL_CATEGORY, COL_BRAND, COL_SPEC, COL_DESC, COL_CAT1, COL_CAT2,
     COL_PHONE_BRAND, COL_PHONE_MODEL, COL_NOTE,
 )
-
-
-def _raw(**kw):
-    base = {c: None for c in (
-        COL_CODE, COL_CATEGORY, COL_BRAND, COL_SPEC, COL_DESC, COL_CAT1,
-        COL_CAT2, COL_PHONE_BRAND, COL_PHONE_MODEL, COL_NOTE)}
-    base.update(kw)
-    return base
+from base import ConnTestCase, raw_row as _raw
 
 
 # ===================== 純函式 =====================
@@ -274,16 +265,7 @@ class TestCategoryAttrWrites(unittest.TestCase):
 
 # ===================== run_import 整合 =====================
 
-class TestRunImportIntegration(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
-        self.conn = get_conn(self.db)
-
-    def tearDown(self):
-        self.conn.close()
-
+class TestRunImportIntegration(ConnTestCase):
     def _records(self, rows):
         return [parse_row(_raw(**r)) for r in rows]
 

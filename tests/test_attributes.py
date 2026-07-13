@@ -1,15 +1,7 @@
-import unittest, tempfile, os
-from fastapi.testclient import TestClient
-from lib.db import init_db
-from api import create_app
+import unittest
+from base import ApiTestCase
 
-class TestAttributes(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
-        self.c = TestClient(create_app(self.db))
-
+class TestAttributes(ApiTestCase):
     def test_seed_common_fields(self):
         # 種子只留兩個共用欄:商品描述、顏色
         names = [f["name"] for f in self.c.get("/api/fields").json()]

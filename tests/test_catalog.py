@@ -1,22 +1,12 @@
-import unittest, tempfile, os
-from fastapi.testclient import TestClient
-from lib.db import init_db, get_conn
-from api import create_app
+import unittest
+from base import ApiTestCase
 
 
-class TestCatalog(unittest.TestCase):
+class TestCatalog(ApiTestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
-        self.c = TestClient(create_app(self.db))
-        self.cid = self.c.post("/api/categories",
-                               json={"name": "鋼化玻璃"}).json()["category_id"]
+        super().setUp()
         # 正規化後 select 值須為既有選項:先建專屬欄「規格」與選項
-        self.fid = self.c.post("/api/fields",
-            json={"name": "規格", "category_id": self.cid}).json()["field_id"]
-        for v in ("亮面", "霧面", "超亮", "防窺"):
-            self.c.post("/api/options", json={"field_id": self.fid, "value": v})
+        self.make_category_with_field("規格", options=("亮面", "霧面", "超亮", "防窺"))
 
     def _create(self):
         return self.c.post("/api/products", json={

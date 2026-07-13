@@ -1,18 +1,14 @@
 """玻璃規格模型:multi/tags 讀寫、tags 自動建選項、預設選項帶入、
 唯一索引擋重覆、v3→v4 migration。樣本為虛構資料,不含真實人名。"""
 import unittest, tempfile, os, sqlite3
-from fastapi.testclient import TestClient
 from lib.db import get_conn, init_db
 from lib import db_schema
-from api import create_app
+from base import ApiTestCase
 
 
-class TestMultiTagsApi(unittest.TestCase):
+class TestMultiTagsApi(ApiTestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
-        self.c = TestClient(create_app(self.db))
+        super().setUp()
         self.cid = self.c.post("/api/categories",
                                json={"name": "鋼化玻璃"}).json()["category_id"]
         # 規格 multi + 四基礎選項
@@ -36,10 +32,7 @@ class TestMultiTagsApi(unittest.TestCase):
         self.c.put(f"/api/fields/{self.layout}", json={"default_option_id": oid})
 
     def _create(self, attrs):
-        return self.c.post("/api/products", json={
-            "name": "膜", "category_id": self.cid, "default_price": 100,
-            "variants": [{"attributes": attrs,
-                          "barcodes": [{"barcode": "B1", "source": "store"}]}]}).json()
+        return self.create_product(attrs)
 
     def _tags_values(self):
         return {o["value"]

@@ -1,16 +1,9 @@
-import unittest, tempfile, os
-from fastapi.testclient import TestClient
-from lib.db import init_db, get_conn
-from api import create_app
+import unittest
+from lib.db import get_conn
+from base import ApiTestCase
 
 
-class TestSortApi(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
-        self.c = TestClient(create_app(self.db))
-
+class TestSortApi(ApiTestCase):
     def _add_cats(self, names):
         return [self.c.post("/api/categories", json={"name": n}).json()["category_id"]
                 for n in names]

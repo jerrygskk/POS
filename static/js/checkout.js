@@ -14,10 +14,10 @@ window.PosPages["page-checkout"] = {
     },
   },
   async mounted() {
-    try {
+    await this.guard(async () => {
       this.payments = await API.get("/api/payments");
       this.payment = this.payments[0];
-    } catch (e) { this.showError(e.message); }
+    });
     this.$refs.scan?.focus();
     this._refocus = () => setTimeout(() => {
       if (document.activeElement.tagName !== "INPUT" &&
@@ -27,7 +27,6 @@ window.PosPages["page-checkout"] = {
   },
   unmounted() { document.removeEventListener("click", this._refocus); },
   methods: {
-    attrText(row) { return window.fmtAttr(row); },
     addItem(r) {
       let price = r.price;
       if (price === null) {
@@ -46,10 +45,10 @@ window.PosPages["page-checkout"] = {
     async onScan() {
       const code = this.scanCode.trim();
       if (!code) return;
-      try {
+      await this.guard(async () => {  // 查無條碼:保留輸入
         this.addItem(await API.get("/api/barcode/" + encodeURIComponent(code)));
         this.scanCode = "";
-      } catch (e) { this.showError(e.message); }  // 查無條碼:保留輸入
+      });
     },
     async onSearch() {
       if (!this.searchQ.trim()) return;
@@ -57,7 +56,7 @@ window.PosPages["page-checkout"] = {
         encodeURIComponent(this.searchQ.trim()));
     },
     async checkout() {
-      try {
+      await this.guard(async () => {
         const r = await API.post("/api/sales", {
           payment: this.payment, order_discount: this.orderDiscount,
           paid: this.paid,
@@ -66,7 +65,7 @@ window.PosPages["page-checkout"] = {
         this.doneMsg = `結帳完成,找零 ${r.change} 元(交易編號 ${r.sale_id})`;
         this.cart = []; this.orderDiscount = 0; this.paid = 0;
         setTimeout(() => this.doneMsg = "", 5000);
-      } catch (e) { this.showError(e.message); }
+      });
     },
   },
 };

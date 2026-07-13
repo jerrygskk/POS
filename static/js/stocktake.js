@@ -7,7 +7,6 @@ window.PosPages["page-stocktake"] = {
   },
   async mounted() { await this.reload(); },
   methods: {
-    attrText(row) { return window.fmtAttr(row); },
     async reload() { this.sessions = await API.get("/api/stocktake"); },
     async openNew() {
       const r = await API.post("/api/stocktake", { operator: this.operator || null });
@@ -21,13 +20,13 @@ window.PosPages["page-stocktake"] = {
     async onScan() {
       const code = this.scanCode.trim();
       if (!code) return;
-      try {
+      await this.guard(async () => {
         const hit = await API.get("/api/barcode/" + encodeURIComponent(code));
         await API.post(`/api/stocktake/${this.current}/scan`,
                        { variant_id: hit.variant_id });
         this.detail = await API.get("/api/stocktake/" + this.current);
         this.scanCode = "";
-      } catch (e) { this.showError(e.message); }
+      });
     },
     async setCounted(it) {
       try {

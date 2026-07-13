@@ -1,16 +1,8 @@
-import unittest, tempfile, os
-from fastapi.testclient import TestClient
-from lib.db import init_db
-from api import create_app
+import unittest
+from base import ApiTestCase
 
 
-class TestCatalogApi(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
-        self.c = TestClient(create_app(self.db))
-
+class TestCatalogApi(ApiTestCase):
     # ---- 種類 CRUD ----
     def test_category_crud(self):
         cid = self.c.post("/api/categories", json={"name": "手機殼"}).json()["category_id"]

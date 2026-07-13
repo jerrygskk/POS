@@ -2,7 +2,7 @@ import json, io, csv
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from lib.db import get_conn
+from lib.db import db_conn
 from api.products import attrs_by_variant, display_attrs
 
 router = APIRouter(prefix="/api")
@@ -21,20 +21,16 @@ class SaleIn(BaseModel):
 
 @router.get("/payments")
 def payments(request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         row = conn.execute("SELECT value FROM Setting WHERE key='payments'").fetchone()
         return json.loads(row["value"])
-    finally:
-        conn.close()
 
 @router.post("/sales")
 def checkout(body: SaleIn, request: Request):
     total = sum(i.qty * i.unit_price - i.discount for i in body.items) - body.order_discount
     if total < 0:
         raise HTTPException(422, "折扣後金額不可為負")
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         # 停用 guard:任一變體或其款停用 → 擋掉,不寫入任何資料
         for i in body.items:
             row = conn.execute(
@@ -57,8 +53,6 @@ def checkout(body: SaleIn, request: Request):
                 "VALUES(?,?,'sale',?)", (i.variant_id, -i.qty, sale_id))
         conn.commit()   # 全部一次 commit=同一 transaction
         return {"sale_id": sale_id, "total": total, "change": body.paid - total}
-    finally:
-        conn.close()
 
 def _query_sales(conn, date_from, date_to, payment):
     sql = ("SELECT s.*, i.variant_id, i.qty, i.unit_price, i.discount, p.name "
@@ -73,8 +67,7 @@ def _query_sales(conn, date_from, date_to, payment):
 
 @router.get("/sales")
 def list_sales(request: Request, date_from: str = "", date_to: str = "", payment: str = ""):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         rows = _query_sales(conn, date_from, date_to, payment)
         vids = [r["variant_id"] for r in rows]
         attrs = attrs_by_variant(conn, vids)
@@ -89,14 +82,11 @@ def list_sales(request: Request, date_from: str = "", date_to: str = "", payment
                 "attr_display": disp.get(r["variant_id"], ""), "qty": r["qty"],
                 "unit_price": r["unit_price"], "discount": r["discount"]})
         return list(out.values())
-    finally:
-        conn.close()
 
 @router.get("/sales/summary")
 def summary(request: Request, date_from: str = "", date_to: str = "",
             payment: str = "", date: str = ""):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         # date 為舊參數(單日),保留相容;優先用 date_from/date_to 區間
         if date and not date_from and not date_to:
             date_from = date_to = date
@@ -109,13 +99,10 @@ def summary(request: Request, date_from: str = "", date_to: str = "",
         return {"count": sum(r["c"] for r in rows),
                 "total": sum(r["t"] or 0 for r in rows),
                 "by_payment": {r["payment"]: r["t"] for r in rows}}
-    finally:
-        conn.close()
 
 @router.get("/sales/export")
 def export_csv(request: Request, date_from: str = "", date_to: str = ""):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         buf = io.StringIO()
         w = csv.writer(buf)
         w.writerow(["交易編號","時間","付款方式","商品","屬性","數量","成交單價","單品折扣","整單折抵","應收"])
@@ -129,5 +116,3 @@ def export_csv(request: Request, date_from: str = "", date_to: str = ""):
         data = "﻿" + buf.getvalue()   # utf-8-sig 給 Excel
         return StreamingResponse(iter([data]), media_type="text/csv",
             headers={"Content-Disposition": "attachment; filename=sales.csv"})
-    finally:
-        conn.close()

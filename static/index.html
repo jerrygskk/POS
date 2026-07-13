@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="/css/pos.css?v=36">
+<link rel="stylesheet" href="/css/pos.css?v=37">
 </head>
 <body>
 <div id="app">
@@ -106,42 +106,8 @@
     <div class="step" :class="{locked: !form.category_id}">
       <div class="step-title">④ 規格</div>
       <div v-if="!fields.length" class="hint">此種類尚未設定規格欄。</div>
-      <div v-for="f in fields" :key="f.field_id" class="attr-row">
-        <!-- 複選:勾選框列 -->
-        <template v-if="f.field_type === 'multi'">
-          <div class="attr-name">{{ f.name }}</div>
-          <div class="chip-box">
-            <div class="chip-wrap">
-              <label v-for="o in optionsFor(f)" :key="o.option_id" class="chip"
-                     :class="{ on: form.attrs[f.name].includes(o.value) }">
-                <input type="checkbox" :value="o.value" v-model="form.attrs[f.name]">
-                {{ o.value }}
-              </label>
-              <span v-if="!optionsFor(f).length" class="hint">尚無選項</span>
-            </div>
-          </div>
-        </template>
-        <!-- 特性詞條:逗號輸入 + 既有詞條建議 -->
-        <label v-else-if="f.field_type === 'tags'">{{ f.name }}
-          <input v-model="form.attrs[f.name]" :list="'dl-' + f.field_id"
-                 placeholder="以逗號分隔,可自由新增">
-          <datalist :id="'dl-' + f.field_id">
-            <option v-for="o in (f.options || [])" :key="o.option_id"
-                    :value="o.value"></option>
-          </datalist>
-        </label>
-        <!-- 下拉選單 -->
-        <label v-else-if="f.field_type === 'select'">{{ f.name }}
-          <input :list="'dl-' + f.field_id" v-model="form.attrs[f.name]">
-          <datalist :id="'dl-' + f.field_id">
-            <option v-for="o in optionsFor(f)" :key="o.option_id" :value="o.value"></option>
-          </datalist>
-        </label>
-        <!-- 文字 -->
-        <label v-else>{{ f.name }}
-          <input v-model="form.attrs[f.name]">
-        </label>
-      </div>
+      <attr-fields :fields="fields" :options="fieldOptions" :attrs="form.attrs"
+                   :model-ids="form.model_ids" :show-empty-hint="true"></attr-fields>
     </div>
 
     <label>預設售價(可留空) <input type="number" v-model.number="form.price" min="0"></label>
@@ -297,42 +263,11 @@
                   </td>
                   <td>
                     <template v-if="editVariant && editVariant.variant_id === v.variant_id">
-                      <div v-for="f in (fieldsByCat[p.category_id] || [])" :key="f.field_id" class="attr-row">
-                        <template v-if="f.field_type === 'multi'">
-                          <div class="attr-name">{{ f.name }}</div>
-                          <div class="chip-box">
-                            <div class="chip-wrap">
-                              <label v-for="o in optionsFor(f, editVariant.model_ids)" :key="o.option_id" class="chip"
-                                     :class="{ on: editVariant.attrs[f.name].includes(o.value) }">
-                                <input type="checkbox" :value="o.value" v-model="editVariant.attrs[f.name]">
-                                {{ o.value }}
-                              </label>
-                            </div>
-                          </div>
-                        </template>
-                        <template v-else-if="f.field_type === 'tags'">
-                          <div class="attr-name">{{ f.name }}</div>
-                          <div class="chip-box">
-                            <div class="chip-wrap">
-                              <button type="button" v-for="o in (f.options || [])" :key="o.option_id" class="chip"
-                                      :class="{ on: tagHas(editVariant.attrs[f.name], o.value) }"
-                                      @click="toggleTag(editVariant.attrs, f.name, o.value)">{{ o.value }}</button>
-                            </div>
-                            <input v-model="editVariant.attrs[f.name]" placeholder="以逗號分隔,可自由新增">
-                          </div>
-                        </template>
-                        <label v-else-if="f.field_type === 'select'">{{ f.name }}
-                          <input :list="'edl-' + f.field_id" v-model="editVariant.attrs[f.name]">
-                          <datalist :id="'edl-' + f.field_id">
-                            <option v-for="o in optionsFor(f, editVariant.model_ids)" :key="o.option_id" :value="o.value"></option>
-                          </datalist>
-                        </label>
-                        <label v-else>{{ f.name }}
-                          <input v-model="editVariant.attrs[f.name]">
-                        </label>
-                      </div>
+                      <attr-fields :fields="fieldsByCat[p.category_id] || []" :options="fieldOptions"
+                                   :attrs="editVariant.attrs" :model-ids="editVariant.model_ids"
+                                   tags-style="chips"></attr-fields>
                     </template>
-                    <template v-else>{{ attrText(v) }}</template>
+                    <template v-else>{{ attrText(v, '（無規格）') }}</template>
                   </td>
                   <td :class="{neg: v.stock < 0}">{{ v.stock }}</td>
                   <td>
@@ -369,13 +304,13 @@
                   <td>{{ v.active ? '啟用' : '已停用' }}</td>
                   <td>
                     <template v-if="editVariant && editVariant.variant_id === v.variant_id">
-                      <button class="primary" @click="saveVariant">儲存</button>
-                      <button @click="editVariant = null">取消</button>
+                      <button class="btn-sm primary" @click="saveVariant">儲存</button>
+                      <button class="btn-sm" @click="editVariant = null">取消</button>
                     </template>
                     <template v-else>
-                      <button @click="startEditVariant(p, v)">編輯</button>
-                      <button @click="toggleVariantActive(p, v)">{{ v.active ? '停用' : '啟用' }}</button>
-                      <button @click="deleteVariant(p, v)">刪除</button>
+                      <button class="btn-sm" @click="startEditVariant(p, v)">編輯</button>
+                      <button class="btn-sm" @click="toggleVariantActive(p, v)">{{ v.active ? '停用' : '啟用' }}</button>
+                      <button class="btn-sm" @click="deleteVariant(p, v)">刪除</button>
                     </template>
                   </td>
                 </tr>
@@ -385,36 +320,8 @@
                       <h3>新增子產品</h3>
                       <div class="spec-box">
                       <div class="step-title">規格</div>
-                      <div v-for="f in (fieldsByCat[p.category_id] || [])" :key="f.field_id" class="attr-row">
-                        <template v-if="f.field_type === 'multi'">
-                          <div class="attr-name">{{ f.name }}</div>
-                          <div class="chip-box">
-                            <div class="chip-wrap">
-                              <label v-for="o in optionsFor(f, newVariant.model_ids)" :key="o.option_id" class="chip"
-                                     :class="{ on: newVariant.attrs[f.name].includes(o.value) }">
-                                <input type="checkbox" :value="o.value" v-model="newVariant.attrs[f.name]">
-                                {{ o.value }}
-                              </label>
-                            </div>
-                          </div>
-                        </template>
-                        <label v-else-if="f.field_type === 'tags'">{{ f.name }}
-                          <input v-model="newVariant.attrs[f.name]" :list="'ndl-' + f.field_id"
-                                 placeholder="以逗號分隔,可自由新增">
-                          <datalist :id="'ndl-' + f.field_id">
-                            <option v-for="o in (f.options || [])" :key="o.option_id" :value="o.value"></option>
-                          </datalist>
-                        </label>
-                        <label v-else-if="f.field_type === 'select'">{{ f.name }}
-                          <input :list="'ndl-' + f.field_id" v-model="newVariant.attrs[f.name]">
-                          <datalist :id="'ndl-' + f.field_id">
-                            <option v-for="o in optionsFor(f, newVariant.model_ids)" :key="o.option_id" :value="o.value"></option>
-                          </datalist>
-                        </label>
-                        <label v-else>{{ f.name }}
-                          <input v-model="newVariant.attrs[f.name]">
-                        </label>
-                      </div>
+                      <attr-fields :fields="fieldsByCat[p.category_id] || []" :options="fieldOptions"
+                                   :attrs="newVariant.attrs" :model-ids="newVariant.model_ids"></attr-fields>
                       </div>
                       <div class="step-title">適用手機型號(可略過)</div>
                       <model-picker :models="models" v-model:model_ids="newVariant.model_ids"></model-picker>
@@ -446,7 +353,7 @@
   <!-- 卡片一:品項名稱(維護 Category) -->
   <div class="card">
     <div class="card-head"><h3>品項名稱</h3>
-      <button class="maint-btn" @click="saveAll('categories')">儲存修改</button></div>
+      <button class="primary" @click="saveAll('categories')">儲存修改</button></div>
     <sortable-list :items="categories" item-key="category_id"
                    @save="saveSort('categories', $event)">
       <template #row="{ item: c }">
@@ -457,15 +364,15 @@
       </template>
     </sortable-list>
     <div class="inline-add">
-      <input v-model="newCat" placeholder="新配件種類名稱" @keyup.enter="addCategory">
+      <input v-model="newItem.categories" placeholder="新配件種類名稱" @keyup.enter="addItem('categories')">
       <input class="w60" v-model="newSeq.categories" placeholder="序號">
-      <button class="primary" @click="addCategory">新增</button>
+      <button class="primary" @click="addItem('categories')">新增</button>
     </div>
 
     <!-- 種類規格欄設定(同畫面展開) -->
     <div v-if="openCat" class="detail-panel">
       <div class="card-head"><div class="step-title">「{{ openCatName }}」的規格欄</div>
-        <button class="maint-btn" @click="saveAllFields">儲存修改</button></div>
+        <button class="primary" @click="saveAllFields">儲存修改</button></div>
       <small class="hint">這些欄位會出現在此種類的建檔畫面。</small>
       <div v-for="f in catFields" :key="f.field_id" class="maint-row">
         <input class="name" v-model="f.name">
@@ -487,7 +394,7 @@
           <span v-for="o in (catOptions[f.field_id] || [])" :key="o.option_id"
                 class="opt-chip" :class="{ inactive: !o.active }">{{ o.value }}
             <span class="hint">（{{ optModelLabel(o) }}）</span>
-            <button class="maint-btn chip-btn" @click="renameOption(f, o)">修改</button>
+            <button class="primary" @click="renameOption(f, o)">修改</button>
             <a class="chip-act" @click="openOptModels(f, o)">限定型號</a>
             <a class="chip-act" @click="toggleOption(f, o)">{{ o.active ? '停用' : '啟用' }}</a>
             <a class="chip-act" @click="deleteOption(f, o)">刪除</a></span>
@@ -542,7 +449,7 @@
   <!-- 卡片二:廠牌 -->
   <div class="card">
     <div class="card-head"><h3>廠牌</h3>
-      <button class="maint-btn" @click="saveAll('brands')">儲存修改</button></div>
+      <button class="primary" @click="saveAll('brands')">儲存修改</button></div>
     <sortable-list :items="brands" item-key="brand_id"
                    @save="saveSort('brands', $event)">
       <template #row="{ item: b }">
@@ -553,9 +460,9 @@
       </template>
     </sortable-list>
     <div class="inline-add">
-      <input v-model="newBrand" placeholder="新廠牌名稱" @keyup.enter="addBrand">
+      <input v-model="newItem.brands" placeholder="新廠牌名稱" @keyup.enter="addItem('brands')">
       <input class="w60" v-model="newSeq.brands" placeholder="序號">
-      <button class="primary" @click="addBrand">新增</button>
+      <button class="primary" @click="addItem('brands')">新增</button>
     </div>
 
     <div v-if="openBrand" class="detail-panel">
@@ -571,7 +478,7 @@
   <!-- 卡片三:手機品牌與型號 -->
   <div class="card">
     <div class="card-head"><h3>手機品牌</h3>
-      <button class="maint-btn" @click="saveAll('phoneBrands')">儲存修改</button></div>
+      <button class="primary" @click="saveAll('phoneBrands')">儲存修改</button></div>
     <sortable-list :items="phoneBrands" item-key="phone_brand_id"
                    @save="saveSort('phoneBrands', $event)">
       <template #row="{ item: pb }">
@@ -581,14 +488,14 @@
       </template>
     </sortable-list>
     <div class="inline-add">
-      <input v-model="newPhoneBrand" placeholder="新手機品牌名稱(如 iPhone)"
-             @keyup.enter="addPhoneBrand">
+      <input v-model="newItem.phoneBrands" placeholder="新手機品牌名稱(如 iPhone)"
+             @keyup.enter="addItem('phoneBrands')">
       <input class="w60" v-model="newSeq.phoneBrands" placeholder="序號">
-      <button class="primary" @click="addPhoneBrand">新增</button>
+      <button class="primary" @click="addItem('phoneBrands')">新增</button>
     </div>
 
     <div class="card-head" style="margin-top:16px"><h3>手機型號</h3>
-      <button class="maint-btn" @click="saveAll('models')">儲存修改</button></div>
+      <button class="primary" @click="saveAll('models')">儲存修改</button></div>
     <div v-for="g in modelGroups" :key="g.brand" class="model-group">
       <div class="grp-title">{{ g.brand }}</div>
       <sortable-list :items="g.items" item-key="model_id"
@@ -617,16 +524,18 @@
 
 </div>
 </template>
-<script src="/js/vue.global.prod.js?v=36"></script>
-<script src="/js/api.js?v=36"></script>
-<script src="/js/checkout.js?v=36"></script>
-<script src="/js/receive.js?v=36"></script>
-<script src="/js/stocktake.js?v=36"></script>
-<script src="/js/records.js?v=36"></script>
-<script src="/js/catalog.js?v=36"></script>
-<script src="/js/sortable.js?v=36"></script>
-<script src="/js/modelpicker.js?v=36"></script>
-<script src="/js/settings.js?v=36"></script>
-<script src="/js/app.js?v=36"></script>
+<script src="/js/vue.global.prod.js?v=37"></script>
+<script src="/js/api.js?v=37"></script>
+<script src="/js/catalogfields.js?v=37"></script>
+<script src="/js/checkout.js?v=37"></script>
+<script src="/js/receive.js?v=37"></script>
+<script src="/js/stocktake.js?v=37"></script>
+<script src="/js/records.js?v=37"></script>
+<script src="/js/catalog.js?v=37"></script>
+<script src="/js/sortable.js?v=37"></script>
+<script src="/js/modelpicker.js?v=37"></script>
+<script src="/js/attrfields.js?v=37"></script>
+<script src="/js/settings.js?v=37"></script>
+<script src="/js/app.js?v=37"></script>
 </body>
 </html>

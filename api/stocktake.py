@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
-from lib.db import get_conn
+from lib.db import db_conn
 from api.products import stock_of, attrs_by_variant, display_attrs
 
 router = APIRouter(prefix="/api")
@@ -18,23 +18,17 @@ class SetIn(BaseModel):
 
 @router.post("/stocktake")
 def open_session(body: SessionIn, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         cur = conn.execute("INSERT INTO StocktakeSession(operator,note) VALUES(?,?)",
                            (body.operator, body.note))
         conn.commit()
         return {"session_id": cur.lastrowid}
-    finally:
-        conn.close()
 
 @router.get("/stocktake")
 def list_sessions(request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         return [dict(r) for r in conn.execute(
             "SELECT * FROM StocktakeSession ORDER BY session_id DESC LIMIT 50")]
-    finally:
-        conn.close()
 
 def _require_open(conn, sid):
     row = conn.execute("SELECT status FROM StocktakeSession WHERE session_id=?",
@@ -46,8 +40,7 @@ def _require_open(conn, sid):
 
 @router.post("/stocktake/{sid}/scan")
 def scan(sid: int, body: ScanIn, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         _require_open(conn, sid)
         row = conn.execute(
             "SELECT * FROM StocktakeItem WHERE session_id=? AND variant_id=?",
@@ -65,13 +58,10 @@ def scan(sid: int, body: ScanIn, request: Request):
                 "VALUES(?,?,?,?)", (sid, body.variant_id, system, counted))
         conn.commit()
         return {"system_qty": system, "counted_qty": counted}
-    finally:
-        conn.close()
 
 @router.put("/stocktake/{sid}/items/{variant_id}")
 def set_counted(sid: int, variant_id: int, body: SetIn, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         _require_open(conn, sid)
         cur = conn.execute(
             "UPDATE StocktakeItem SET counted_qty=? WHERE session_id=? AND variant_id=?",
@@ -80,13 +70,10 @@ def set_counted(sid: int, variant_id: int, body: SetIn, request: Request):
             raise HTTPException(404, "此變體尚未進入本次盤點,請先掃描")
         conn.commit()
         return {"ok": True}
-    finally:
-        conn.close()
 
 @router.get("/stocktake/{sid}")
 def detail(sid: int, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         rows = conn.execute(
             "SELECT si.*, p.name FROM StocktakeItem si "
             "JOIN Variant v ON si.variant_id=v.variant_id "
@@ -107,13 +94,10 @@ def detail(sid: int, request: Request):
         if not sess:
             raise HTTPException(404, "查無此盤點單")
         return {**dict(sess), "items": items}
-    finally:
-        conn.close()
 
 @router.post("/stocktake/{sid}/close")
 def close(sid: int, request: Request):
-    conn = get_conn(request.app.state.db_path)
-    try:
+    with db_conn(request.app.state.db_path) as conn:
         _require_open(conn, sid)
         for r in conn.execute(
                 "SELECT variant_id, counted_qty - system_qty AS diff "
@@ -126,5 +110,3 @@ def close(sid: int, request: Request):
                      "ended_at=datetime('now','localtime') WHERE session_id=?", (sid,))
         conn.commit()
         return {"ok": True}
-    finally:
-        conn.close()

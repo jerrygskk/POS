@@ -16,6 +16,7 @@ from tools.import_excel import (
     COL_CODE, COL_CATEGORY, COL_BRAND, COL_SPEC, COL_DESC, COL_CAT1, COL_CAT2,
     COL_PHONE_BRAND, COL_PHONE_MODEL, COL_NOTE,
 )
+from base import raw_row as _raw
 
 
 class TestClean(unittest.TestCase):
@@ -137,15 +138,6 @@ class TestSplitModels(unittest.TestCase):
 
     def test_custom_brand_prefix(self):
         self.assertEqual(split_models("14", "Galaxy")[0], ["Galaxy 14"])
-
-
-def _raw(**kw):
-    """組一列 Excel 原值 dict(未提供的欄為 None)。"""
-    base = {c: None for c in (
-        COL_CODE, COL_CATEGORY, COL_BRAND, COL_SPEC, COL_DESC, COL_CAT1,
-        COL_CAT2, COL_PHONE_BRAND, COL_PHONE_MODEL, COL_NOTE)}
-    base.update(kw)
-    return base
 
 
 class TestParseRow(unittest.TestCase):

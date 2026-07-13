@@ -1,14 +1,9 @@
-import unittest, tempfile, os, datetime
-from fastapi.testclient import TestClient
-from lib.db import init_db
-from api import create_app
+import unittest, datetime
+from base import ApiTestCase
 
-class TestSales(unittest.TestCase):
+class TestSales(ApiTestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
-        self.c = TestClient(create_app(self.db))
+        super().setUp()
         cid = self.c.post("/api/categories", json={"name": "膜類"}).json()["category_id"]
         r = self.c.post("/api/products", json={"name": "膜", "category_id": cid,
             "default_price": 500,

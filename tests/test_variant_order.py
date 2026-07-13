@@ -1,18 +1,13 @@
 """資料庫頁變體列排序:依材質組合分節。
 單材質依材質序、複合材質排全部單材質後;同材質組合內素身先、帶詞條依詞條序跟在後。
 樣本皆虛構,不含真實人名。"""
-import unittest, tempfile, os
-from fastapi.testclient import TestClient
-from lib.db import init_db
-from api import create_app
+import unittest
+from base import ApiTestCase
 
 
-class TestVariantOrder(unittest.TestCase):
+class TestVariantOrder(ApiTestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
-        self.c = TestClient(create_app(self.db))
+        super().setUp()
         self.cid = self.c.post("/api/categories",
             json={"name": "鋼化玻璃"}).json()["category_id"]
         # multi 欄「規格」:亮面/霧面/藍光/防窺(建立順序=sort)
