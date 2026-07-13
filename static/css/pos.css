@@ -132,7 +132,8 @@ tr.inactive > td { opacity: 0.55; }
 .drag-handle:active { cursor: grabbing; }
 .seq-cell { width: 48px; text-align: center; border: 1px dashed var(--accent);
   border-radius: 6px; padding: 4px 2px; }
-.maint-row.drop-target { border-top: 2px solid var(--accent); }
+.maint-row.drop-before { border-top: 2px solid var(--accent); }
+.maint-row.drop-after { border-bottom: 2px solid var(--accent); }
 .detail-panel { margin-top: 14px; padding: 14px; background: var(--panel);
   border-radius: 8px; border: 1px solid var(--hover); }
 .grp-title { font-weight: bold; margin: 8px 0 2px; color: var(--text-2); }

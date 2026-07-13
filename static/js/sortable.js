@@ -24,8 +24,17 @@ window.PosComponents["sortable-list"] = {
       const row = ev.target.closest(".maint-row");
       if (row) ev.dataTransfer.setDragImage(row, 20, 20);
     },
-    onDrop(i) {
-      if (this.dragIdx !== null) this.moveRow(this.dragIdx, i);
+    onDragOver(i, ev) {
+      // 游標在列上半=插到本列前(insertPos=i),下半=插到本列後(i+1)
+      const r = ev.currentTarget.getBoundingClientRect();
+      this.overIdx = ev.clientY < r.top + r.height / 2 ? i : i + 1;
+    },
+    onDrop() {
+      if (this.dragIdx !== null && this.overIdx !== null) {
+        // 先移除 src 再插入,src 在插入點之前時目標索引要 -1
+        const dst = this.overIdx > this.dragIdx ? this.overIdx - 1 : this.overIdx;
+        this.moveRow(this.dragIdx, dst);
+      }
       this.dragIdx = null; this.overIdx = null;
     },
     onSeqCommit(i, ev) {
@@ -44,9 +53,11 @@ window.PosComponents["sortable-list"] = {
   template: `
   <div>
     <div v-for="(it, i) in rows" :key="it[itemKey]" class="maint-row"
-         :class="{ inactive: !it.active, 'drop-target': overIdx === i }"
-         @dragover.prevent="overIdx = i" @dragleave="overIdx === i && (overIdx = null)"
-         @drop.prevent="onDrop(i)">
+         :class="{ inactive: !it.active, 'drop-before': overIdx === i,
+                   'drop-after': overIdx === i + 1 && i === rows.length - 1 }"
+         @dragover.prevent="onDragOver(i, $event)"
+         @dragleave="(overIdx === i || overIdx === i + 1) && (overIdx = null)"
+         @drop.prevent="onDrop()">
       <span class="drag-handle" draggable="true" title="按住拖拉調整排序"
             @dragstart="onDragStart(i, $event)" @dragend="dragIdx = null; overIdx = null">⠿</span>
       <input class="seq-cell" :value="i + 1" title="輸入序號後按 Enter 可搬移"
