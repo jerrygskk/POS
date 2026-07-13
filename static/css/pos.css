@@ -27,7 +27,7 @@ table { width: 100%; border-collapse: collapse; background: #fff; }
 th, td { border: 1px solid #d1d1d6; padding: 8px 10px; text-align: left; }
 
 /* ── 按鈕基準:一般鈕(白底細框)/primary(墨藍);min-width 80px 保持等寬,
-      小型鈕(btn-sm/chip/chip-btn/bc-del/表格操作鈕)歸零 ── */
+      小型鈕(btn-sm/chip/表格操作鈕)歸零 ── */
 button { font-size: 15px; padding: 8px 16px; border-radius: 8px;
   border: 1px solid #c6c6c8; background: #fff; color: #1c1c1e; cursor: pointer;
   font-family: inherit; min-width: 80px; }
@@ -76,8 +76,6 @@ button:focus-visible { outline: 2px solid #8fa8c8; outline-offset: 1px; }
 .attr-row input { width: 100%; max-width: 280px; }
 .create-form > label input, .create-form > label select { max-width: 280px; }
 .attr-name { font-weight: bold; margin: 0; }
-.chk-inline { display: flex; flex-wrap: wrap; gap: 6px 16px; }
-.chk-inline .chk { white-space: nowrap; }
 
 .w120 { width: 120px; } .w160 { width: 160px; }
 .chk { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -91,10 +89,6 @@ tr.inactive > td { opacity: 0.55; }
 .bc-add-btns { display: flex; gap: 6px; }
 .bc-tag { color: #636366; font-size: 12px; }
 .bc-more { color: #636366; font-size: 12px; margin-left: 2px; }
-.bc-del { color: #c0392b; border: none; background: none; cursor: pointer;
-  font-size: 13px; padding: 0 4px; min-width: 0; }
-.bc-del:hover { text-decoration: underline; }
-.bc-gen { font-size: 13px; padding: 2px 10px; min-width: 0; }
 .bc-err { color: #e74c3c; font-size: 13px; margin-top: 4px; white-space: normal; }
 
 /* 設定頁維護卡片 */

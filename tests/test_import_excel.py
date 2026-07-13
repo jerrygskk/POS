@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.import_excel import (
     normalize_brand, split_models, parse_row, product_key, product_name, clean,
+    close_unbalanced_parens,
     glass_spec, glass_layout, glass_attrs,
     GLASS_SPEC_FIELD, GLASS_TAGS_FIELD, GLASS_LAYOUT_FIELD,
     COL_CODE, COL_CATEGORY, COL_BRAND, COL_SPEC, COL_DESC, COL_CAT1, COL_CAT2,
@@ -24,6 +25,29 @@ class TestClean(unittest.TestCase):
         self.assertIsNone(clean("   "))
         self.assertIsNone(clean("nan"))
         self.assertEqual(clean(123), "123")
+
+    def test_integer_float_no_decimal(self):
+        # 商品編碼/條碼被 Excel 讀成整數值的 float,不可帶「.0」
+        self.assertEqual(clean(4711229542344.0), "4711229542344")
+        self.assertEqual(clean(20.0), "20")
+        # 真正有小數的值保留(非條碼欄,不強轉)
+        self.assertEqual(clean(6.1), "6.1")
+
+
+class TestCloseParens(unittest.TestCase):
+    def test_missing_right(self):
+        self.assertEqual(close_unbalanced_parens("磁吸(附掛環扣"), "磁吸(附掛環扣)")
+
+    def test_balanced_noop(self):
+        self.assertEqual(close_unbalanced_parens("磁吸(附掛環扣)"), "磁吸(附掛環扣)")
+        self.assertEqual(close_unbalanced_parens("無括號"), "無括號")
+
+    def test_nested_missing(self):
+        self.assertEqual(close_unbalanced_parens("A(B(C"), "A(B(C))")
+
+    def test_extra_right_untouched(self):
+        # 多餘右括號不屬本函式職責,不應亂動
+        self.assertEqual(close_unbalanced_parens("A)"), "A)")
 
 
 class TestNormalizeBrand(unittest.TestCase):
@@ -68,6 +92,13 @@ class TestSplitModels(unittest.TestCase):
         self.assertEqual(split_models("iPhone17 ProMax")[0], ["iPhone 17 Pro Max"])
         self.assertEqual(split_models("iPhone17promax")[0], ["iPhone 17 Pro Max"])
         self.assertEqual(split_models("iPhone17Air")[0], ["iPhone 17 Air"])
+
+    def test_fullwidth_paren_size(self):
+        # 尺寸括號用全形（）也要能去除,型號正常拆解(半形已有 test_size_paren 涵蓋)
+        self.assertEqual(split_models("iPhone14（6.1）")[0], ["iPhone 14"])
+        self.assertEqual(
+            split_models("iPhone14/13/13pro（6.1）共用")[0],
+            ["iPhone 14", "iPhone 13", "iPhone 13 Pro"])
 
     def test_split_with_prefix_completion(self):
         self.assertEqual(

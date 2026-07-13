@@ -46,6 +46,19 @@ class TestSales(unittest.TestCase):
         self.assertEqual(s["count"], 2)
         self.assertEqual(s["by_payment"]["現金"], 1000)
 
+    def test_summary_date_range_and_payment(self):
+        # 小結支援 date_from/date_to 區間與付款方式過濾(與明細清單一致)
+        self._sale(); self._sale(payment="刷卡")
+        today = datetime.date.today().isoformat()
+        tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+        s = self.c.get(f"/api/sales/summary?date_from={today}&date_to={tomorrow}").json()
+        self.assertEqual(s["count"], 2)
+        # 只算現金
+        s2 = self.c.get(
+            f"/api/sales/summary?date_from={today}&date_to={tomorrow}&payment=現金").json()
+        self.assertEqual(s2["count"], 1)
+        self.assertEqual(s2["total"], 1000)
+
     def test_export_csv(self):
         self._sale()
         r = self.c.get("/api/sales/export")

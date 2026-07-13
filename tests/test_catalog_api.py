@@ -37,6 +37,17 @@ class TestCatalogApi(unittest.TestCase):
         self.assertEqual(self.c.delete(f"/api/categories/{cid}").status_code, 200)
         self.assertNotIn(cid, [x["category_id"] for x in self.c.get("/api/categories?all=1").json()])
 
+    def test_category_delete_with_default_option(self):
+        # 種類專屬 select 欄設了預設選項:刪種類須先解除 default_option_id 參照,
+        # 否則刪選項時觸發 FK 循環參照回 500(回歸測試)
+        cid = self.c.post("/api/categories", json={"name": "有預設選項"}).json()["category_id"]
+        fid = self.c.post("/api/fields", json={"name": "版型", "category_id": cid}).json()["field_id"]
+        self.c.post("/api/options", json={"field_id": fid, "value": "亮面"})
+        oid = self.c.get(f"/api/options?field_id={fid}").json()[0]["option_id"]
+        self.c.patch(f"/api/fields/{fid}", json={"default_option_id": oid})
+        self.assertEqual(self.c.delete(f"/api/categories/{cid}").status_code, 200)
+        self.assertNotIn(cid, [x["category_id"] for x in self.c.get("/api/categories?all=1").json()])
+
     def test_build_with_inactive_category_422(self):
         cid = self.c.post("/api/categories", json={"name": "停用種類"}).json()["category_id"]
         self.c.patch(f"/api/categories/{cid}", json={"active": 0})
@@ -172,6 +183,17 @@ class TestCatalogApi(unittest.TestCase):
         mid = self.c.post("/api/models", json={"phone_brand_id": pbid, "name": "15"}).json()["model_id"]
         self.c.post("/api/products", json={"name": "殼", "category_id": cid,
             "variants": [{"attributes": {}, "model_ids": [mid], "barcodes": []}]})
+        self.assertEqual(self.c.delete(f"/api/models/{mid}").status_code, 409)
+
+    def test_model_delete_with_option_binding_409(self):
+        # 選項限定型號(特別色)也算參照,刪型號須回 409 而非 500(回歸測試)
+        cid = self.c.post("/api/categories", json={"name": "手機殼"}).json()["category_id"]
+        pbid = self._add_phone_brand("iPhone")
+        mid = self.c.post("/api/models", json={"phone_brand_id": pbid, "name": "15"}).json()["model_id"]
+        fid = self.c.post("/api/fields", json={"name": "顏色A", "category_id": cid}).json()["field_id"]
+        self.c.post("/api/options", json={"field_id": fid, "value": "限定色"})
+        oid = self.c.get(f"/api/options?field_id={fid}").json()[0]["option_id"]
+        self.c.put(f"/api/options/{oid}/models", json={"model_ids": [mid]})
         self.assertEqual(self.c.delete(f"/api/models/{mid}").status_code, 409)
 
     # ---- categories/{id}/fields 專屬+共用合併 ----

@@ -30,9 +30,15 @@ window.PosPages["page-stocktake"] = {
       } catch (e) { this.showError(e.message); }
     },
     async setCounted(it) {
-      await API.put(`/api/stocktake/${this.current}/items/${it.variant_id}`,
-                    { counted_qty: it.counted_qty });
-      this.detail = await API.get("/api/stocktake/" + this.current);
+      try {
+        await API.put(`/api/stocktake/${this.current}/items/${it.variant_id}`,
+                      { counted_qty: it.counted_qty });
+        this.detail = await API.get("/api/stocktake/" + this.current);
+      } catch (e) {
+        this.showError(e.message);
+        // 寫入失敗:重新載入以還原畫面上未儲存的輸入值
+        this.detail = await API.get("/api/stocktake/" + this.current);
+      }
     },
     async close() {
       const diffs = this.detail.items.filter(i => i.diff !== 0);

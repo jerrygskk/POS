@@ -16,7 +16,7 @@ window.PosPages["page-records"] = {
       const q = `date_from=${this.dateFrom}&date_to=${this.dateTo}` +
                 (this.payment ? `&payment=${encodeURIComponent(this.payment)}` : "");
       this.sales = await API.get("/api/sales?" + q);
-      this.summary = await API.get("/api/sales/summary?date=" + this.dateFrom);
+      this.summary = await API.get("/api/sales/summary?" + q);
     },
     exportCsv() {
       window.open(`/api/sales/export?date_from=${this.dateFrom}&date_to=${this.dateTo}`);

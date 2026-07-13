@@ -126,10 +126,19 @@ class TestCableParse(unittest.TestCase):
         self.assertEqual(info["接頭"], "Lightning")
         self.assertEqual(info["特性詞條"], ["5A"])
 
-    def test_unknown_connector_warns(self):
+    def test_unknown_connector_to_tags(self):
+        # 無法辨識的接頭怪值:不污染「接頭」欄,改入特性詞條並警告
         info = parse_cable("MicroUSB", "50公分")
-        self.assertEqual(info["接頭"], "MicroUSB")
+        self.assertIsNone(info["接頭"])
+        self.assertEqual(info["特性詞條"], ["MicroUSB"])
+        self.assertEqual(info["長度"], "50公分")
         self.assertEqual(len(info["warnings"]), 1)
+
+    def test_unknown_connector_with_prefix_to_tags(self):
+        # 前綴詞條照舊 + 怪值核心也進詞條
+        info = parse_cable("5A 怪接頭XYZ", "50公分")
+        self.assertIsNone(info["接頭"])
+        self.assertEqual(info["特性詞條"], ["5A", "怪接頭XYZ"])
 
 
 class TestWatchGlass(unittest.TestCase):
@@ -222,6 +231,14 @@ class TestCategoryAttrWrites(unittest.TestCase):
         self.assertEqual(opts, [("規格", "4代 CC"), ("顏色", "柔霧白")])
 
     def test_powerbank_color_from_cat1_priority(self):
+        # 規格含「-」會拆出顏色(柔霧白),但分類1(奶茶)須優先蓋過,真正驗到優先權分支
+        opts, _, _ = self._writes(
+            {COL_CODE: "X", COL_CATEGORY: "行動電源",
+             COL_SPEC: "4代 CC-柔霧白", COL_CAT1: "奶茶"})
+        self.assertEqual(opts, [("規格", "4代 CC"), ("顏色", "奶茶")])
+
+    def test_powerbank_color_cat1_when_spec_no_color(self):
+        # 規格不含「-」→ 拆不出顏色,退回用分類1
         opts, _, _ = self._writes(
             {COL_CODE: "X", COL_CATEGORY: "行動電源",
              COL_SPEC: "MAGO Qi2 10000mAh", COL_CAT1: "奶茶"})

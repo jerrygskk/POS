@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="/css/pos.css?v=35">
+<link rel="stylesheet" href="/css/pos.css?v=36">
 </head>
 <body>
 <div id="app">
@@ -38,7 +38,8 @@
         <td>{{ it.name }}</td>
         <td>{{ attrText(it) }}</td>
         <td><input type="number" v-model.number="it.unit_price" min="0" class="w80"></td>
-        <td><input type="number" v-model.number="it.qty" min="1" class="w60"></td>
+        <td><input type="number" v-model.number="it.qty" min="1" class="w60"
+                   @change="it.qty = Math.max(1, Math.floor(it.qty) || 1)"></td>
         <td><input type="number" v-model.number="it.discount" min="0" class="w80"></td>
         <td>{{ it.qty * it.unit_price - it.discount }}</td>
         <td><button @click="cart.splice(i,1)">✕</button></td>
@@ -52,7 +53,7 @@
     </label>
     <div class="total">應收 {{ total }} 元</div>
     <label>實收 <input type="number" v-model.number="paid" min="0" class="w100"></label>
-    <div class="total">找零 {{ Math.max(0, paid - total) }} 元</div>
+    <div class="total">找零 {{ Math.max(0, (paid || 0) - total) }} 元</div>
     <button class="primary" :disabled="!cart.length || paid < total"
             @click="checkout">結帳</button>
   </div>
@@ -182,7 +183,7 @@
         <td>{{ it.system_qty }}</td>
         <td><input type="number" v-model.number="it.counted_qty" min="0" class="w80"
                    :disabled="detail.status!=='open'" @change="setCounted(it)"></td>
-        <td :class="{neg: it.diff !== 0}">{{ it.diff > 0 ? '+' + it.diff : it.diff }}</td>
+        <td :class="{neg: it.diff < 0}">{{ it.diff > 0 ? '+' + it.diff : it.diff }}</td>
       </tr></tbody>
     </table>
   </div>
@@ -616,16 +617,16 @@
 
 </div>
 </template>
-<script src="/js/vue.global.prod.js?v=35"></script>
-<script src="/js/api.js?v=35"></script>
-<script src="/js/checkout.js?v=35"></script>
-<script src="/js/receive.js?v=35"></script>
-<script src="/js/stocktake.js?v=35"></script>
-<script src="/js/records.js?v=35"></script>
-<script src="/js/catalog.js?v=35"></script>
-<script src="/js/sortable.js?v=35"></script>
-<script src="/js/modelpicker.js?v=35"></script>
-<script src="/js/settings.js?v=35"></script>
-<script src="/js/app.js?v=35"></script>
+<script src="/js/vue.global.prod.js?v=36"></script>
+<script src="/js/api.js?v=36"></script>
+<script src="/js/checkout.js?v=36"></script>
+<script src="/js/receive.js?v=36"></script>
+<script src="/js/stocktake.js?v=36"></script>
+<script src="/js/records.js?v=36"></script>
+<script src="/js/catalog.js?v=36"></script>
+<script src="/js/sortable.js?v=36"></script>
+<script src="/js/modelpicker.js?v=36"></script>
+<script src="/js/settings.js?v=36"></script>
+<script src="/js/app.js?v=36"></script>
 </body>
 </html>

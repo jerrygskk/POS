@@ -302,7 +302,7 @@ def _has_records(conn, variant_ids):
 def _reject_manual_tl(barcode):
     """TL 開頭為自取碼保留字頭,禁止手動輸入(只能由系統取號或匯入工具寫入),
     避免與流水號撞號。"""
-    if barcode and barcode.upper().startswith("TL"):
+    if barcode and barcode.strip().upper().startswith("TL"):
         raise HTTPException(422, "TL 開頭為系統保留，如有需求請按自取條碼")
 
 def next_store_barcode(conn):

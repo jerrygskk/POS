@@ -234,7 +234,11 @@ window.PosPages["page-catalog"] = {
         await API.put("/api/variants/" + e.variant_id + "/models",
           { model_ids: e.model_ids });
         await this.reload();
-      } catch (err) { this.showError(err.message); }
+      } catch (err) {
+        this.showError(err.message);
+        // 雙寫可能部分成功,重新載入拉回後端真實狀態,避免畫面停在舊資料
+        await this.reload();
+      }
     },
     async toggleVariantActive(p, v) {
       try {

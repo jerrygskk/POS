@@ -73,9 +73,11 @@ def set_counted(sid: int, variant_id: int, body: SetIn, request: Request):
     conn = get_conn(request.app.state.db_path)
     try:
         _require_open(conn, sid)
-        conn.execute(
+        cur = conn.execute(
             "UPDATE StocktakeItem SET counted_qty=? WHERE session_id=? AND variant_id=?",
             (body.counted_qty, sid, variant_id))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "此變體尚未進入本次盤點,請先掃描")
         conn.commit()
         return {"ok": True}
     finally:

@@ -68,6 +68,10 @@ def clean(value):
     """儲存格值 → 去空白字串;空字串/None/'nan' 一律回 None。"""
     if value is None:
         return None
+    # 商品編碼/條碼在 Excel 若存成數值,openpyxl 回 float(如 4711...0),
+    # 直接 str() 會帶「.0」汙染條碼;整數值的 float 先轉 int
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
     s = str(value).strip()
     if s == "" or s.lower() == "nan":
         return None
@@ -179,7 +183,7 @@ _MODEL_SUFFIXES = [
 
 def _canon_model(token, brand_prefix="iPhone"):
     """單一型號片段 → 標準型號名;無法解析回傳 None。"""
-    t = re.sub(r"\(.*?\)", "", token)          # 去尺寸括號 (6.1)
+    t = re.sub(r"[(（].*?[)）]", "", token)      # 去尺寸括號(半形/全形)(6.1)（6.1）
     for junk in ("共用款", "共用", "一般"):
         t = t.replace(junk, "")
     t = t.strip().strip("/").strip()
@@ -540,7 +544,11 @@ def parse_cable(spec_value, desc_value):
             core = connector_raw
         connector, ok = normalize_connector(core)
         if not ok:
-            warnings.append(f"充電線接頭無法辨識,原樣入接頭欄:「{core}」")
+            # 怪值不污染「接頭」選項池,改當一個特性詞條保留(可搜尋、不流失)
+            connector = None
+            if core:
+                tags.append(core)
+            warnings.append(f"充電線接頭無法辨識,改入特性詞條:「{core}」")
     else:
         warnings.append(
             f"充電線無法辨識接頭(規格「{clean(spec_value)}」描述「{clean(desc_value)}」)")

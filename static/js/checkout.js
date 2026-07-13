@@ -14,9 +14,11 @@ window.PosPages["page-checkout"] = {
     },
   },
   async mounted() {
-    this.payments = await API.get("/api/payments");
-    this.payment = this.payments[0];
-    this.$refs.scan.focus();
+    try {
+      this.payments = await API.get("/api/payments");
+      this.payment = this.payments[0];
+    } catch (e) { this.showError(e.message); }
+    this.$refs.scan?.focus();
     this._refocus = () => setTimeout(() => {
       if (document.activeElement.tagName !== "INPUT" &&
           document.activeElement.tagName !== "SELECT") this.$refs.scan?.focus();

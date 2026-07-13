@@ -44,3 +44,10 @@ class TestStocktake(unittest.TestCase):
         item = [i for i in d["items"] if i["variant_id"] == self.v1][0]
         self.assertEqual(item["counted_qty"], 7)
         self.assertEqual(item["diff"], 2)
+
+    def test_manual_set_unscanned_404(self):
+        # 對尚未掃描(無 StocktakeItem 列)的變體設實盤量:須回 404,
+        # 不可影響 0 列卻回 ok(否則前端誤以為已存,實際靜默漏寫)
+        r = self.c.put(f"/api/stocktake/{self.sid}/items/{self.v2}",
+                       json={"counted_qty": 3})
+        self.assertEqual(r.status_code, 404)

@@ -93,12 +93,18 @@ def list_sales(request: Request, date_from: str = "", date_to: str = "", payment
         conn.close()
 
 @router.get("/sales/summary")
-def summary(request: Request, date: str = ""):
+def summary(request: Request, date_from: str = "", date_to: str = "",
+            payment: str = "", date: str = ""):
     conn = get_conn(request.app.state.db_path)
     try:
-        sql = "SELECT payment, COUNT(*) c, SUM(total) t FROM Sale"
+        # date 為舊參數(單日),保留相容;優先用 date_from/date_to 區間
+        if date and not date_from and not date_to:
+            date_from = date_to = date
+        sql = "SELECT payment, COUNT(*) c, SUM(total) t FROM Sale WHERE 1=1"
         args = []
-        if date: sql += " WHERE date(ts)=?"; args.append(date)
+        if date_from: sql += " AND date(ts)>=?"; args.append(date_from)
+        if date_to:   sql += " AND date(ts)<=?"; args.append(date_to)
+        if payment:   sql += " AND payment=?";   args.append(payment)
         rows = conn.execute(sql + " GROUP BY payment", args).fetchall()
         return {"count": sum(r["c"] for r in rows),
                 "total": sum(r["t"] or 0 for r in rows),

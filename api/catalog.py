@@ -151,6 +151,10 @@ def delete_category(cid: int, request: Request):
         # 清掉關聯:共用欄勾選、廠牌掛勾、該種類專屬欄及其選項
         conn.execute("DELETE FROM CategoryField WHERE category_id=?", (cid,))
         conn.execute("DELETE FROM BrandCategory WHERE category_id=?", (cid,))
+        # 先解除欄位對選項的預設參照,避免刪選項時觸發 FK 循環參照
+        conn.execute(
+            "UPDATE AttributeField SET default_option_id=NULL WHERE category_id=?",
+            (cid,))
         conn.execute(
             "DELETE FROM AttributeOption WHERE field_id IN "
             "(SELECT field_id FROM AttributeField WHERE category_id=?)", (cid,))
@@ -378,6 +382,9 @@ def delete_model(mid: int, request: Request):
         if conn.execute("SELECT 1 FROM VariantModel WHERE model_id=? LIMIT 1",
                        (mid,)).fetchone():
             raise HTTPException(409, "仍有商品掛此型號,無法刪除,請改用停用")
+        if conn.execute("SELECT 1 FROM OptionModel WHERE model_id=? LIMIT 1",
+                       (mid,)).fetchone():
+            raise HTTPException(409, "仍有選項限定此型號,無法刪除,請改用停用")
         conn.execute("DELETE FROM PhoneModel WHERE model_id=?", (mid,))
         conn.commit()
         return {"ok": True}
