@@ -19,9 +19,10 @@ main.py → uvicorn(127.0.0.1:8737) → FastAPI app(api/create_app) → static/(
 |---|---|
 | `main.py` | 進入點:備份→起 uvicorn→開瀏覽器 |
 | `lib/version.py` | `VERSION` 字串 |
-| `lib/db.py` | `get_conn` / `init_db`(唯一 DB 連線入口) |
+| `lib/db.py` | `get_conn` / `db_conn`(context manager)/ `init_db`,純資料層(零框架依賴) |
 | `lib/db_schema.py` | 全部 DDL(唯一來源) |
-| `lib/db_seed.py` | 預設八屬性欄位、付款方式種子 |
+| `lib/db_seed.py` | 共用欄(商品描述/顏色)、付款方式種子 |
+| `lib/dbutil.py` | 會 raise HTTPException 的 DB helper(`require_exists`/`reject_if_referenced` 等) |
 | `lib/backup.py` | GFS 備份(日7/週4/月12) |
 | `api/__init__.py` | `create_app()`:掛 router、掛 static(含 `_static_dir()` 打包路徑) |
 | `api/attributes.py` | 屬性欄位/選單庫(含連動) |
@@ -33,8 +34,9 @@ main.py → uvicorn(127.0.0.1:8737) → FastAPI app(api/create_app) → static/(
 | `api/printing.py` | 條碼列印服務介面(stub) |
 | `static/` | `index.html` + `css/pos.css` + `js/*.js`(Vue 3、fetch 包裝、各頁邏輯) |
 | `tools/build.ps1` | PyInstaller 打包腳本 |
-| `tools/import_excel.py` | 一次性匯入舊 Excel 產品清單 |
-| `tests/` | 單元測試 |
+| `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
+| `tools/import_excel.py` | 一次性匯入舊 Excel 產品清單(**不入庫**,僅本地) |
+| `tests/` | 單元測試(`tests/base.py` 共用基底 `ApiTestCase`/`ConnTestCase` 與 fixture helper) |
 
 ## 2. 慣例
 
@@ -43,7 +45,7 @@ main.py → uvicorn(127.0.0.1:8737) → FastAPI app(api/create_app) → static/(
 - **商品結構**:`Category`/`Brand`/`PhoneModel` 為正式資料表;`Product`(款)以 `category_id`/`brand_id` FK 掛種類/廠牌;`Variant`(變體)以 `VariantModel` 多對多掛適用型號(共用款可掛多筆型號);規格欄 `AttributeField` 依 `category_id` 掛種類(NULL 為共用欄,各種類需經 `CategoryField` 勾選啟用才可用);`AttributeOption` 無 parent 連動。
 - **規格值正規化**:變體規格不再存 JSON,改由 `VariantAttribute(variant_id, field_id, option_id?, text_value?)` 關聯表承載(`CHECK` 約束 `option_id`/`text_value` 恰一非 NULL:select 欄存 `option_id`、text 欄存 `text_value`)。API 對外仍以 `attributes:{欄名:值}` dict 進出,讀寫由 `api/products.py` 的 `set_variant_attributes`/`attrs_by_variant` 在 dict 與關聯列間轉換(讀取一次 JOIN 撈齊避免 N+1)。因此**改欄名/改選項值即生效**,不需回掃變體;有 `VariantAttribute` 參照的選項硬刪回 409。寫入時 select 值查無對應選項回 422。
 - **選項限定型號**:`OptionModel(option_id, model_id)` 記錄選項只在特定型號出現(特別色)。`GET /options?field_id=&model_ids=` 過濾回「未綁任何型號的 ∪ 綁定含任一給定型號的」聯集,僅過濾建檔下拉,不回溯既有變體;未帶 `model_ids` 回全部。`PUT /options/{id}/models` 全量替換該選項的限定型號清單(空清單=改回通用)。
-- **條碼混合**:`source` 分 `factory`(廠商既有)與 `store`(店內自產,`SP` + 8 位流水,`Setting.next_store_barcode` 計數)。
+- **條碼混合**:`source` 分 `factory`(廠商既有)與 `store`(店內自取碼,`TL` + 流水號,`Setting.next_store_barcode` 純計數、刪除不回收);手動輸入 `TL` 開頭一律 422(系統保留字頭)。
 - **有效售價**:`Variant.price` 不為 NULL 時採用,否則退回 `Product.default_price`,兩者皆 NULL 則售價為 `null`。
 - **共用欄 NULL 去重提醒**:`AttributeField` 的共用欄 `category_id` 為 NULL;SQLite 的 `UNIQUE` 對 NULL 不視為相等,故去重不能單靠資料庫唯一鍵,需靠應用層先查再插。
 
@@ -61,9 +63,11 @@ main.py → uvicorn(127.0.0.1:8737) → FastAPI app(api/create_app) → static/(
 python -m unittest discover -s tests
 ```
 
-目前 206 個測試,涵蓋 schema/migration、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、匯入規則(七類拆解/透明填補/括號補齊)等模組,檔名皆 `test_*.py`。
+目前 218 個測試,涵蓋 schema/migration、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、匯入規則(七類拆解/透明填補/括號補齊)等模組,檔名皆 `test_*.py`。
 
 ### 匯入工具(`tools/import_excel.py`)規則補充
+
+> ⚠️ 此檔為一次性工具,**不入庫**(已 gitignore,僅存在本地);相依它的 `tests/test_import_excel.py`、`tests/test_import_rules.py` 於正式匯入驗收後一併移除。fresh clone 無此檔時該兩支測試會失敗,屬預期。
 
 - **鋼化玻璃複選欄名為「材質」**(常數 `GLASS_SPEC_FIELD`;非「規格」)。
 - **手機殼款式/顏色兩欄皆空**(空壓殼等透明殼)→ 款式自動填「透明」,避免無規格。
@@ -86,7 +90,7 @@ powershell -ExecutionPolicy Bypass -File tools/build.ps1
 
 - 版號單一來源 `lib/version.py`(`__version__`),顯示版本一律 `from lib.version import __version__`,不寫死第二份。
 - 進版一律跑 `python tools/bump_version.py {新版號}`,不手改 `version.py`(否則 `version_info.txt` 脫鉤)。
-- `version_info.txt` 由工具自動產生(PyInstaller `--version-file` 用),勿手改,已入庫。
+- `version_info.txt` 由工具自動產生(PyInstaller `--version-file` 用),勿手改;**不入庫**(已 gitignore),fresh clone 需先跑一次 `bump_version.py` 產出才能 build。
 - 版號三碼 主.次.修,日常進第三碼;接受 1~4 碼,`version_info.txt` 自動補 0。
 - tag 順序鐵則:文件/release note 先寫好 → 進版 commit → `git tag v{版號}` → push tag;tag 已 push 要移動:本地 `git tag -f` 後,遠端先刪(`git push origin :refs/tags/v{版號}`)再推。
 
