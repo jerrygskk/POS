@@ -76,7 +76,7 @@ python -m unittest discover -s tests
 powershell -ExecutionPolicy Bypass -File tools/build.ps1
 ```
 
-`tools/build.ps1` 內容:清除舊 `build/`、`dist/`、`POS.spec` → `pyinstaller --onefile --name POS --add-data "static;static"` 並加 uvicorn 相關 hidden-import(`uvicorn.logging`、`uvicorn.loops.auto`、`uvicorn.protocols.http.auto`、`uvicorn.lifespan.on`)→ 指定 `main.py`。
+`tools/build.ps1` 內容:清除舊 `build/`、`dist/`、`POS.spec` → `pyinstaller --clean --onefile --name POS --add-data "static;static"`(`--clean` 一併清 PyInstaller 快取)並加 uvicorn 相關 hidden-import(`uvicorn.logging`、`uvicorn.loops.auto`、`uvicorn.protocols.http.auto`、`uvicorn.lifespan.on`)→ 指定 `main.py`。
 
 產出 `dist/POS.exe`,雙擊即可執行,會在 exe 所在目錄自動建立 `data/`(含 `pos.db`、`backups/`)。
 
