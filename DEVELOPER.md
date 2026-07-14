@@ -23,6 +23,7 @@ main.py → uvicorn(127.0.0.1:8737) → FastAPI app(api/create_app) → static/(
 | `lib/db_schema.py` | 全部 DDL(唯一來源) |
 | `lib/db_seed.py` | 共用欄(商品描述/顏色)、付款方式種子 |
 | `lib/dbutil.py` | 會 raise HTTPException 的 DB helper(`require_exists`/`reject_if_referenced` 等) |
+| `lib/product_rules.py` | 共用商品規則(`FIELD_TYPES`、欄位型別驗證、自取碼取號) |
 | `lib/backup.py` | GFS 備份(日7/週4/月12) |
 | `api/__init__.py` | `create_app()`:掛 router、掛 static(含 `_static_dir()` 打包路徑) |
 | `api/attributes.py` | 屬性欄位/選單庫(含連動) |
@@ -43,9 +44,13 @@ main.py → uvicorn(127.0.0.1:8737) → FastAPI app(api/create_app) → static/(
 - **庫存採異動流水制**:不存「目前庫存」欄位,一律由 `StockMovement` 加總取得(`api/products.py:stock_of`)。`kind` 為 `purchase`(進貨,+)、`sale`(銷售,-)、`adjust`(盤點調整,±)。
 - **金額一律 int**:新台幣元,無小數;數量亦為 int。
 - **商品結構**:`Category`/`Brand`/`PhoneModel` 為正式資料表;`Product`(款)以 `category_id`/`brand_id` FK 掛種類/廠牌;`Variant`(變體)以 `VariantModel` 多對多掛適用型號(共用款可掛多筆型號);規格欄 `AttributeField` 依 `category_id` 掛種類(NULL 為共用欄,各種類需經 `CategoryField` 勾選啟用才可用);`AttributeOption` 無 parent 連動。
-- **規格值正規化**:變體規格不再存 JSON,改由 `VariantAttribute(variant_id, field_id, option_id?, text_value?)` 關聯表承載(`CHECK` 約束 `option_id`/`text_value` 恰一非 NULL:select 欄存 `option_id`、text 欄存 `text_value`)。API 對外仍以 `attributes:{欄名:值}` dict 進出,讀寫由 `api/products.py` 的 `set_variant_attributes`/`attrs_by_variant` 在 dict 與關聯列間轉換(讀取一次 JOIN 撈齊避免 N+1)。因此**改欄名/改選項值即生效**,不需回掃變體;有 `VariantAttribute` 參照的選項硬刪回 409。寫入時 select 值查無對應選項回 422。
+- **規格值正規化**:變體規格不再存 JSON,改由 `VariantAttribute(variant_id, field_id, option_id?, text_value?)` 關聯表承載(`CHECK` 約束 `option_id`/`text_value` 恰一非 NULL:select 欄存 `option_id`、text 欄存 `text_value`)。API 對外仍以 `attributes:{欄名:值}` dict 進出,讀寫由 `api/products.py` 的 `set_variant_attributes`/`attrs_by_variant` 在 dict 與關聯列間轉換(讀取一次 JOIN 撈齊避免 N+1)。因此**改欄名/改選項值即生效**,不需回掃變體;寫入時 select 值查無對應選項回 422。
+- **規格選項生命週期**:`AttributeOption.active` 只控制新增選單可見性。有 `VariantAttribute` 引用時刪除會清除預設選項與限定型號後設為停用,保留既有商品關聯;0 使用中才硬刪除。設定頁重新加入同欄位、同值的停用選項時會恢復原 `option_id` 並重新啟用;商品建檔流程自動補選項時不會重新啟用。`GET /options` 的 `usage_count` 為引用該 `option_id` 的 distinct `variant_id` 數量。
 - **選項限定型號**:`OptionModel(option_id, model_id)` 記錄選項只在特定型號出現(特別色)。`GET /options?field_id=&model_ids=` 過濾回「未綁任何型號的 ∪ 綁定含任一給定型號的」聯集,僅過濾建檔下拉,不回溯既有變體;未帶 `model_ids` 回全部。`PUT /options/{id}/models` 全量替換該選項的限定型號清單(空清單=改回通用)。
 - **條碼混合**:`source` 分 `factory`(廠商既有)與 `store`(店內自取碼,`TL` + 流水號,`Setting.next_store_barcode` 純計數、刪除不回收);手動輸入 `TL` 開頭一律 422(系統保留字頭)。
+- **自取碼交易語意**:`lib/product_rules.py:next_store_barcode` 使用呼叫端的同一條資料庫連線更新計數器,由呼叫端決定 commit;商品或條碼建立失敗造成 transaction rollback 時,計數器亦一併回復。
+- **關鍵輸入驗證**:進貨數量與盤點掃描數量須大於 0,盤點實數不得小於 0;結帳單品折扣不可超過品項小計、總額不得為負,付款方式須存在設定清單。規格欄型別統一由 `lib/product_rules.py` 驗證。
+- **盤點結案防重**:結案先以 `status='open'` 條件原子更新盤點單;不存在回 404,已結案回 409,避免重複產生 `adjust` 庫存異動。
 - **有效售價**:`Variant.price` 不為 NULL 時採用,否則退回 `Product.default_price`,兩者皆 NULL 則售價為 `null`。
 - **共用欄 NULL 去重提醒**:`AttributeField` 的共用欄 `category_id` 為 NULL;SQLite 的 `UNIQUE` 對 NULL 不視為相等,故去重不能單靠資料庫唯一鍵,需靠應用層先查再插。
 
@@ -63,7 +68,7 @@ main.py → uvicorn(127.0.0.1:8737) → FastAPI app(api/create_app) → static/(
 python -m unittest discover -s tests
 ```
 
-目前 218 個測試,涵蓋 schema/migration、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、匯入規則(七類拆解/透明填補/括號補齊)等模組,檔名皆 `test_*.py`。
+目前 242 個測試,涵蓋 schema/migration、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、匯入規則(七類拆解/透明填補/括號補齊)等模組,檔名皆 `test_*.py`。
 
 ### 匯入工具(`tools/import_excel.py`)規則補充
 
@@ -77,10 +82,12 @@ python -m unittest discover -s tests
 ## 4. 打包
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/build.ps1
+Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
+Remove-Item -Force POS.spec -ErrorAction SilentlyContinue
+pyinstaller --clean --onefile --name POS --add-data "static;static" --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.lifespan.on --version-file version_info.txt main.py
 ```
 
-`tools/build.ps1` 內容:清除舊 `build/`、`dist/`、`POS.spec` → `pyinstaller --clean --onefile --name POS --add-data "static;static"`(`--clean` 一併清 PyInstaller 快取)並加 uvicorn 相關 hidden-import(`uvicorn.logging`、`uvicorn.loops.auto`、`uvicorn.protocols.http.auto`、`uvicorn.lifespan.on`)→ 指定 `main.py`。
+上列為標準打包指令:先清除舊 `build/`、`dist/`、`POS.spec`,再以 `--clean --onefile` 打包 static、版本資訊與 uvicorn hidden-import。`tools/build.ps1` 可供核對參數,實際打包不要執行該腳本。
 
 產出 `dist/POS.exe`,雙擊即可執行,會在 exe 所在目錄自動建立 `data/`(含 `pos.db`、`backups/`)。
 
