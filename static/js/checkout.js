@@ -43,10 +43,11 @@ window.PosPages["page-checkout"] = {
       this.searchResults = [];
     },
     async onScan() {
-      const code = this.scanCode.trim();
-      if (!code) return;
+
       await this.guard(async () => {  // 查無條碼:保留輸入
-        this.addItem(await API.get("/api/barcode/" + encodeURIComponent(code)));
+        const query = await API.barcodeQuery(this.scanCode);
+        if (!query) return;
+        this.addItem(query.data);
         this.scanCode = "";
       });
     },

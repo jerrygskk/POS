@@ -1,5 +1,8 @@
 import unittest, datetime
+from unittest.mock import patch
 from base import ApiTestCase
+from lib.db import db_conn
+from api.sales import _build_sale_filters, _load_sale_rows
 
 class TestSales(ApiTestCase):
     def setUp(self):
@@ -69,11 +72,43 @@ class TestSales(ApiTestCase):
         self.assertEqual(s2["count"], 1)
         self.assertEqual(s2["total"], 1000)
 
+    def test_sale_filter_builder_uses_shared_boundaries_and_arguments(self):
+        sql, args = _build_sale_filters("2026-07-01", "2026-07-31", "?暸?")
+        self.assertEqual(
+            sql,
+            " AND date(s.ts)>=? AND date(s.ts)<=? AND s.payment=?",
+        )
+        self.assertEqual(args, ["2026-07-01", "2026-07-31", "?暸?"])
+
+    def test_sale_row_loader_returns_rows_and_display_data_together(self):
+        self._sale()
+        with db_conn(self.db) as conn:
+            rows, attrs, display = _load_sale_rows(conn, "", "", "")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(attrs.get(rows[0]["variant_id"], {}), {})
+        self.assertEqual(display.get(rows[0]["variant_id"], ""), "")
+
+    def test_summary_date_range_takes_precedence_over_legacy_date(self):
+        self._sale()
+        today = datetime.date.today().isoformat()
+        tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+        s = self.c.get(
+            f"/api/sales/summary?date={tomorrow}&date_from={today}"
+        ).json()
+        self.assertEqual(s["count"], 1)
+
     def test_export_csv(self):
         self._sale()
         r = self.c.get("/api/sales/export")
         self.assertEqual(r.status_code, 200)
         self.assertIn("csv", r.headers["content-type"])
+
+    def test_export_csv_does_not_load_attributes(self):
+        self._sale()
+        with patch("api.sales.attrs_by_variant") as attrs:
+            r = self.c.get("/api/sales/export")
+        self.assertEqual(r.status_code, 200)
+        attrs.assert_not_called()
 
     def test_export_filters_by_payment(self):
         self._sale(payment="現金")

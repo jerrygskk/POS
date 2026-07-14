@@ -16,6 +16,9 @@ from tools.import_excel import (
     COL_CODE, COL_CATEGORY, COL_BRAND, COL_SPEC, COL_DESC, COL_CAT1, COL_CAT2,
     COL_PHONE_BRAND, COL_PHONE_MODEL, COL_NOTE,
 )
+from lib.product_rules import next_store_barcode
+from lib.db import init_db, get_conn
+import tempfile
 from base import raw_row as _raw
 
 
@@ -266,6 +269,20 @@ class TestGlassSpec(unittest.TestCase):
         self.assertEqual(ga[GLASS_SPEC_FIELD], ["霧面", "防窺"])
         self.assertEqual(ga[GLASS_TAGS_FIELD], [])
         self.assertEqual(ga[GLASS_LAYOUT_FIELD], "滿版")
+
+
+class TestImportSharedBarcodeRule(unittest.TestCase):
+    def test_import_uses_shared_store_barcode_counter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "pos.db")
+            init_db(db)
+            conn = get_conn(db)
+            try:
+                from tools.import_excel import _next_store_barcode
+                self.assertEqual(_next_store_barcode(conn), "TL100000001")
+                self.assertEqual(next_store_barcode(conn), "TL100000002")
+            finally:
+                conn.close()
 
 
 if __name__ == "__main__":

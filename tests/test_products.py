@@ -1,5 +1,31 @@
 import unittest
 from base import ApiTestCase
+from lib.product_rules import FIELD_TYPES, check_field_type, next_store_barcode
+from fastapi import HTTPException
+from base import ConnTestCase
+
+
+class TestProductRules(ConnTestCase):
+    def test_next_store_barcode_uses_default_and_increments(self):
+        self.assertEqual(next_store_barcode(self.conn), "TL100000001")
+        self.assertEqual(next_store_barcode(self.conn), "TL100000002")
+        value = self.conn.execute(
+            "SELECT value FROM Setting WHERE key='next_store_barcode'"
+        ).fetchone()["value"]
+        self.assertEqual(value, "100000003")
+
+    def test_next_store_barcode_rolls_back_with_same_connection(self):
+        self.assertEqual(next_store_barcode(self.conn), "TL100000001")
+        self.conn.rollback()
+        self.assertEqual(next_store_barcode(self.conn), "TL100000001")
+
+    def test_runtime_field_types_are_shared(self):
+        self.assertEqual(FIELD_TYPES, {"select", "text", "multi", "tags"})
+        for field_type in FIELD_TYPES:
+            check_field_type(field_type)
+        with self.assertRaises(HTTPException) as ctx:
+            check_field_type("number")
+        self.assertEqual(ctx.exception.status_code, 422)
 
 class TestProducts(ApiTestCase):
     def setUp(self):

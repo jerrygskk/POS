@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from lib.db import db_conn, next_sort
 from lib.dbutil import (require_exists, reject_if_referenced, update_by_id,
                         replace_links)
+from lib.product_rules import FIELD_TYPES
 
 router = APIRouter(prefix="/api")
 
@@ -286,7 +287,7 @@ def category_fields(cid: int, request: Request):
         for f in rows:
             opts = []
             # select/multi/tags 皆帶選項供建檔勾選/下拉/詞條建議
-            if f["field_type"] in ("select", "multi", "tags"):
+            if f["field_type"] in FIELD_TYPES - {"text"}:
                 opts = [dict(o) for o in conn.execute(
                     "SELECT option_id, value, sort FROM AttributeOption "
                     "WHERE field_id=? AND active=1 ORDER BY sort, option_id",

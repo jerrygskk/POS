@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from lib.db import db_conn, in_clause, next_sort, stock_map
 from lib.dbutil import require_exists, update_by_id, replace_links
+from lib.product_rules import FIELD_TYPES, next_store_barcode as _next_store_barcode
 
 router = APIRouter(prefix="/api")
 
@@ -85,17 +86,23 @@ def _models_by_variant(conn, variant_ids):
 # ---- 規格值(VariantAttribute)讀寫 ----
 # API 對外仍以 attributes:{欄名:值} dict 形狀進出;內部轉為關聯列。
 
+def _entity_category(conn, table, id_col, entity_id):
+    row = conn.execute(
+        f"SELECT p.category_id FROM {table} p WHERE p.{id_col}=?",
+        (entity_id,)).fetchone()
+    return (row is not None, row["category_id"] if row else None)
+
+
 def _product_category(conn, pid):
-    r = conn.execute("SELECT category_id FROM Product WHERE product_id=?",
-                     (pid,)).fetchone()
-    return r["category_id"] if r else None
+    return _entity_category(conn, "Product", "product_id", pid)
+
 
 def _variant_category(conn, variant_id):
-    r = conn.execute(
+    row = conn.execute(
         "SELECT p.category_id FROM Variant v "
         "JOIN Product p ON v.product_id=p.product_id WHERE v.variant_id=?",
         (variant_id,)).fetchone()
-    return r["category_id"] if r else None
+    return (row is not None, row["category_id"] if row else None)
 
 def _resolve_field(conn, category_id, name):
     """依欄名 + 商品種類找 AttributeField;專屬欄優先於共用欄(category_id NULL)。"""
@@ -149,7 +156,7 @@ def set_variant_attributes(conn, variant_id, category_id, attributes):
         if f is None:
             raise HTTPException(422, f"規格欄「{name}」不存在")
         fid, ftype = f["field_id"], f["field_type"]
-        if ftype in ("multi", "tags"):
+        if ftype in FIELD_TYPES - {"select", "text"}:
             for v in dict.fromkeys(_as_list(value)):     # 同欄去重、保序
                 oid = _find_option(conn, fid, v)
                 if oid is None:
@@ -303,19 +310,28 @@ def _reject_manual_tl(barcode):
     if barcode and barcode.strip().upper().startswith("TL"):
         raise HTTPException(422, "TL 開頭為系統保留，如有需求請按自取條碼")
 
-def next_store_barcode(conn):
-    """自取碼取號:TL+流水號。號碼只存 Setting.next_store_barcode(取用後+1),
-    單調遞增、刪除條碼不回收號碼;匯入工具寫入既有 TL 碼後會更新此值。"""
-    row = conn.execute("SELECT value FROM Setting WHERE key='next_store_barcode'").fetchone()
-    n = int(row["value"]) if row else 100000001
-    conn.execute("INSERT OR REPLACE INTO Setting(key,value) VALUES('next_store_barcode',?)",
-                 (str(n + 1),))
-    return f"TL{n}"
-
 def stock_of(conn, variant_id):
     r = conn.execute("SELECT COALESCE(SUM(qty),0) s FROM StockMovement WHERE variant_id=?",
                      (variant_id,)).fetchone()
     return r["s"]
+
+def _create_variant(conn, product_id, category_id, body):
+    cur = conn.execute(
+        "INSERT INTO Variant(product_id,price) VALUES(?,?)",
+        (product_id, body.price))
+    vid = cur.lastrowid
+    set_variant_attributes(conn, vid, category_id, body.attributes)
+    _set_variant_models(conn, vid, body.model_ids)
+    codes = []
+    for barcode in body.barcodes:
+        _reject_manual_tl(barcode.barcode)
+        code = barcode.barcode or _next_store_barcode(conn)
+        conn.execute(
+            "INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",
+            (code, vid, barcode.source))
+        codes.append(code)
+    return vid, codes
+
 
 @router.post("/products")
 def create_product(body: ProductIn, request: Request):
@@ -330,17 +346,8 @@ def create_product(body: ProductIn, request: Request):
         pid = cur.lastrowid
         vids = []
         for v in body.variants:
-            cur = conn.execute(
-                "INSERT INTO Variant(product_id,price) VALUES(?,?)", (pid, v.price))
-            vid = cur.lastrowid
+            vid, _codes = _create_variant(conn, pid, body.category_id, v)
             vids.append(vid)
-            set_variant_attributes(conn, vid, body.category_id, v.attributes)
-            _set_variant_models(conn, vid, v.model_ids)
-            for b in v.barcodes:
-                _reject_manual_tl(b.barcode)
-                code = b.barcode or next_store_barcode(conn)
-                conn.execute("INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",
-                             (code, vid, b.source))
         conn.commit()
         return {"product_id": pid, "variant_ids": vids}
 
@@ -368,7 +375,7 @@ def add_barcode(variant_id: int, body: BarcodeIn, request: Request):
         require_exists(conn, "Variant", "variant_id", variant_id,
                        "查無此子產品")
         _reject_manual_tl(body.barcode)
-        code = body.barcode or next_store_barcode(conn)
+        code = body.barcode or _next_store_barcode(conn)
         conn.execute("INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",
                      (code, variant_id, body.source))
         conn.commit()
@@ -418,107 +425,107 @@ def search(request: Request, q: str = "", category_id: int | None = None,
                  "models": models.get(r["variant_id"], []),
                  "stock": smap.get(r["variant_id"], 0)} for r in rows]
 
+def _load_catalog(conn, include_inactive, category_id, brand_id, model_id):
+    bc = {}
+    for row in conn.execute(
+            "SELECT variant_id, barcode, source FROM Barcode "
+            "ORDER BY variant_id, barcode"):
+        bc.setdefault(row["variant_id"], []).append(
+            {"barcode": row["barcode"], "source": row["source"]})
+
+    clauses, args = [], []
+    if not include_inactive:
+        clauses.append("p.active=1")
+    if category_id is not None:
+        clauses.append("p.category_id=?"); args.append(category_id)
+    if brand_id is not None:
+        clauses.append("p.brand_id=?"); args.append(brand_id)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    prods = conn.execute(
+        "SELECT p.product_id, p.name, p.category_id, p.brand_id, "
+        "p.default_price, p.note, p.active, "
+        "c.name AS category_name, b.name AS brand_name "
+        "FROM Product p LEFT JOIN Category c ON p.category_id=c.category_id "
+        "LEFT JOIN Brand b ON p.brand_id=b.brand_id" + where +
+        " ORDER BY c.sort, p.category_id, b.sort, p.name, p.product_id", args
+    ).fetchall()
+    model_vids = None
+    if model_id is not None:
+        model_vids = {row["variant_id"] for row in conn.execute(
+            "SELECT variant_id FROM VariantModel WHERE model_id=?", (model_id,))}
+    prod_ids = [p["product_id"] for p in prods]
+    vrows = []
+    if prod_ids:
+        active = "" if include_inactive else " AND active=1"
+        qs = in_clause(prod_ids)
+        vrows = conn.execute(
+            f"SELECT variant_id, product_id, price, active FROM Variant "
+            f"WHERE product_id IN ({qs})" + active +
+            " ORDER BY product_id, variant_id", prod_ids).fetchall()
+    vids = [row["variant_id"] for row in vrows]
+    return (prods, vrows, model_vids, bc, attrs_by_variant(conn, vids),
+            display_attrs(conn, vids), _models_by_variant(conn, vids),
+            variant_sort_keys(conn, vids), stock_map(conn, vids))
+
+
+def _assemble_catalog(data):
+    prods, vrows, model_vids, bc, attrs_map, disp_map, models_map, sort_keys, smap = data
+    by_pid = {}
+    for row in vrows:
+        by_pid.setdefault(row["product_id"], []).append(row)
+    for rows in by_pid.values():
+        rows.sort(key=lambda row: (sort_keys[row["variant_id"]], row["variant_id"]))
+    out = []
+    for product in prods:
+        variants = []
+        for row in by_pid.get(product["product_id"], []):
+            if model_vids is not None and row["variant_id"] not in model_vids:
+                continue
+            vid = row["variant_id"]
+            variants.append({
+                "variant_id": vid, "attributes": attrs_map.get(vid, {}),
+                "attr_display": disp_map.get(vid, ""), "price": row["price"],
+                "effective_price": row["price"] if row["price"] is not None
+                else product["default_price"], "stock": smap.get(vid, 0),
+                "active": bool(row["active"]), "models": models_map.get(vid, []),
+                "barcodes": bc.get(vid, [])})
+        if model_vids is not None and not variants:
+            continue
+        out.append({
+            "product_id": product["product_id"], "name": product["name"],
+            "category_id": product["category_id"],
+            "category_name": product["category_name"],
+            "brand_id": product["brand_id"], "brand_name": product["brand_name"],
+            "default_price": product["default_price"], "note": product["note"],
+            "active": bool(product["active"]), "variants": variants})
+    return out
+
+
+def _filter_catalog(products, query):
+    if not query:
+        return products
+    like = query.lower()
+    out = []
+    for product in products:
+        if like in (product["name"] or "").lower():
+            out.append(product)
+            continue
+        hits = [variant for variant in product["variants"]
+                if any(like in str(value).lower()
+                       for value in variant["attributes"].values())]
+        if hits:
+            product["variants"] = hits
+            out.append(product)
+    return out
+
+
 @router.get("/catalog")
 def catalog(request: Request, q: str = "", include_inactive: bool = False,
             category_id: int | None = None, brand_id: int | None = None,
             model_id: int | None = None):
     with db_conn(request.app.state.db_path) as conn:
-        # 條碼:先撈全部,依 variant_id 分組
-        bc = {}
-        for b in conn.execute(
-                "SELECT variant_id, barcode, source FROM Barcode "
-                "ORDER BY variant_id, barcode"):
-            bc.setdefault(b["variant_id"], []).append(
-                {"barcode": b["barcode"], "source": b["source"]})
-
-        p_clauses, p_args = [], []
-        if not include_inactive:
-            p_clauses.append("p.active=1")
-        if category_id is not None:
-            p_clauses.append("p.category_id=?"); p_args.append(category_id)
-        if brand_id is not None:
-            p_clauses.append("p.brand_id=?"); p_args.append(brand_id)
-        p_where = (" WHERE " + " AND ".join(p_clauses)) if p_clauses else ""
-        prods = conn.execute(
-            "SELECT p.product_id, p.name, p.category_id, p.brand_id, "
-            "p.default_price, p.note, p.active, "
-            "c.name AS category_name, b.name AS brand_name "
-            "FROM Product p "
-            "LEFT JOIN Category c ON p.category_id=c.category_id "
-            "LEFT JOIN Brand b ON p.brand_id=b.brand_id"
-            + p_where + " ORDER BY c.sort, p.category_id, b.sort, "
-            "p.name, p.product_id", p_args).fetchall()
-
-        # 依 model_id 篩選的變體白名單(None=不篩)
-        model_vids = None
-        if model_id is not None:
-            model_vids = {r["variant_id"] for r in conn.execute(
-                "SELECT variant_id FROM VariantModel WHERE model_id=?", (model_id,))}
-
-        # 一次撈齊所有款的變體 + 規格 + 型號,避免逐款/逐變體 N+1
-        prod_ids = [p["product_id"] for p in prods]
-        vrows = []
-        if prod_ids:
-            v_active = "" if include_inactive else " AND active=1"
-            qs = in_clause(prod_ids)
-            vrows = conn.execute(
-                f"SELECT variant_id, product_id, price, active FROM Variant "
-                f"WHERE product_id IN ({qs})" + v_active +
-                " ORDER BY product_id, variant_id", prod_ids).fetchall()
-        all_vids = [r["variant_id"] for r in vrows]
-        attrs_map = attrs_by_variant(conn, all_vids)
-        disp_map = display_attrs(conn, all_vids)
-        models_map = _models_by_variant(conn, all_vids)
-        sort_keys = variant_sort_keys(conn, all_vids)
-        smap = stock_map(conn, all_vids)
-        vrows_by_pid = {}
-        for v in vrows:
-            vrows_by_pid.setdefault(v["product_id"], []).append(v)
-        # 變體列排序:單一材質在前(依選項 sort)、combo 在後,同鍵依建檔序
-        for vs in vrows_by_pid.values():
-            vs.sort(key=lambda v: (sort_keys[v["variant_id"]], v["variant_id"]))
-
-        out = []
-        for p in prods:
-            variants = []
-            for v in vrows_by_pid.get(p["product_id"], []):
-                if model_vids is not None and v["variant_id"] not in model_vids:
-                    continue
-                eff = v["price"] if v["price"] is not None else p["default_price"]
-                variants.append({
-                    "variant_id": v["variant_id"],
-                    "attributes": attrs_map.get(v["variant_id"], {}),
-                    "attr_display": disp_map.get(v["variant_id"], ""),
-                    "price": v["price"], "effective_price": eff,
-                    "stock": smap.get(v["variant_id"], 0),
-                    "active": bool(v["active"]),
-                    "models": models_map.get(v["variant_id"], []),
-                    "barcodes": bc.get(v["variant_id"], [])})
-            if model_vids is not None and not variants:
-                continue
-            out.append({
-                "product_id": p["product_id"], "name": p["name"],
-                "category_id": p["category_id"], "category_name": p["category_name"],
-                "brand_id": p["brand_id"], "brand_name": p["brand_name"],
-                "default_price": p["default_price"],
-                "note": p["note"], "active": bool(p["active"]),
-                "variants": variants})
-
-        if q:
-            like = q.lower()
-            filtered = []
-            for p in out:
-                if like in (p["name"] or "").lower():
-                    filtered.append(p)
-                    continue
-                hit = [v for v in p["variants"]
-                       if any(like in str(val).lower()
-                              for val in v["attributes"].values())]
-                if hit:
-                    p["variants"] = hit
-                    filtered.append(p)
-            out = filtered
-        return out
+        data = _load_catalog(conn, include_inactive, category_id, brand_id, model_id)
+        return _filter_catalog(_assemble_catalog(data), q)
 
 @router.put("/products/{pid}")
 def update_product(pid: int, body: ProductPatch, request: Request):
@@ -541,9 +548,8 @@ def update_variant(vid: int, body: VariantPatch, request: Request):
         has_attrs = "attributes" in fields
         attributes = fields.pop("attributes", None)
         # 先確認變體存在(取其種類供規格欄解析)
-        cat = _variant_category(conn, vid)
-        if cat is None and not conn.execute(
-                "SELECT 1 FROM Variant WHERE variant_id=?", (vid,)).fetchone():
+        exists, cat = _variant_category(conn, vid)
+        if not exists:
             raise HTTPException(404, "查無此子產品")
         if fields:
             update_by_id(conn, "Variant", "variant_id", vid, fields)
@@ -563,22 +569,10 @@ def set_variant_models(vid: int, body: ModelIdList, request: Request):
 @router.post("/products/{pid}/variants")
 def add_variant(pid: int, body: NewVariantIn, request: Request):
     with db_conn(request.app.state.db_path) as conn:
-        cat = _product_category(conn, pid)
-        if cat is None and not conn.execute(
-                "SELECT 1 FROM Product WHERE product_id=?", (pid,)).fetchone():
+        exists, cat = _product_category(conn, pid)
+        if not exists:
             raise HTTPException(404, "查無此商品")
-        cur = conn.execute(
-            "INSERT INTO Variant(product_id,price) VALUES(?,?)", (pid, body.price))
-        vid = cur.lastrowid
-        set_variant_attributes(conn, vid, cat, body.attributes)
-        _set_variant_models(conn, vid, body.model_ids)
-        codes = []
-        for b in body.barcodes:
-            _reject_manual_tl(b.barcode)
-            code = b.barcode or next_store_barcode(conn)
-            conn.execute("INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",
-                         (code, vid, b.source))
-            codes.append(code)
+        vid, codes = _create_variant(conn, pid, cat, body)
         conn.commit()
         return {"variant_id": vid, "barcodes": codes}
 

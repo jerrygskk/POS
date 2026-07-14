@@ -13,10 +13,20 @@ const API = {
     return r.json();
   },
   get(url) { return this._do("GET", url); },
+  async barcodeQuery(value) {
+    const code = String(value || "").trim();
+    if (!code) return null;
+    const data = await this.get("/api/barcode/" + encodeURIComponent(code));
+    return { code, data };
+  },
   post(url, body) { return this._do("POST", url, body); },
   put(url, body) { return this._do("PUT", url, body); },
   patch(url, body) { return this._do("PATCH", url, body); },
   del(url) { return this._do("DELETE", url); },
+};
+
+window.parseTagList = function (v) {
+  return String(v || "").split(/[,、，]/).map(s => s.trim()).filter(Boolean);
 };
 
 // ---- 規格顯示與表單共用工具(multi/tags 皆為清單)----
@@ -66,8 +76,7 @@ window.buildAttrPayload = function (fields, attrs) {
         .filter(Boolean);
       if (arr.length) out[f.name] = arr;
     } else if (f.field_type === "tags") {
-      const arr = String(v || "").split(/[,、，]/).map(x => x.trim())
-        .filter(Boolean);
+      const arr = window.parseTagList(v);
       if (arr.length) out[f.name] = arr;
     } else {
       const s = (v == null ? "" : String(v)).trim();

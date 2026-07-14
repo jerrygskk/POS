@@ -18,10 +18,10 @@ window.PosPages["page-stocktake"] = {
       this.$nextTick(() => this.$refs.scan?.focus());
     },
     async onScan() {
-      const code = this.scanCode.trim();
-      if (!code) return;
       await this.guard(async () => {
-        const hit = await API.get("/api/barcode/" + encodeURIComponent(code));
+        const query = await API.barcodeQuery(this.scanCode);
+        if (!query) return;
+        const hit = query.data;
         await API.post(`/api/stocktake/${this.current}/scan`,
                        { variant_id: hit.variant_id });
         this.detail = await API.get("/api/stocktake/" + this.current);

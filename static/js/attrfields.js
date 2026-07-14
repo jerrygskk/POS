@@ -26,9 +26,7 @@ window.PosComponents["attr-fields"] = {
       return window.CatalogFields.filterOptions(this.options[f.field_id] || [], this.modelIds);
     },
     datalistId(f) { return "af-" + this.afUid + "-" + f.field_id; },
-    tagList(str) {
-      return String(str || "").split(/[,、，]/).map(s => s.trim()).filter(Boolean);
-    },
+    tagList(str) { return window.parseTagList(str); },
     tagHas(str, val) { return this.tagList(str).includes(val); },
     toggleTag(obj, fname, val) {
       const arr = this.tagList(obj[fname]);

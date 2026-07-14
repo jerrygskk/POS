@@ -21,10 +21,11 @@ window.PosPages["page-receive"] = {
   },
   methods: {
     async onScan() {
-      const code = this.scanCode.trim();
-      if (!code) return;
+      const code = String(this.scanCode || "").trim();
       try {
-        this.hit = await API.get("/api/barcode/" + encodeURIComponent(code));
+        const query = await API.barcodeQuery(code);
+        if (!query) return;
+        this.hit = query.data;
         this.creating = false; this.scanCode = "";
       } catch (e) {
         if (e.status === 404) this.startCreate(code);
@@ -67,8 +68,9 @@ window.PosPages["page-receive"] = {
           variants: [{ attributes: attrs, model_ids: this.form.model_ids,
                        barcodes }] });
         this.createdVid = r.variant_ids[0];
-        this.hit = this.newBarcode
-          ? await API.get("/api/barcode/" + encodeURIComponent(this.newBarcode))
+        const query = await API.barcodeQuery(this.newBarcode);
+        this.hit = query
+          ? query.data
           : { name: this.form.name, attributes: attrs, stock: 0,
               variant_id: this.createdVid };
       });

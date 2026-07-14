@@ -61,24 +61,42 @@ def checkout(body: SaleIn, request: Request):
         conn.commit()   # 全部一次 commit=同一 transaction
         return {"sale_id": sale_id, "total": total, "change": body.paid - total}
 
+def _build_sale_filters(date_from, date_to, payment, sale_alias="s"):
+    prefix = f"{sale_alias}." if sale_alias else ""
+    sql = ""
+    args = []
+    if date_from:
+        sql += f" AND date({prefix}ts)>=?"
+        args.append(date_from)
+    if date_to:
+        sql += f" AND date({prefix}ts)<=?"
+        args.append(date_to)
+    if payment:
+        sql += f" AND {prefix}payment=?"
+        args.append(payment)
+    return sql, args
+
+
 def _query_sales(conn, date_from, date_to, payment):
     sql = ("SELECT s.*, i.variant_id, i.qty, i.unit_price, i.discount, p.name "
            "FROM Sale s JOIN SaleItem i ON s.sale_id=i.sale_id "
            "JOIN Variant v ON i.variant_id=v.variant_id "
            "JOIN Product p ON v.product_id=p.product_id WHERE 1=1")
-    args = []
-    if date_from: sql += " AND date(s.ts)>=?"; args.append(date_from)
-    if date_to:   sql += " AND date(s.ts)<=?"; args.append(date_to)
-    if payment:   sql += " AND s.payment=?";   args.append(payment)
+    filters, args = _build_sale_filters(date_from, date_to, payment)
+    sql += filters
     return conn.execute(sql + " ORDER BY s.sale_id DESC", args).fetchall()
+
+
+def _load_sale_rows(conn, date_from, date_to, payment, load_attrs=True):
+    rows = _query_sales(conn, date_from, date_to, payment)
+    vids = [r["variant_id"] for r in rows]
+    attrs = attrs_by_variant(conn, vids) if load_attrs else {}
+    return rows, attrs, display_attrs(conn, vids)
 
 @router.get("/sales")
 def list_sales(request: Request, date_from: str = "", date_to: str = "", payment: str = ""):
     with db_conn(request.app.state.db_path) as conn:
-        rows = _query_sales(conn, date_from, date_to, payment)
-        vids = [r["variant_id"] for r in rows]
-        attrs = attrs_by_variant(conn, vids)
-        disp = display_attrs(conn, vids)
+        rows, attrs, disp = _load_sale_rows(conn, date_from, date_to, payment)
         out = {}
         for r in rows:
             s = out.setdefault(r["sale_id"], {
@@ -98,10 +116,8 @@ def summary(request: Request, date_from: str = "", date_to: str = "",
         if date and not date_from and not date_to:
             date_from = date_to = date
         sql = "SELECT payment, COUNT(*) c, SUM(total) t FROM Sale WHERE 1=1"
-        args = []
-        if date_from: sql += " AND date(ts)>=?"; args.append(date_from)
-        if date_to:   sql += " AND date(ts)<=?"; args.append(date_to)
-        if payment:   sql += " AND payment=?";   args.append(payment)
+        filters, args = _build_sale_filters(date_from, date_to, payment, "")
+        sql += filters
         rows = conn.execute(sql + " GROUP BY payment", args).fetchall()
         return {"count": sum(r["c"] for r in rows),
                 "total": sum(r["t"] or 0 for r in rows),
@@ -114,8 +130,7 @@ def export_csv(request: Request, date_from: str = "", date_to: str = "",
         buf = io.StringIO()
         w = csv.writer(buf)
         w.writerow(["交易編號","時間","付款方式","商品","屬性","數量","成交單價","單品折扣","整單折抵","應收"])
-        rows = _query_sales(conn, date_from, date_to, payment)
-        disp = display_attrs(conn, [r["variant_id"] for r in rows])
+        rows, _, disp = _load_sale_rows(conn, date_from, date_to, payment, load_attrs=False)
         for r in rows:
             attr_str = disp.get(r["variant_id"], "")
             w.writerow([r["sale_id"], r["ts"], r["payment"], r["name"],

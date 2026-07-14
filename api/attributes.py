@@ -4,10 +4,9 @@ from pydantic import BaseModel
 from lib.db import db_conn, in_clause, next_sort
 from lib.dbutil import (require_exists, reject_if_referenced, update_by_id,
                         replace_links)
+from lib.product_rules import check_field_type
 
 router = APIRouter(prefix="/api")
-
-_FIELD_TYPES = {"select", "text", "multi", "tags"}
 
 class FieldPatch(BaseModel):
     name: str | None = None
@@ -35,8 +34,7 @@ class OptionModelList(BaseModel):
     model_ids: list[int] = []
 
 def _check_field_type(field_type):
-    if field_type not in _FIELD_TYPES:
-        raise HTTPException(422, "欄位類型不合法")
+    check_field_type(field_type)
 
 def _check_default_option(conn, field_id, option_id):
     if option_id is None:

@@ -88,11 +88,9 @@ class TestOptionModel(ApiTestCase):
                                json={"name": "手機殼"}).json()["category_id"]
         self.fid = self.c.post("/api/fields",
             json={"name": "顏色", "category_id": self.cid}).json()["field_id"]
-        ip = self.c.post("/api/phone-brands", json={"name": "iPhone"}).json()["phone_brand_id"]
-        self.m15 = self.c.post("/api/models",
-            json={"phone_brand_id": ip, "name": "15"}).json()["model_id"]
-        self.m16 = self.c.post("/api/models",
-            json={"phone_brand_id": ip, "name": "16"}).json()["model_id"]
+        ip = self.create_phone_brand("iPhone")
+        self.m15 = self.create_model(ip, "15")
+        self.m16 = self.create_model(ip, "16")
         # 三個選項:通用黑、限 15 的特別色、共用款(綁 15+16)
         self.o_black = self._add_opt("黑")
         self.o_special = self._add_opt("限定色")

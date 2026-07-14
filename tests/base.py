@@ -44,16 +44,32 @@ class ApiTestCase(unittest.TestCase):
         init_db(self.db)
         self.c = make_client(self.db)
 
+    def create_category(self, name):
+        return self.c.post("/api/categories", json={"name": name}).json()["category_id"]
+
+    def create_field(self, name, category_id=None, field_type="select"):
+        payload = {"name": name, "field_type": field_type}
+        if category_id is not None:
+            payload["category_id"] = category_id
+        return self.c.post("/api/fields", json=payload).json()["field_id"]
+
+    def create_options(self, field_id, values):
+        for value in values:
+            self.c.post("/api/options", json={"field_id": field_id, "value": value})
+
+    def create_phone_brand(self, name):
+        return self.c.post("/api/phone-brands", json={"name": name}).json()["phone_brand_id"]
+
+    def create_model(self, phone_brand_id, name):
+        return self.c.post("/api/models", json={
+            "phone_brand_id": phone_brand_id, "name": name}).json()["model_id"]
+
     def make_category_with_field(self, name, field_type="select", options=(),
                                  category="鋼化玻璃"):
         """建一種類 + 一屬性欄 + 選項;設定 self.cid、self.fid 並回傳 (cid, fid)。"""
-        self.cid = self.c.post(
-            "/api/categories", json={"name": category}).json()["category_id"]
-        self.fid = self.c.post("/api/fields", json={
-            "name": name, "category_id": self.cid,
-            "field_type": field_type}).json()["field_id"]
-        for v in options:
-            self.c.post("/api/options", json={"field_id": self.fid, "value": v})
+        self.cid = self.create_category(category)
+        self.fid = self.create_field(name, self.cid, field_type)
+        self.create_options(self.fid, options)
         return self.cid, self.fid
 
     def create_product(self, attrs, name="膜", price=100, barcode="B1",
