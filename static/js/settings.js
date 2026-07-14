@@ -20,9 +20,6 @@ window.PosPages["page-settings"] = {
       openCat: null, openCatName: "",
       catFields: [], catOptions: {}, newField: { name: "", field_type: "select" },
       newOption: {}, sharedFields: [], enabledShared: {},
-      // 選項限定型號(展開式勾選)
-      editingOptId: null, editingOptValue: "", editingOptField: null,
-      optModelChecked: {},
       // 廠牌經營種類
       openBrand: null, openBrandName: "", brandCatChecked: {},
     };
@@ -146,10 +143,10 @@ window.PosPages["page-settings"] = {
         this.catFields = await API.get("/api/fields?category_id=" + c.category_id);
         this._fieldSnap = {};
         for (const f of this.catFields) this._fieldSnap[f.field_id] = f.name;
-        // 維護頁需含 tags 與停用選項(all=1)
+        // 設定頁只顯示啟用選項；已刪除但仍被舊商品使用者保持隱藏
         this.catOptions = {};
         await window.CatalogFields.loadFieldsWithOptions(this.catFields, this.catOptions,
-          { types: ["select", "multi", "tags"], all: true });
+          { types: ["select", "multi", "tags"] });
         this.sharedFields = await API.get("/api/fields?common=1");
         const merged = await API.get("/api/categories/" + c.category_id + "/fields");
         const en = {};
@@ -158,8 +155,7 @@ window.PosPages["page-settings"] = {
       });
     },
     async loadFieldOptions(f) {
-      // all=1:維護頁需含停用選項(灰顯);建檔下拉另走 categories/{id}/fields 只回啟用
-      this.catOptions[f.field_id] = await API.get("/api/options?field_id=" + f.field_id + "&all=1");
+      this.catOptions[f.field_id] = await API.get("/api/options?field_id=" + f.field_id);
     },
     fieldTypeLabel(t) {
       return { select: "下拉選單", text: "文字", multi: "複選",
@@ -205,68 +201,23 @@ window.PosPages["page-settings"] = {
       const v = (this.newOption[f.field_id] || "").trim();
       if (!v) return;
       await this.guard(async () => {
-        await API.post("/api/options", { field_id: f.field_id, value: v });
+        await API.post("/api/options", {
+          field_id: f.field_id, value: v, reactivate: true,
+        });
         this.newOption[f.field_id] = "";
         await this.loadFieldOptions(f);
       });
     },
-    async renameOption(f, o) {
-      const v = prompt("請輸入新的選項名稱:", o.value);
-      if (v === null) return;
-      const nv = v.trim();
-      if (!nv || nv === o.value) return;
-      // 409:此選項值已存在
-      await this.guard(async () => {
-        await API.patch("/api/options/" + o.option_id, { value: nv });
-        await this.loadFieldOptions(f);
-      });
-    },
-    async toggleOption(f, o) {
-      await this.guard(async () => {
-        await API.patch("/api/options/" + o.option_id, { active: o.active ? 0 : 1 });
-        o.active = o.active ? 0 : 1;
-      });
-    },
     async deleteOption(f, o) {
-      if (!confirm("刪除後建檔時將不再出現此選項,既有商品不受影響。確定刪除?")) return;
-      // 409:已被商品使用,無法刪除
+      const message = o.usage_count > 0
+        ? `此選項有 ${o.usage_count} 個商品規格使用中。刪除後將從新增選單隱藏，既有商品不受影響。確定刪除？`
+        : "此選項目前未使用，刪除後將永久移除且無法復原。確定刪除？";
+      if (!confirm(message)) return;
       await this.guard(async () => {
         await API.del("/api/options/" + o.option_id);
+        if (f.default_option_id === o.option_id) f.default_option_id = null;
         await this.loadFieldOptions(f);
       });
-    },
-
-    // ---- 選項限定型號 ----
-    optModelLabel(o) {
-      const n = (o.model_ids || []).length;
-      return n ? "限 " + n + " 型號" : "通用";
-    },
-    openOptModels(f, o) {
-      if (this.editingOptId === o.option_id) { this.editingOptId = null; return; }
-      this.editingOptId = o.option_id;
-      this.editingOptValue = o.value;
-      this.editingOptField = f.field_id;
-      const checked = {};
-      for (const mid of (o.model_ids || [])) checked[mid] = true;
-      this.optModelChecked = checked;
-    },
-    toggleOptModel(m) {
-      const checked = Object.assign({}, this.optModelChecked);
-      checked[m.model_id] = !checked[m.model_id];
-      this.optModelChecked = checked;
-    },
-    async saveOptModels(f) {
-      const ids = this.models.filter(m => this.optModelChecked[m.model_id])
-        .map(m => m.model_id);
-      await this.guard(async () => {
-        await API.put("/api/options/" + this.editingOptId + "/models",
-          { model_ids: ids });
-        this.editingOptId = null;
-        await this.loadFieldOptions(f);  // 重載以更新綁定狀態顯示
-      });
-    },
-    cancelOptModels() {
-      this.editingOptId = null;
     },
     async toggleShared(sf) {
       const en = Object.assign({}, this.enabledShared);

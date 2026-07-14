@@ -31,13 +31,13 @@
 body { font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
   font-size: 16px; background: var(--bg); color: var(--text); }
 
-/* ── 導航列(淺色,選中=白底＋藍灰字) ── */
-nav { display: flex; gap: 8px; padding: 10px; background: var(--hover);
+/* ── 導航列(藍底,選中=白底＋藍字) ── */
+nav { display: flex; gap: 8px; padding: 10px; background: var(--primary-hover);
   border-bottom: 1px solid var(--pressed); }
 nav button { padding: 12px 24px; font-size: 18px; border: 0; border-radius: 8px;
-  background: var(--hover); color: var(--text-2); cursor: pointer; min-width: 0; }
-nav button:hover { background: var(--pressed); }
-nav button:active { background: var(--border); }
+  background: transparent; color: #fff; cursor: pointer; min-width: 0; }
+nav button:hover { background: var(--primary-active); }
+nav button:active { background: var(--primary-active); }
 nav button.active, nav button.active:hover, nav button.active:active {
   background: var(--surface); color: var(--primary-hover); font-weight: 600; }
 
@@ -128,6 +128,8 @@ tr.inactive > td { opacity: 0.55; }
 .maint-row .tag, .tag { background: var(--hover); color: var(--text-2); font-size: 13px;
   padding: 2px 8px; border-radius: 10px; }
 .inline-add { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.add-before-list { margin-top: 0; margin-bottom: 10px; flex-wrap: nowrap; }
+.sort-actions { margin: 0 0 6px; padding: 6px 0; flex-wrap: nowrap; }
 .drag-handle { color: var(--text-3); cursor: grab; padding: 0 4px; user-select: none; }
 .drag-handle:active { cursor: grabbing; }
 .seq-cell { width: 48px; text-align: center; border: 1px dashed var(--accent);
@@ -136,16 +138,19 @@ tr.inactive > td { opacity: 0.55; }
 .maint-row.drop-after { border-bottom: 2px solid var(--accent); }
 .detail-panel { margin-top: 14px; padding: 14px; background: var(--panel);
   border-radius: 8px; border: 1px solid var(--hover); }
+.maint-detail { margin: 0 0 8px; }
 .grp-title { font-weight: bold; margin: 8px 0 2px; color: var(--text-2); }
 .model-group { margin-bottom: 10px; }
 .hint { color: var(--text-2); font-size: 14px; }
 .opt-block { margin: 8px 0; }
-.opt-chip { display: inline-block; background: var(--accent-soft); color: var(--primary-active);
-  padding: 3px 10px; border-radius: 12px; margin: 3px 4px 0 0; font-size: 14px; }
-.opt-chip.inactive { background: var(--hover); color: var(--text-3); }
-.chip-act { margin-left: 6px; cursor: pointer; font-size: 12px;
-  color: var(--primary-hover); text-decoration: underline; }
-.opt-chip.inactive .chip-act { color: var(--text-3); }
+.option-default { display: block; margin: 4px 0; }
+.option-add { margin: 6px 0; flex-wrap: nowrap; }
+.option-list-box { height: 160px; overflow-y: auto; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface); padding: 4px 8px; }
+.option-row { display: flex; align-items: center; gap: 10px; min-height: 36px;
+  border-bottom: 1px solid var(--hover); white-space: nowrap; }
+.option-row:last-child { border-bottom: 0; }
+.option-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* 墨藍主要鈕的滑鼠移入/按下回饋(置於 primary 之後以覆寫) */
 button.primary:hover { background: var(--primary-hover); }
 button.primary:active { background: var(--primary-active); transform: translateY(1px); }

@@ -2,8 +2,7 @@ import sqlite3
 from fastapi import APIRouter, Request, HTTPException, Query
 from pydantic import BaseModel
 from lib.db import db_conn, in_clause, next_sort
-from lib.dbutil import (require_exists, reject_if_referenced, update_by_id,
-                        replace_links)
+from lib.dbutil import require_exists, update_by_id, replace_links
 from lib.product_rules import check_field_type
 
 router = APIRouter(prefix="/api")
@@ -24,6 +23,7 @@ class FieldNew(BaseModel):
 class OptionNew(BaseModel):
     field_id: int
     value: str
+    reactivate: bool = False
 
 class OptionPatch(BaseModel):
     value: str | None = None
@@ -109,10 +109,15 @@ def list_options(field_id: int, request: Request, all: int = 0,
                  model_ids: list[int] = Query(default=[])):
     with db_conn(request.app.state.db_path) as conn:
         # all=1:維護頁需看到停用者;預設只回啟用(建檔下拉用)
-        sql = "SELECT * FROM AttributeOption WHERE field_id=?"
+        sql = ("SELECT AttributeOption.*, "
+               "COUNT(DISTINCT va.variant_id) AS usage_count "
+               "FROM AttributeOption "
+               "LEFT JOIN VariantAttribute va "
+               "ON va.option_id=AttributeOption.option_id "
+               "WHERE AttributeOption.field_id=?")
         args = [field_id]
         if not all:
-            sql += " AND active=1"
+            sql += " AND AttributeOption.active=1"
         # model_ids 過濾(建檔下拉):回「未綁任何型號的 ∪ 綁定含任一給定型號的」
         if model_ids:
             qs = in_clause(model_ids)
@@ -122,7 +127,7 @@ def list_options(field_id: int, request: Request, all: int = 0,
                     "WHERE om.option_id=AttributeOption.option_id "
                     f"AND om.model_id IN ({qs})))")
             args += model_ids
-        sql += " ORDER BY sort, option_id"
+        sql += " GROUP BY AttributeOption.option_id ORDER BY sort, option_id"
         opts = [dict(r) for r in conn.execute(sql, args)]
         # 附上每個選項的限定型號清單(維護頁顯示用)
         mm = _option_models(conn, [o["option_id"] for o in opts])
@@ -140,6 +145,10 @@ def add_option(body: OptionNew, request: Request):
         conn.execute(
             "INSERT OR IGNORE INTO AttributeOption(field_id, value, sort) "
             "VALUES(?, ?, ?)", (body.field_id, body.value, sort))
+        if body.reactivate:
+            conn.execute(
+                "UPDATE AttributeOption SET active=1 WHERE field_id=? AND value=?",
+                (body.field_id, body.value))
         conn.commit()
         return {"ok": True}
 
@@ -165,13 +174,20 @@ def patch_option(option_id: int, body: OptionPatch, request: Request):
 def delete_option(option_id: int, request: Request):
     with db_conn(request.app.state.db_path) as conn:
         require_exists(conn, "AttributeOption", "option_id", option_id, "查無此選項")
-        # 正規化後變體以 VariantAttribute.option_id 參照選項;有參照硬刪回 409
-        reject_if_referenced(conn, "VariantAttribute", "option_id", option_id,
-                             "此選項已被商品使用,無法刪除,請改用停用")
+        usage_count = conn.execute(
+            "SELECT COUNT(DISTINCT variant_id) FROM VariantAttribute WHERE option_id=?",
+            (option_id,)).fetchone()[0]
+        conn.execute(
+            "UPDATE AttributeField SET default_option_id=NULL WHERE default_option_id=?",
+            (option_id,))
         conn.execute("DELETE FROM OptionModel WHERE option_id=?", (option_id,))
-        conn.execute("DELETE FROM AttributeOption WHERE option_id=?", (option_id,))
+        if usage_count:
+            conn.execute("UPDATE AttributeOption SET active=0 WHERE option_id=?",
+                         (option_id,))
+        else:
+            conn.execute("DELETE FROM AttributeOption WHERE option_id=?", (option_id,))
         conn.commit()
-        return {"ok": True}
+        return {"ok": True, "deleted": not bool(usage_count)}
 
 @router.get("/options/{option_id}/models")
 def get_option_models(option_id: int, request: Request):

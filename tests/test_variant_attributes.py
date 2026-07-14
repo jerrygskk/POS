@@ -61,11 +61,16 @@ class TestVariantAttributes(ApiTestCase):
         self.assertNotIn("規格", got)
         self.assertEqual(got["面料"], "亮面")
 
-    # 有 VariantAttribute 參照的選項硬刪 → 409
-    def test_delete_referenced_option_409(self):
+    # 有 VariantAttribute 參照的選項刪除 → 軟隱藏,既有規格保留
+    def test_delete_referenced_option_preserves_existing_attribute(self):
         self._create({"規格": "亮面"})
         oid = self._opt_id("亮面")
-        self.assertEqual(self.c.delete(f"/api/options/{oid}").status_code, 409)
+        self.assertEqual(self.c.delete(f"/api/options/{oid}").status_code, 200)
+        self.assertEqual(self.c.get("/api/barcode/B1").json()["attributes"]["規格"],
+                         "亮面")
+        self.assertNotIn("亮面", [
+            o["value"] for o in self.c.get(f"/api/options?field_id={self.fid}").json()
+        ])
         # 未被參照的選項可刪
         oid2 = self._opt_id("霧面")
         self.assertEqual(self.c.delete(f"/api/options/{oid2}").status_code, 200)

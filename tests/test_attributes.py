@@ -1,4 +1,5 @@
 import unittest
+from lib.db import get_conn
 from base import ApiTestCase
 
 class TestAttributes(ApiTestCase):
@@ -40,6 +41,35 @@ class TestAttributes(ApiTestCase):
         self.assertEqual(r.status_code, 200)   # 重複靜默成功,不炸
         opts = self.c.get(f"/api/options?field_id={fid}").json()
         self.assertEqual(len([o for o in opts if o["value"] == "黑"]), 1)
+
+    def test_reactivate_inactive_option_restores_same_id_without_duplicate(self):
+        fid = self.c.post("/api/fields", json={"name": "版型"}).json()["field_id"]
+        oid = self._opt(fid, "亮面")
+        self.c.patch(f"/api/options/{oid}", json={"active": 0})
+
+        r = self.c.post("/api/options", json={
+            "field_id": fid, "value": "亮面", "reactivate": True})
+
+        self.assertEqual(r.status_code, 200)
+        opts = self.c.get(f"/api/options?field_id={fid}&all=1").json()
+        matches = [o for o in opts if o["value"] == "亮面"]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["option_id"], oid)
+        self.assertEqual(matches[0]["active"], 1)
+
+    def test_duplicate_inactive_option_without_reactivate_stays_inactive(self):
+        fid = self.c.post("/api/fields", json={"name": "版型"}).json()["field_id"]
+        oid = self._opt(fid, "亮面")
+        self.c.patch(f"/api/options/{oid}", json={"active": 0})
+
+        r = self.c.post("/api/options", json={"field_id": fid, "value": "亮面"})
+
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.c.get(f"/api/options?field_id={fid}").json(), [])
+        all_opts = self.c.get(f"/api/options?field_id={fid}&all=1").json()
+        self.assertEqual(len(all_opts), 1)
+        self.assertEqual(all_opts[0]["option_id"], oid)
+        self.assertEqual(all_opts[0]["active"], 0)
 
     def _opt(self, fid, value):
         self.c.post("/api/options", json={"field_id": fid, "value": value})
@@ -88,6 +118,60 @@ class TestAttributes(ApiTestCase):
         fields = self.c.get(f"/api/categories/{cid}/fields").json()
         opts = next(f["options"] for f in fields if f["field_id"] == fid)
         self.assertEqual(opts, [])
+
+    def test_referenced_delete_hides_option_preserves_attributes_and_clears_links(self):
+        cid = self.create_category("保護貼")
+        fid = self.create_field("版型", cid)
+        oid = self._opt(fid, "亮面")
+        mid = self.create_model(self.create_phone_brand("測試品牌"), "測試型號")
+        self.c.put(f"/api/fields/{fid}", json={"default_option_id": oid})
+        self.c.put(f"/api/options/{oid}/models", json={"model_ids": [mid]})
+        self.c.post("/api/products", json={
+            "name": "膜", "category_id": cid, "default_price": 100,
+            "variants": [
+                {"attributes": {"版型": "亮面"}, "barcodes": []},
+                {"attributes": {"版型": "亮面"}, "barcodes": []},
+            ],
+        })
+
+        listed = self.c.get(f"/api/options?field_id={fid}").json()
+        self.assertEqual(listed[0]["usage_count"], 2)
+        r = self.c.delete(f"/api/options/{oid}")
+
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()["deleted"])
+        self.assertEqual(self.c.get(f"/api/options?field_id={fid}").json(), [])
+        hidden = self.c.get(f"/api/options?field_id={fid}&all=1").json()[0]
+        self.assertEqual(hidden["active"], 0)
+        self.assertEqual(hidden["usage_count"], 2)
+        with get_conn(self.db) as conn:
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM VariantAttribute WHERE option_id=?", (oid,)
+            ).fetchone()[0], 2)
+            self.assertIsNone(conn.execute(
+                "SELECT default_option_id FROM AttributeField WHERE field_id=?", (fid,)
+            ).fetchone()[0])
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM OptionModel WHERE option_id=?", (oid,)
+            ).fetchone()[0], 0)
+
+    def test_unreferenced_delete_removes_option_and_clears_default(self):
+        fid = self.c.post("/api/fields", json={"name": "版型"}).json()["field_id"]
+        oid = self._opt(fid, "亮面")
+        self.c.put(f"/api/fields/{fid}", json={"default_option_id": oid})
+
+        r = self.c.delete(f"/api/options/{oid}")
+
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["deleted"])
+        self.assertEqual(self.c.get(f"/api/options?field_id={fid}&all=1").json(), [])
+        with get_conn(self.db) as conn:
+            self.assertIsNone(conn.execute(
+                "SELECT default_option_id FROM AttributeField WHERE field_id=?", (fid,)
+            ).fetchone()[0])
+            self.assertIsNone(conn.execute(
+                "SELECT option_id FROM AttributeOption WHERE option_id=?", (oid,)
+            ).fetchone())
 
     def test_add_option_unknown_field_returns_404(self):
         r = self.c.post("/api/options",

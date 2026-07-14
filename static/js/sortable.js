@@ -52,21 +52,24 @@ window.PosComponents["sortable-list"] = {
   },
   template: `
   <div>
-    <div v-for="(it, i) in rows" :key="it[itemKey]" class="maint-row"
-         :class="{ inactive: !it.active, 'drop-before': overIdx === i,
-                   'drop-after': overIdx === i + 1 && i === rows.length - 1 }"
-         @dragover.prevent="onDragOver(i, $event)"
-         @dragleave="(overIdx === i || overIdx === i + 1) && (overIdx = null)"
-         @drop.prevent="onDrop()">
-      <span class="drag-handle" draggable="true" title="按住拖拉調整排序"
-            @dragstart="onDragStart(i, $event)" @dragend="dragIdx = null; overIdx = null">⠿</span>
-      <input class="seq-cell" :value="i + 1" title="輸入序號後按 Enter 可搬移"
-             @keyup.enter="onSeqCommit(i, $event)" @blur="onSeqBlur(i, $event)">
-      <slot name="row" :item="it" :index="i"></slot>
-    </div>
-    <div v-if="dirty" class="inline-add">
+    <div v-if="dirty" class="inline-add sort-actions">
       <button class="primary" @click="save">儲存排序</button>
       <button @click="reset">取消</button>
     </div>
+    <template v-for="(it, i) in rows" :key="it[itemKey]">
+      <div class="maint-row"
+           :class="{ inactive: !it.active, 'drop-before': overIdx === i,
+                     'drop-after': overIdx === i + 1 && i === rows.length - 1 }"
+           @dragover.prevent="onDragOver(i, $event)"
+           @dragleave="(overIdx === i || overIdx === i + 1) && (overIdx = null)"
+           @drop.prevent="onDrop()">
+        <span class="drag-handle" draggable="true" title="按住拖拉調整排序"
+              @dragstart="onDragStart(i, $event)" @dragend="dragIdx = null; overIdx = null">⠿</span>
+        <input class="seq-cell" :value="i + 1" title="輸入序號後按 Enter 可搬移"
+               @keyup.enter="onSeqCommit(i, $event)" @blur="onSeqBlur(i, $event)">
+        <slot name="row" :item="it" :index="i"></slot>
+      </div>
+      <slot name="detail" :item="it" :index="i"></slot>
+    </template>
   </div>`,
 };
