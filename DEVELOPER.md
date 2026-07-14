@@ -84,10 +84,10 @@ python -m unittest discover -s tests
 ```powershell
 Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
 Remove-Item -Force POS.spec -ErrorAction SilentlyContinue
-pyinstaller --clean --onefile --name POS --add-data "static;static" --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.lifespan.on --version-file version_info.txt main.py
+pyinstaller --clean --onefile --name POS --icon "assets/POS.ico" --add-data "static;static" --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.lifespan.on --version-file version_info.txt main.py
 ```
 
-上列為標準打包指令:先清除舊 `build/`、`dist/`、`POS.spec`,再以 `--clean --onefile` 打包 static、版本資訊與 uvicorn hidden-import。`tools/build.ps1` 可供核對參數,實際打包不要執行該腳本。
+上列為標準打包指令:先清除舊 `build/`、`dist/`、`POS.spec`,再以 `--clean --onefile` 打包 static、版本資訊與 uvicorn hidden-import，並以 `assets/POS.ico` 作為執行檔圖示。`tools/build.ps1` 可供核對參數,實際打包不要執行該腳本。
 
 產出 `dist/POS.exe`,雙擊即可執行,會在 exe 所在目錄自動建立 `data/`(含 `pos.db`、`backups/`)。
 

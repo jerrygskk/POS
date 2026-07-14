@@ -32,8 +32,9 @@ body { font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-se
   font-size: 16px; background: var(--bg); color: var(--text); }
 
 /* ── 導航列(藍底,選中=白底＋藍字) ── */
-nav { display: flex; gap: 8px; padding: 10px; background: var(--primary-hover);
-  border-bottom: 1px solid var(--pressed); }
+nav { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding: 10px;
+  background: var(--primary-hover); border-bottom: 1px solid var(--pressed); }
+.nav-logo { width: 52px; height: 52px; object-fit: contain; flex: 0 0 52px; }
 nav button { padding: 12px 24px; font-size: 18px; border: 0; border-radius: 8px;
   background: transparent; color: #fff; cursor: pointer; min-width: 0; }
 nav button:hover { background: var(--primary-active); }
