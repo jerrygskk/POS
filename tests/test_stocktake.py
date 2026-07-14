@@ -1,5 +1,7 @@
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from base import ApiTestCase
+from lib.db import get_conn
 
 class TestStocktake(ApiTestCase):
     def setUp(self):
@@ -32,6 +34,27 @@ class TestStocktake(ApiTestCase):
         self.c.post(f"/api/stocktake/{self.sid}/close")
         self.assertEqual(self.c.post(f"/api/stocktake/{self.sid}/close").status_code, 409)
 
+    def test_concurrent_close_creates_one_adjustment(self):
+        self.c.post(f"/api/stocktake/{self.sid}/scan",
+                    json={"variant_id": self.v1, "qty": 4})
+
+        def close_session():
+            from base import make_client
+            return make_client(self.db).post(f"/api/stocktake/{self.sid}/close")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = list(pool.map(lambda _: close_session(), range(2)))
+
+        self.assertEqual(sorted(r.status_code for r in responses), [200, 409])
+        conn = get_conn(self.db)
+        try:
+            count = conn.execute(
+                "SELECT COUNT(*) AS n FROM StockMovement "
+                "WHERE kind='adjust' AND ref_id=?", (self.sid,)).fetchone()["n"]
+        finally:
+            conn.close()
+        self.assertEqual(count, 1)
+
     def test_manual_set(self):
         self.c.post(f"/api/stocktake/{self.sid}/scan", json={"variant_id": self.v1})
         self.c.put(f"/api/stocktake/{self.sid}/items/{self.v1}", json={"counted_qty": 7})
@@ -46,3 +69,14 @@ class TestStocktake(ApiTestCase):
         r = self.c.put(f"/api/stocktake/{self.sid}/items/{self.v2}",
                        json={"counted_qty": 3})
         self.assertEqual(r.status_code, 404)
+
+    def test_negative_counts_rejected(self):
+        r = self.c.post(f"/api/stocktake/{self.sid}/scan",
+                        json={"variant_id": self.v1, "qty": -1})
+        self.assertEqual(r.status_code, 422)
+
+        self.c.post(f"/api/stocktake/{self.sid}/scan",
+                    json={"variant_id": self.v1})
+        r = self.c.put(f"/api/stocktake/{self.sid}/items/{self.v1}",
+                       json={"counted_qty": -1})
+        self.assertEqual(r.status_code, 422)

@@ -28,10 +28,25 @@ class TestSales(ApiTestCase):
                                "unit_price": 500, "discount": 50}]).json()
         self.assertEqual(r["total"], 450)
 
+    def test_item_discount_cannot_exceed_subtotal(self):
+        r = self._sale(items=[
+            {"variant_id": self.vid, "qty": 1,
+             "unit_price": 500, "discount": 501},
+            {"variant_id": self.vid, "qty": 2,
+             "unit_price": 500, "discount": 0},
+        ])
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(self.c.get(f"/api/stock/{self.vid}").json()["stock"], 10)
+
     def test_negative_total_rejected(self):
         r = self._sale(order_discount=99999)
         self.assertEqual(r.status_code, 422)
         # 交易失敗庫存不動
+        self.assertEqual(self.c.get(f"/api/stock/{self.vid}").json()["stock"], 10)
+
+    def test_unknown_payment_rejected(self):
+        r = self._sale(payment="不存在的付款方式")
+        self.assertEqual(r.status_code, 422)
         self.assertEqual(self.c.get(f"/api/stock/{self.vid}").json()["stock"], 10)
 
     def test_summary(self):
@@ -59,3 +74,12 @@ class TestSales(ApiTestCase):
         r = self.c.get("/api/sales/export")
         self.assertEqual(r.status_code, 200)
         self.assertIn("csv", r.headers["content-type"])
+
+    def test_export_filters_by_payment(self):
+        self._sale(payment="現金")
+        self._sale(payment="刷卡")
+        r = self.c.get("/api/sales/export?payment=%E7%8F%BE%E9%87%91")
+        self.assertEqual(r.status_code, 200)
+        content = r.content.decode("utf-8-sig")
+        self.assertIn("現金", content)
+        self.assertNotIn("刷卡", content)

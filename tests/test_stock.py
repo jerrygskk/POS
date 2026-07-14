@@ -25,3 +25,8 @@ class TestStock(ApiTestCase):
     def test_reject_zero_qty(self):
         r = self.c.post("/api/stock/receive", json={"variant_id": self.vid, "qty": 0})
         self.assertEqual(r.status_code, 422)
+
+    def test_receive_unknown_variant_returns_404(self):
+        r = self.c.post("/api/stock/receive",
+                        json={"variant_id": 999999, "qty": 1})
+        self.assertEqual(r.status_code, 404)

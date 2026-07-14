@@ -23,7 +23,8 @@ window.PosPages["page-records"] = {
       });
     },
     exportCsv() {
-      window.open(`/api/sales/export?date_from=${this.dateFrom}&date_to=${this.dateTo}`);
+      const payment = this.payment ? `&payment=${encodeURIComponent(this.payment)}` : "";
+      window.open(`/api/sales/export?date_from=${this.dateFrom}&date_to=${this.dateTo}${payment}`);
     },
   },
 };

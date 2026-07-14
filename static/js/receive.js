@@ -26,7 +26,10 @@ window.PosPages["page-receive"] = {
       try {
         this.hit = await API.get("/api/barcode/" + encodeURIComponent(code));
         this.creating = false; this.scanCode = "";
-      } catch (e) { this.startCreate(code); }  // 查無 → 建檔,條碼帶入
+      } catch (e) {
+        if (e.status === 404) this.startCreate(code);
+        else this.showError(e.message);
+      }
     },
     startCreate(code) {
       this.hit = null; this.creating = true; this.newBarcode = code;

@@ -19,18 +19,25 @@ class SaleIn(BaseModel):
     paid: int = Field(ge=0)
     items: list[ItemIn] = Field(min_length=1)
 
+def _configured_payments(conn):
+    row = conn.execute("SELECT value FROM Setting WHERE key='payments'").fetchone()
+    return json.loads(row["value"]) if row else []
+
 @router.get("/payments")
 def payments(request: Request):
     with db_conn(request.app.state.db_path) as conn:
-        row = conn.execute("SELECT value FROM Setting WHERE key='payments'").fetchone()
-        return json.loads(row["value"])
+        return _configured_payments(conn)
 
 @router.post("/sales")
 def checkout(body: SaleIn, request: Request):
+    if any(i.discount > i.qty * i.unit_price for i in body.items):
+        raise HTTPException(422, "單品折扣不可超過品項小計")
     total = sum(i.qty * i.unit_price - i.discount for i in body.items) - body.order_discount
     if total < 0:
         raise HTTPException(422, "折扣後金額不可為負")
     with db_conn(request.app.state.db_path) as conn:
+        if body.payment not in _configured_payments(conn):
+            raise HTTPException(422, "付款方式不在設定清單")
         # 停用 guard:任一變體或其款停用 → 擋掉,不寫入任何資料
         for i in body.items:
             row = conn.execute(
@@ -101,12 +108,13 @@ def summary(request: Request, date_from: str = "", date_to: str = "",
                 "by_payment": {r["payment"]: r["t"] for r in rows}}
 
 @router.get("/sales/export")
-def export_csv(request: Request, date_from: str = "", date_to: str = ""):
+def export_csv(request: Request, date_from: str = "", date_to: str = "",
+               payment: str = ""):
     with db_conn(request.app.state.db_path) as conn:
         buf = io.StringIO()
         w = csv.writer(buf)
         w.writerow(["交易編號","時間","付款方式","商品","屬性","數量","成交單價","單品折扣","整單折抵","應收"])
-        rows = _query_sales(conn, date_from, date_to, "")
+        rows = _query_sales(conn, date_from, date_to, payment)
         disp = display_attrs(conn, [r["variant_id"] for r in rows])
         for r in rows:
             attr_str = disp.get(r["variant_id"], "")

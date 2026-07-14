@@ -6,7 +6,9 @@ const API = {
     if (!r.ok) {
       let msg = "系統發生錯誤";
       try { msg = (await r.json()).detail || msg; } catch (e) {}
-      throw new Error(msg);
+      const err = new Error(msg);
+      err.status = r.status;
+      throw err;
     }
     return r.json();
   },

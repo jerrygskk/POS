@@ -65,7 +65,7 @@ def _check_brand(conn, brand_id):
 
 def _set_variant_models(conn, variant_id, model_ids):
     replace_links(conn, "VariantModel", "variant_id", variant_id,
-                  "model_id", model_ids)
+                  "model_id", model_ids, fk_error_msg="型號不存在")
 
 def _models_by_variant(conn, variant_ids):
     """回傳 {variant_id: [型號顯示名, ...]}(有別名顯示別名,否則全名)"""
@@ -365,6 +365,8 @@ def scan(code: str, request: Request):
 @router.post("/variants/{variant_id}/barcodes")
 def add_barcode(variant_id: int, body: BarcodeIn, request: Request):
     with db_conn(request.app.state.db_path) as conn:
+        require_exists(conn, "Variant", "variant_id", variant_id,
+                       "查無此子產品")
         _reject_manual_tl(body.barcode)
         code = body.barcode or next_store_barcode(conn)
         conn.execute("INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",

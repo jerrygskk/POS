@@ -7,6 +7,8 @@ from lib.dbutil import (require_exists, reject_if_referenced, update_by_id,
 
 router = APIRouter(prefix="/api")
 
+_FIELD_TYPES = {"select", "text", "multi", "tags"}
+
 class FieldPatch(BaseModel):
     name: str | None = None
     sort: int | None = None
@@ -31,6 +33,19 @@ class OptionPatch(BaseModel):
 
 class OptionModelList(BaseModel):
     model_ids: list[int] = []
+
+def _check_field_type(field_type):
+    if field_type not in _FIELD_TYPES:
+        raise HTTPException(422, "欄位類型不合法")
+
+def _check_default_option(conn, field_id, option_id):
+    if option_id is None:
+        return
+    row = conn.execute(
+        "SELECT field_id FROM AttributeOption WHERE option_id=?",
+        (option_id,)).fetchone()
+    if row is None or row["field_id"] != field_id:
+        raise HTTPException(422, "預設選項不屬於此規格欄")
 
 def _option_models(conn, option_ids):
     """回傳 {option_id: [model_id, ...]}(選項限定型號)。"""
@@ -61,6 +76,12 @@ def list_fields(request: Request, category_id: int | None = None,
 @router.post("/fields")
 def add_field(body: FieldNew, request: Request):
     with db_conn(request.app.state.db_path) as conn:
+        _check_field_type(body.field_type)
+        if body.default_option_id is not None:
+            raise HTTPException(422, "新建規格欄不可設定預設選項")
+        if body.category_id is not None:
+            require_exists(conn, "Category", "category_id", body.category_id,
+                           "查無此種類")
         sort = next_sort(conn, "AttributeField")
         cur = conn.execute(
             "INSERT INTO AttributeField(name, category_id, field_type, "
@@ -77,7 +98,10 @@ def patch_field(field_id: int, body: FieldPatch, request: Request):
         fields = body.model_dump(exclude_unset=True)
         if not fields:
             return {"ok": True}
-        # 查無 field_id 時原行為為冪等成功(不 404),故 not_found_msg 留空
+        if "field_type" in fields:
+            _check_field_type(fields["field_type"])
+        if "default_option_id" in fields:
+            _check_default_option(conn, field_id, fields["default_option_id"])
         update_by_id(conn, "AttributeField", "field_id", field_id, fields)
         conn.commit()
         return {"ok": True}
@@ -111,6 +135,8 @@ def list_options(field_id: int, request: Request, all: int = 0,
 @router.post("/options")
 def add_option(body: OptionNew, request: Request):
     with db_conn(request.app.state.db_path) as conn:
+        require_exists(conn, "AttributeField", "field_id", body.field_id,
+                       "查無此規格欄")
         # UNIQUE(field_id,value):手打自增入庫入口,重複送出冪等成功
         sort = next_sort(conn, "AttributeOption", "field_id=?", (body.field_id,))
         conn.execute(

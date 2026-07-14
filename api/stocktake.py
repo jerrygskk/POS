@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from lib.db import db_conn
 from api.products import stock_of, attrs_by_variant, display_attrs
 
@@ -11,10 +11,10 @@ class SessionIn(BaseModel):
 
 class ScanIn(BaseModel):
     variant_id: int
-    qty: int = 1
+    qty: int = Field(default=1, gt=0)
 
 class SetIn(BaseModel):
-    counted_qty: int
+    counted_qty: int = Field(ge=0)
 
 @router.post("/stocktake")
 def open_session(body: SessionIn, request: Request):
@@ -98,15 +98,23 @@ def detail(sid: int, request: Request):
 @router.post("/stocktake/{sid}/close")
 def close(sid: int, request: Request):
     with db_conn(request.app.state.db_path) as conn:
-        _require_open(conn, sid)
+        cur = conn.execute(
+            "UPDATE StocktakeSession SET status='closed', "
+            "ended_at=datetime('now','localtime') "
+            "WHERE session_id=? AND status='open'", (sid,))
+        if cur.rowcount == 0:
+            session = conn.execute(
+                "SELECT status FROM StocktakeSession WHERE session_id=?",
+                (sid,)).fetchone()
+            if not session:
+                raise HTTPException(404, "查無此盤點單")
+            raise HTTPException(409, "盤點單已結案")
         for r in conn.execute(
-                "SELECT variant_id, counted_qty - system_qty AS diff "
-                "FROM StocktakeItem WHERE session_id=?", (sid,)):
+            "SELECT variant_id, counted_qty - system_qty AS diff "
+            "FROM StocktakeItem WHERE session_id=?", (sid,)):
             if r["diff"] != 0:
                 conn.execute(
                     "INSERT INTO StockMovement(variant_id,qty,kind,ref_id,note) "
                     "VALUES(?,?,'adjust',?,'盤點調整')", (r["variant_id"], r["diff"], sid))
-        conn.execute("UPDATE StocktakeSession SET status='closed', "
-                     "ended_at=datetime('now','localtime') WHERE session_id=?", (sid,))
         conn.commit()
         return {"ok": True}

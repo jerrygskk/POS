@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 from lib.db import db_conn
+from lib.dbutil import require_exists
 from api.products import stock_of
 
 router = APIRouter(prefix="/api")
@@ -13,6 +14,8 @@ class ReceiveIn(BaseModel):
 @router.post("/stock/receive")
 def receive(body: ReceiveIn, request: Request):
     with db_conn(request.app.state.db_path) as conn:
+        require_exists(conn, "Variant", "variant_id", body.variant_id,
+                       "查無此子產品")
         conn.execute(
             "INSERT INTO StockMovement(variant_id,qty,kind,note) VALUES(?,?,'purchase',?)",
             (body.variant_id, body.qty, body.note))

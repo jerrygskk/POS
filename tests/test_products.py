@@ -73,3 +73,13 @@ class TestProducts(ApiTestCase):
         self.assertEqual(self.c.delete(f"/api/barcodes/{b1}").status_code, 200)
         b2 = self.c.post(f"/api/variants/{v}/barcodes", json={"source":"store"}).json()["barcode"]
         self.assertEqual(int(b2[2:]), int(b1[2:]) + 1)
+
+    def test_add_barcode_unknown_variant_returns_404(self):
+        r = self.c.post("/api/variants/999999/barcodes",
+                        json={"source": "store"})
+        self.assertEqual(r.status_code, 404)
+
+    def test_variant_model_unknown_id_returns_422(self):
+        v = self._create()["variant_ids"][0]
+        r = self.c.put(f"/api/variants/{v}/models", json={"model_ids": [999999]})
+        self.assertEqual(r.status_code, 422)

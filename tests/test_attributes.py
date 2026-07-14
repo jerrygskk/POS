@@ -89,6 +89,35 @@ class TestAttributes(ApiTestCase):
         opts = next(f["options"] for f in fields if f["field_id"] == fid)
         self.assertEqual(opts, [])
 
+    def test_add_option_unknown_field_returns_404(self):
+        r = self.c.post("/api/options",
+                        json={"field_id": 999999, "value": "不存在"})
+        self.assertEqual(r.status_code, 404)
+
+    def test_invalid_field_type_rejected_on_add_and_patch(self):
+        r = self.c.post("/api/fields", json={"name": "壞欄", "field_type": "number"})
+        self.assertEqual(r.status_code, 422)
+
+        fid = self.c.get("/api/fields").json()[0]["field_id"]
+        r = self.c.put(f"/api/fields/{fid}", json={"field_type": "number"})
+        self.assertEqual(r.status_code, 422)
+
+    def test_default_option_must_be_created_with_field_and_belong_to_field(self):
+        fid = self.c.post("/api/fields", json={"name": "版型一"}).json()["field_id"]
+        other_fid = self.c.post("/api/fields", json={"name": "版型二"}).json()["field_id"]
+        other_oid = self._opt(other_fid, "亮面")
+
+        r = self.c.post("/api/fields", json={
+            "name": "不應有預設", "default_option_id": other_oid})
+        self.assertEqual(r.status_code, 422)
+
+        r = self.c.put(f"/api/fields/{fid}",
+                       json={"default_option_id": 999999})
+        self.assertEqual(r.status_code, 422)
+        r = self.c.put(f"/api/fields/{fid}",
+                       json={"default_option_id": other_oid})
+        self.assertEqual(r.status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()

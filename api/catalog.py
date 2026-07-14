@@ -312,6 +312,7 @@ def set_category_common_fields(cid: int, body: FieldIdList, request: Request):
     with db_conn(request.app.state.db_path) as conn:
         require_exists(conn, "Category", "category_id", cid, "查無此種類")
         replace_links(conn, "CategoryField", "category_id", cid,
-                      "field_id", body.field_ids)
+                      "field_id", body.field_ids,
+                      fk_error_msg="規格欄不存在")
         conn.commit()
         return {"ok": True}

@@ -209,6 +209,12 @@ class TestCatalogApi(ApiTestCase):
         self.assertFalse(vt["shared"])
         self.assertTrue([f for f in fields if f["name"] == "顏色"][0]["shared"])
 
+    def test_category_common_fields_unknown_field_returns_422(self):
+        cid = self.c.post("/api/categories", json={"name": "測試種類"}).json()["category_id"]
+        r = self.c.put(f"/api/categories/{cid}/fields-common",
+                       json={"field_ids": [999999]})
+        self.assertEqual(r.status_code, 422)
+
     # ---- 變體掛型號後以 model_id 篩選查得 ----
     def test_variant_model_filter(self):
         cid = self.c.post("/api/categories", json={"name": "手機殼"}).json()["category_id"]
