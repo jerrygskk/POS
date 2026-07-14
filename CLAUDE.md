@@ -39,6 +39,7 @@
 ### Git
 
 - **push＝commit + push**。**逐檔 add**（不要一次全加，跳過資料庫檔／含個資檔）；**叫你推才推**，沒說不要問。
+- **commit 訊息須完整列出改動**：第一行寫精簡主旨，空一行後以條列逐項說明本次實際修改內容；不得只用一行摘要帶過。
 - ⚠️ 多行 commit 訊息用 Bash heredoc（`git commit -F - <<'EOF' … EOF`），**不要用 PowerShell here-string**（`@` 會黏進 subject）。
 - ⚠️ **公開 repo**（https://github.com/jerrygskk/POS）：push 前必確認無真實人名／個資（測試 fixture、文件範例、資料庫檔）；所有 xlsm/xlsx 已 gitignore，**絕不入庫**。
 ### 發布
