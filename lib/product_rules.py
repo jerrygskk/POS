@@ -1,6 +1,6 @@
 """共用商品規則：執行期欄位型別與自取條碼計數器。"""
 
-from fastapi import HTTPException
+from lib.application_errors import ValidationError
 
 
 FIELD_TYPES = {"select", "text", "multi", "tags"}
@@ -8,7 +8,7 @@ FIELD_TYPES = {"select", "text", "multi", "tags"}
 
 def check_field_type(field_type):
     if field_type not in FIELD_TYPES:
-        raise HTTPException(422, "欄位類型不合法")
+        raise ValidationError("欄位類型不合法")
 
 
 def next_store_barcode(conn):

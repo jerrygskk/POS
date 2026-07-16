@@ -1,7 +1,7 @@
 import unittest
 from base import ApiTestCase
 from lib.product_rules import FIELD_TYPES, check_field_type, next_store_barcode
-from fastapi import HTTPException
+from lib.application_errors import ValidationError
 from base import ConnTestCase
 
 
@@ -23,9 +23,9 @@ class TestProductRules(ConnTestCase):
         self.assertEqual(FIELD_TYPES, {"select", "text", "multi", "tags"})
         for field_type in FIELD_TYPES:
             check_field_type(field_type)
-        with self.assertRaises(HTTPException) as ctx:
+        with self.assertRaises(ValidationError) as ctx:
             check_field_type("number")
-        self.assertEqual(ctx.exception.status_code, 422)
+        self.assertEqual(ctx.exception.code, "validation_error")
 
 class TestProducts(ApiTestCase):
     def setUp(self):

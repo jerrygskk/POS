@@ -93,9 +93,9 @@ window.PosPages["page-catalog"] = {
     };
     document.addEventListener("keydown", this._escHandler);
     await this.guard(async () => {
-      this.categories = await API.get("/api/categories");
-      this.brands = await API.get("/api/brands");
-      this.models = await API.get("/api/models");
+      this.categories = await API.listCategories({});
+      this.brands = await API.listBrands({});
+      this.models = await API.listModels({});
     });
     await this.reload();
   },
@@ -106,12 +106,9 @@ window.PosPages["page-catalog"] = {
     // 只重撈資料,不動編輯狀態(條碼即時新增/刪除用,避免把使用者踢出編輯)
     async refresh() {
       await this.guard(async () => {
-        let url = "/api/catalog?q=" + encodeURIComponent(this.q);
-        if (this.includeInactive) url += "&include_inactive=1";
-        if (this.fCategory) url += "&category_id=" + this.fCategory;
-        if (this.fBrand) url += "&brand_id=" + this.fBrand;
-        if (this.fModel) url += "&model_id=" + this.fModel;
-        this.products = await API.get(url);
+        this.products = await API.listCatalog({q: this.q,
+          include_inactive: this.includeInactive, category_id: this.fCategory,
+          brand_id: this.fBrand, model_id: this.fModel});
       });
     },
     async reload() {
@@ -127,7 +124,7 @@ window.PosPages["page-catalog"] = {
     async ensureFields(cid) {
       if (cid == null || this.fieldsByCat[cid]) return;
       await this.guard(async () => {
-        const fields = await API.get("/api/categories/" + cid + "/fields");
+        const fields = await API.categoryFields(cid);
         this.fieldsByCat[cid] = fields;
         // select/multi 欄選項另帶 model_ids(限定型號),供勾選框/下拉依適用型號過濾
         await window.CatalogFields.loadFieldsWithOptions(fields, this.fieldOptions);
@@ -155,18 +152,18 @@ window.PosPages["page-catalog"] = {
     async saveProduct() {
       const e = this.editProduct;
       if (!e.name.trim()) { this.showError("請輸入商品名稱"); return; }
-      await this.guardReload(() => API.put("/api/products/" + e.product_id, {
+      await this.guardReload(() => API.updateProduct(e.product_id, {
         name: e.name.trim(), category_id: e.category_id, brand_id: e.brand_id,
         default_price: e.default_price === "" ? null : (e.default_price ?? null),
         note: e.note.trim() || null }));
     },
     async toggleProductActive(p) {
       await this.guardReload(() =>
-        API.put("/api/products/" + p.product_id, { active: p.active ? 0 : 1 }));
+        API.updateProduct(p.product_id, { active: p.active ? 0 : 1 }));
     },
     async deleteProduct(p) {
       if (!confirm(`確定刪除商品「${p.name}」?刪除後無法復原。`)) return;
-      await this.guardReload(() => API.del("/api/products/" + p.product_id));
+      await this.guardReload(() => API.deleteProduct(p.product_id));
     },
 
     // 變體編輯
@@ -183,11 +180,10 @@ window.PosPages["page-catalog"] = {
       try {
         await window.CatalogFields.ensureOptions(
           this.fieldsByCat[e._cat] || [], e.attrs, this.fieldOptions);
-        await API.put("/api/variants/" + e.variant_id, {
+        await API.updateVariantDetails(e.variant_id, {
           attributes: window.buildAttrPayload(this.fieldsByCat[e._cat], e.attrs),
-          price: e.price === "" ? null : (e.price ?? null) });
-        await API.put("/api/variants/" + e.variant_id + "/models",
-          { model_ids: e.model_ids });
+          price: e.price === "" ? null : (e.price ?? null)
+        }, e.model_ids);
         await this.reload();
       } catch (err) {
         this.showError(err.message);
@@ -197,11 +193,11 @@ window.PosPages["page-catalog"] = {
     },
     async toggleVariantActive(p, v) {
       await this.guardReload(() =>
-        API.put("/api/variants/" + v.variant_id, { active: v.active ? 0 : 1 }));
+        API.updateVariant(v.variant_id, { active: v.active ? 0 : 1 }));
     },
     async deleteVariant(p, v) {
       if (!confirm("確定刪除此子產品?刪除後無法復原。")) return;
-      await this.guardReload(() => API.del("/api/variants/" + v.variant_id));
+      await this.guardReload(() => API.deleteVariant(v.variant_id));
     },
 
     // 條碼(瀏覽只顯示一條:優先原廠碼,其次自取碼;管理進編輯)
@@ -212,7 +208,7 @@ window.PosPages["page-catalog"] = {
     async removeBarcode(p, code) {
       if (!confirm(`確定移除條碼「${code}」?`)) return;
       await this.guard(async () => {
-        await API.del("/api/barcodes/" + encodeURIComponent(code));
+        await API.deleteBarcode(code);
         await this.refresh();
       });
     },
@@ -224,8 +220,8 @@ window.PosPages["page-catalog"] = {
         return;
       }
       try {
-        await API.post("/api/variants/" + v.variant_id + "/barcodes",
-                       { barcode: code, source: "factory" });
+        await API.addBarcode({variant_id: v.variant_id,
+                              barcode: code, source: "factory"});
         this.bcInput[v.variant_id] = "";
         this.bcError[v.variant_id] = "";
         await this.refresh();
@@ -233,8 +229,7 @@ window.PosPages["page-catalog"] = {
     },
     async addStoreBarcode(p, v) {
       await this.guard(async () => {
-        await API.post("/api/variants/" + v.variant_id + "/barcodes",
-                       { source: "store" });
+        await API.addBarcode({variant_id: v.variant_id, source: "store"});
         await this.refresh();
       });
     },
@@ -254,7 +249,7 @@ window.PosPages["page-catalog"] = {
       await this.guardReload(async () => {
         await window.CatalogFields.ensureOptions(
           this.fieldsByCat[p.category_id] || [], n.attrs, this.fieldOptions);
-        await API.post("/api/products/" + p.product_id + "/variants", {
+        await API.createVariant(p.product_id, {
           attributes: window.buildAttrPayload(this.fieldsByCat[p.category_id], n.attrs),
           price: n.price === "" ? null : (n.price ?? null),
           model_ids: n.model_ids, barcodes });

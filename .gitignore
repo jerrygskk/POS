@@ -18,3 +18,8 @@ docs/
 
 # 一次性匯入工具(店內資料相關,不入庫)
 tools/import_excel.py
+
+# 執行期產物(與 exe 同層)
+pos.db
+error.log
+backups/

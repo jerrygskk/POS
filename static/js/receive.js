@@ -14,8 +14,8 @@ window.PosPages["page-receive"] = {
   },
   async mounted() {
     await this.guard(async () => {
-      this.categories = await API.get("/api/categories");
-      this.models = await API.get("/api/models");
+      this.categories = await API.listCategories({});
+      this.models = await API.listModels({});
     });
     this.$refs.scan.focus();
   },
@@ -45,8 +45,8 @@ window.PosPages["page-receive"] = {
       const cid = this.form.category_id;
       if (!cid) return;
       await this.guard(async () => {
-        this.brands = await API.get("/api/brands?category_id=" + cid);
-        this.fields = await API.get("/api/categories/" + cid + "/fields");
+        this.brands = await API.listBrands({category_id: cid});
+        this.fields = await API.categoryFields(cid);
         // 先依欄型初始化屬性值(multi=陣列、tags=逗號字串、select 預設帶入),
         // 再載入選項:避免規格欄先於 attrs 就緒而讀到 undefined
         this.form.attrs = window.initFormAttrs(this.fields, {});
@@ -62,7 +62,7 @@ window.PosPages["page-receive"] = {
         const attrs = window.buildAttrPayload(this.fields, this.form.attrs);
         const barcodes = this.newBarcode
           ? [{ barcode: this.newBarcode, source: "factory" }] : [];
-        const r = await API.post("/api/products", { name: this.form.name.trim(),
+        const r = await API.createProduct({ name: this.form.name.trim(),
           category_id: this.form.category_id, brand_id: this.form.brand_id,
           default_price: this.form.price ?? null,
           variants: [{ attributes: attrs, model_ids: this.form.model_ids,
@@ -76,18 +76,15 @@ window.PosPages["page-receive"] = {
       });
     },
     async genBarcode() {
-      const r = await API.post(`/api/variants/${this.createdVid}/barcodes`,
-                               { source: "store" });
+      const r = await API.addBarcode({variant_id: this.createdVid, source: "store"});
       this.newBarcode = r.barcode;
     },
     async printBarcode() {
-      // 現階段顯示 501 訊息
-      await this.guard(() => API.post("/api/print/barcode",
-        { barcode: this.newBarcode, name: this.form.name }));
+      await this.guard(() => API.printBarcode(this.createdVid));
     },
     async doReceive() {
       await this.guard(async () => {
-        const r = await API.post("/api/stock/receive",
+        const r = await API.receiveStock(
           { variant_id: this.hit.variant_id, qty: this.qty });
         this.hit.stock = r.stock; this.qty = 1;
         this.$refs.scan.focus();

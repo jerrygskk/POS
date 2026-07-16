@@ -1,120 +1,31 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-from lib.db import db_conn
-from api.products import stock_of, attrs_by_variant, display_attrs
+from lib.application_errors import ApplicationError
+from lib.stocktake_service import StocktakeFacade
 
-router = APIRouter(prefix="/api")
-
+router=APIRouter(prefix="/api")
 class SessionIn(BaseModel):
-    operator: str | None = None
-    note: str | None = None
-
+    operator: str|None=None
+    note: str|None=None
 class ScanIn(BaseModel):
-    variant_id: int
-    qty: int = Field(default=1, gt=0)
+    variant_id:int=Field(strict=True)
+    qty:int=Field(default=1,gt=0,strict=True)
+class SetIn(BaseModel): counted_qty:int=Field(ge=0,strict=True)
 
-class SetIn(BaseModel):
-    counted_qty: int = Field(ge=0)
-
+def _call(request,action,payload):
+    try: return StocktakeFacade(request.app.state.db_path).invoke(action,payload)
+    except ApplicationError as exc:
+        status={"validation_error":422,"not_found":404,"conflict":409}.get(exc.code,500)
+        raise HTTPException(status,exc.message if status<500 else type(exc).default_message) from exc
 @router.post("/stocktake")
-def open_session(body: SessionIn, request: Request):
-    with db_conn(request.app.state.db_path) as conn:
-        cur = conn.execute("INSERT INTO StocktakeSession(operator,note) VALUES(?,?)",
-                           (body.operator, body.note))
-        conn.commit()
-        return {"session_id": cur.lastrowid}
-
+def open_session(body:SessionIn,request:Request): return _call(request,"stocktake.create",body.model_dump())
 @router.get("/stocktake")
-def list_sessions(request: Request):
-    with db_conn(request.app.state.db_path) as conn:
-        return [dict(r) for r in conn.execute(
-            "SELECT * FROM StocktakeSession ORDER BY session_id DESC LIMIT 50")]
-
-def _require_open(conn, sid):
-    row = conn.execute("SELECT status FROM StocktakeSession WHERE session_id=?",
-                       (sid,)).fetchone()
-    if not row:
-        raise HTTPException(404, "查無此盤點單")
-    if row["status"] != "open":
-        raise HTTPException(409, "盤點單已結案")
-
+def list_sessions(request:Request): return _call(request,"stocktake.list",{})
 @router.post("/stocktake/{sid}/scan")
-def scan(sid: int, body: ScanIn, request: Request):
-    with db_conn(request.app.state.db_path) as conn:
-        _require_open(conn, sid)
-        row = conn.execute(
-            "SELECT * FROM StocktakeItem WHERE session_id=? AND variant_id=?",
-            (sid, body.variant_id)).fetchone()
-        if row:
-            counted = row["counted_qty"] + body.qty
-            conn.execute("UPDATE StocktakeItem SET counted_qty=? WHERE id=?",
-                         (counted, row["id"]))
-            system = row["system_qty"]
-        else:
-            system = stock_of(conn, body.variant_id)  # 開盤快照:首掃當下
-            counted = body.qty
-            conn.execute(
-                "INSERT INTO StocktakeItem(session_id,variant_id,system_qty,counted_qty) "
-                "VALUES(?,?,?,?)", (sid, body.variant_id, system, counted))
-        conn.commit()
-        return {"system_qty": system, "counted_qty": counted}
-
+def scan(sid:int,body:ScanIn,request:Request): return _call(request,"stocktake.scan",{"session_id":sid,**body.model_dump()})
 @router.put("/stocktake/{sid}/items/{variant_id}")
-def set_counted(sid: int, variant_id: int, body: SetIn, request: Request):
-    with db_conn(request.app.state.db_path) as conn:
-        _require_open(conn, sid)
-        cur = conn.execute(
-            "UPDATE StocktakeItem SET counted_qty=? WHERE session_id=? AND variant_id=?",
-            (body.counted_qty, sid, variant_id))
-        if cur.rowcount == 0:
-            raise HTTPException(404, "此變體尚未進入本次盤點,請先掃描")
-        conn.commit()
-        return {"ok": True}
-
+def set_counted(sid:int,variant_id:int,body:SetIn,request:Request): return _call(request,"stocktake.set_counted",{"session_id":sid,"variant_id":variant_id,**body.model_dump()})
 @router.get("/stocktake/{sid}")
-def detail(sid: int, request: Request):
-    with db_conn(request.app.state.db_path) as conn:
-        rows = conn.execute(
-            "SELECT si.*, p.name FROM StocktakeItem si "
-            "JOIN Variant v ON si.variant_id=v.variant_id "
-            "JOIN Product p ON v.product_id=p.product_id "
-            "WHERE si.session_id=?", (sid,)).fetchall()
-        vids = [r["variant_id"] for r in rows]
-        attrs = attrs_by_variant(conn, vids)
-        disp = display_attrs(conn, vids)
-        items = []
-        for r in rows:
-            items.append({"variant_id": r["variant_id"], "name": r["name"],
-                "attributes": attrs.get(r["variant_id"], {}),
-                "attr_display": disp.get(r["variant_id"], ""),
-                "system_qty": r["system_qty"], "counted_qty": r["counted_qty"],
-                "diff": r["counted_qty"] - r["system_qty"]})
-        sess = conn.execute("SELECT * FROM StocktakeSession WHERE session_id=?",
-                            (sid,)).fetchone()
-        if not sess:
-            raise HTTPException(404, "查無此盤點單")
-        return {**dict(sess), "items": items}
-
+def detail(sid:int,request:Request): return _call(request,"stocktake.detail",{"session_id":sid})
 @router.post("/stocktake/{sid}/close")
-def close(sid: int, request: Request):
-    with db_conn(request.app.state.db_path) as conn:
-        cur = conn.execute(
-            "UPDATE StocktakeSession SET status='closed', "
-            "ended_at=datetime('now','localtime') "
-            "WHERE session_id=? AND status='open'", (sid,))
-        if cur.rowcount == 0:
-            session = conn.execute(
-                "SELECT status FROM StocktakeSession WHERE session_id=?",
-                (sid,)).fetchone()
-            if not session:
-                raise HTTPException(404, "查無此盤點單")
-            raise HTTPException(409, "盤點單已結案")
-        for r in conn.execute(
-            "SELECT variant_id, counted_qty - system_qty AS diff "
-            "FROM StocktakeItem WHERE session_id=?", (sid,)):
-            if r["diff"] != 0:
-                conn.execute(
-                    "INSERT INTO StockMovement(variant_id,qty,kind,ref_id,note) "
-                    "VALUES(?,?,'adjust',?,'盤點調整')", (r["variant_id"], r["diff"], sid))
-        conn.commit()
-        return {"ok": True}
+def close(sid:int,request:Request): return _call(request,"stocktake.close",{"session_id":sid})

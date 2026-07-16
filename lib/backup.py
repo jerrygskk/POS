@@ -12,11 +12,12 @@ def _snapshot(db_path, dest):
     finally:
         src.close()
 
-def run_auto_backup(db_path):
+def run_auto_backup(db_path, backup_dir=None, on_error=None):
     try:
         if not os.path.exists(db_path):
-            return
-        bdir = os.path.join(os.path.dirname(os.path.abspath(db_path)), "backups")
+            return False
+        bdir = os.fspath(backup_dir) if backup_dir is not None else os.path.join(
+            os.path.dirname(os.path.abspath(db_path)), "backups")
         os.makedirs(bdir, exist_ok=True)
         today = datetime.date.today()
         tags = {"day": today.strftime("%Y%m%d"),
@@ -30,5 +31,11 @@ def run_auto_backup(db_path):
             files = sorted(glob.glob(pattern))
             for old in files[:-KEEP[kind]]:
                 os.remove(old)
-    except Exception:
-        pass  # 備份失敗絕不擋啟動;無 log 機制前先靜默
+        return True
+    except Exception as exc:
+        if on_error is not None:
+            try:
+                on_error("自動備份失敗", exc)
+            except Exception:
+                pass
+        return False

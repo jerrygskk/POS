@@ -16,7 +16,7 @@ window.CatalogFields = {
     const q = opts.all ? "&all=1" : "";
     for (const f of (fields || []))
       if (types.includes(f.field_type))
-        into[f.field_id] = await API.get("/api/options?field_id=" + f.field_id + q);
+        into[f.field_id] = await API.listOptions({field_id: f.field_id, model_ids: modelIds || []});
   },
   // 手打自增:select 欄輸入不存在的值,存檔時自動入庫(冪等,失敗忽略)。
   async ensureOptions(fields, attrs, optMap) {
@@ -26,8 +26,8 @@ window.CatalogFields = {
       const list = optMap[f.field_id] || [];
       if (!v || list.some(o => o.value === v)) continue;
       try {
-        await API.post("/api/options", { field_id: f.field_id, value: v });
-        optMap[f.field_id] = await API.get("/api/options?field_id=" + f.field_id);
+        await API.createOption({ field_id: f.field_id, value: v });
+        optMap[f.field_id] = await API.listOptions({field_id: f.field_id});
       } catch (e) { /* 冪等 */ }
     }
   },

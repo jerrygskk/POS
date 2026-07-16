@@ -97,6 +97,12 @@ class TestSales(ApiTestCase):
         ).json()
         self.assertEqual(s["count"], 1)
 
+    def test_invalid_filter_dates_return_422(self):
+        for path in ("/api/sales", "/api/sales/summary", "/api/sales/export"):
+            with self.subTest(path=path):
+                response = self.c.get(path + "?date_from=2026-02-31")
+                self.assertEqual(response.status_code, 422)
+
     def test_export_csv(self):
         self._sale()
         r = self.c.get("/api/sales/export")

@@ -9,22 +9,24 @@ window.PosPages["page-records"] = {
   },
   async mounted() {
     await this.guard(async () => {
-      this.payments = await API.get("/api/payments");
+      this.payments = await API.listPayments();
       await this.reload();
     });
   },
   methods: {
     async reload() {
       await this.guard(async () => {
-        const q = `date_from=${this.dateFrom}&date_to=${this.dateTo}` +
-                  (this.payment ? `&payment=${encodeURIComponent(this.payment)}` : "");
-        this.sales = await API.get("/api/sales?" + q);
-        this.summary = await API.get("/api/sales/summary?" + q);
+        const filters = {date_from: this.dateFrom, date_to: this.dateTo,
+                         payment: this.payment || ""};
+        this.sales = await API.listSales(filters);
+        this.summary = await API.salesSummary(filters);
       });
     },
-    exportCsv() {
-      const payment = this.payment ? `&payment=${encodeURIComponent(this.payment)}` : "";
-      window.open(`/api/sales/export?date_from=${this.dateFrom}&date_to=${this.dateTo}${payment}`);
+    async exportCsv() {
+      await this.guard(async () => {
+        await API.exportSales({ date_from: this.dateFrom, date_to: this.dateTo,
+          payment: this.payment || "" });
+      });
     },
   },
 };

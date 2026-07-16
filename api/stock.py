@@ -1,31 +1,34 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-from lib.db import db_conn
-from lib.dbutil import require_exists
-from api.products import stock_of
+
+from lib.application_errors import (
+    ConflictError, DatabaseError, InternalError, NotFoundError, ValidationError,
+)
+from lib.stock_service import StockFacade
 
 router = APIRouter(prefix="/api")
 
+
 class ReceiveIn(BaseModel):
-    variant_id: int
-    qty: int = Field(gt=0)   # 進貨必為正
+    variant_id: int = Field(strict=True)
+    qty: int = Field(gt=0, strict=True)
     note: str | None = None
+
+
+def _call(request, action, payload):
+    try:
+        return StockFacade(request.app.state.db_path).invoke(action, payload)
+    except (ValidationError, NotFoundError, ConflictError, DatabaseError, InternalError) as exc:
+        status = {ValidationError: 422, NotFoundError: 404, ConflictError: 409}.get(type(exc), 500)
+        message = exc.message if status < 500 else type(exc).default_message
+        raise HTTPException(status, message) from exc
+
 
 @router.post("/stock/receive")
 def receive(body: ReceiveIn, request: Request):
-    with db_conn(request.app.state.db_path) as conn:
-        require_exists(conn, "Variant", "variant_id", body.variant_id,
-                       "查無此子產品")
-        conn.execute(
-            "INSERT INTO StockMovement(variant_id,qty,kind,note) VALUES(?,?,'purchase',?)",
-            (body.variant_id, body.qty, body.note))
-        conn.commit()
-        return {"stock": stock_of(conn, body.variant_id)}
+    return _call(request, "stock.receive", body.model_dump())
+
 
 @router.get("/stock/{variant_id}")
 def detail(variant_id: int, request: Request):
-    with db_conn(request.app.state.db_path) as conn:
-        moves = [dict(r) for r in conn.execute(
-            "SELECT * FROM StockMovement WHERE variant_id=? ORDER BY move_id DESC LIMIT 50",
-            (variant_id,))]
-        return {"stock": stock_of(conn, variant_id), "movements": moves}
+    return _call(request, "stock.detail", {"variant_id": variant_id})

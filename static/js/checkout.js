@@ -15,7 +15,7 @@ window.PosPages["page-checkout"] = {
   },
   async mounted() {
     await this.guard(async () => {
-      this.payments = await API.get("/api/payments");
+      this.payments = await API.listPayments();
       this.payment = this.payments[0];
     });
     this.$refs.scan?.focus();
@@ -53,12 +53,11 @@ window.PosPages["page-checkout"] = {
     },
     async onSearch() {
       if (!this.searchQ.trim()) return;
-      this.searchResults = await API.get("/api/products?q=" +
-        encodeURIComponent(this.searchQ.trim()));
+      this.searchResults = await API.listProducts({q: this.searchQ.trim()});
     },
     async checkout() {
       await this.guard(async () => {
-        const r = await API.post("/api/sales", {
+        const r = await API.checkout({
           payment: this.payment, order_discount: this.orderDiscount,
           paid: this.paid,
           items: this.cart.map(i => ({ variant_id: i.variant_id, qty: i.qty,

@@ -1,28 +1,73 @@
 const API = {
-  async _do(method, url, body) {
-    const opt = { method, headers: { "Content-Type": "application/json" } };
-    if (body !== undefined) opt.body = JSON.stringify(body);
-    const r = await fetch(url, opt);
-    if (!r.ok) {
-      let msg = "系統發生錯誤";
-      try { msg = (await r.json()).detail || msg; } catch (e) {}
-      const err = new Error(msg);
-      err.status = r.status;
-      throw err;
-    }
-    return r.json();
+  _ready: null,
+  _bridge() {
+    if (window.pywebview && window.pywebview.api) return Promise.resolve(window.pywebview.api);
+    if (this._ready) return this._ready;
+    this._ready = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("桌面服務啟動逾時，請重新開啟程式")), 10000);
+      const ready = () => {
+        clearTimeout(timer);
+        if (window.pywebview && window.pywebview.api) resolve(window.pywebview.api);
+        else reject(new Error("桌面服務無法使用"));
+      };
+      window.addEventListener("pywebviewready", ready, { once: true });
+    });
+    return this._ready;
   },
-  get(url) { return this._do("GET", url); },
+  async invoke(action, payload) {
+    const allowed = new Set([
+      "categories.list", "categories.create", "categories.update", "categories.delete", "categories.sort", "categories.fields", "categories.set_common_fields",
+      "brands.list", "brands.create", "brands.update", "brands.delete", "brands.sort", "brands.set_categories",
+      "phone_brands.list", "phone_brands.create", "phone_brands.update", "phone_brands.delete", "phone_brands.sort",
+      "models.list", "models.create", "models.update", "models.delete", "models.sort",
+      "fields.list", "fields.create", "fields.update", "fields.delete",
+      "options.list", "options.create", "options.update", "options.delete", "options.models", "options.set_models",
+      "products.create", "products.list", "products.update", "products.delete", "catalog.list",
+      "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.delete",
+      "barcodes.scan", "barcodes.add", "barcodes.delete", "stock.receive", "stock.detail",
+      "stocktake.create", "stocktake.list", "stocktake.detail", "stocktake.scan", "stocktake.set_counted", "stocktake.close",
+      "payments.list", "sales.checkout", "sales.list", "sales.summary", "sales.export_save", "printing.barcode"
+    ]);
+    if (!allowed.has(action)) throw new Error("不支援的桌面操作");
+    const api = await this._bridge();
+    const result = await api.invoke(action, payload || {});
+    if (result && result.ok) return result.data;
+    const info = (result && result.error) || {};
+    const err = new Error(info.message || "操作失敗");
+    const statuses = { validation_error: 422, not_found: 404, conflict: 409,
+      database_error: 500, internal_error: 500 };
+    err.status = statuses[info.code] || 500;
+    err.code = info.code; err.details = info.details;
+    throw err;
+  },
+  listCategories: p => API.invoke("categories.list", p), createCategory: p => API.invoke("categories.create", p),
+  updateCategory: (id, fields) => API.invoke("categories.update", {id, fields}), deleteCategory: id => API.invoke("categories.delete", {id}),
+  sortCategories: ids => API.invoke("categories.sort", {ids}), categoryFields: id => API.invoke("categories.fields", {id}),
+  setCategoryCommonFields: (id, field_ids) => API.invoke("categories.set_common_fields", {id, field_ids}),
+  listBrands: p => API.invoke("brands.list", p), createBrand: p => API.invoke("brands.create", p), updateBrand: (id, fields) => API.invoke("brands.update", {id, fields}), deleteBrand: id => API.invoke("brands.delete", {id}), sortBrands: ids => API.invoke("brands.sort", {ids}), setBrandCategories: (id, category_ids) => API.invoke("brands.set_categories", {id, category_ids}),
+  listPhoneBrands: p => API.invoke("phone_brands.list", p), createPhoneBrand: p => API.invoke("phone_brands.create", p), updatePhoneBrand: (id, fields) => API.invoke("phone_brands.update", {id, fields}), deletePhoneBrand: id => API.invoke("phone_brands.delete", {id}), sortPhoneBrands: ids => API.invoke("phone_brands.sort", {ids}),
+  listModels: p => API.invoke("models.list", p), createModel: p => API.invoke("models.create", p), updateModel: (id, fields) => API.invoke("models.update", {id, fields}), deleteModel: id => API.invoke("models.delete", {id}), sortModels: ids => API.invoke("models.sort", {ids}),
+  listFields: p => API.invoke("fields.list", p), createField: p => API.invoke("fields.create", p), updateField: (id, fields) => API.invoke("fields.update", {id, fields}), deleteField: id => API.invoke("fields.delete", {id}),
+  listOptions: p => API.invoke("options.list", p), createOption: p => API.invoke("options.create", p), updateOption: (id, fields) => API.invoke("options.update", {id, fields}), deleteOption: id => API.invoke("options.delete", {id}),
+  createProduct: p => API.invoke("products.create", p), listProducts: p => API.invoke("products.list", p), listCatalog: p => API.invoke("catalog.list", p), updateProduct: (id, fields) => API.invoke("products.update", {id, fields}), deleteProduct: id => API.invoke("products.delete", {id}),
+  createVariant: (product_id, fields) => API.invoke("variants.create", {product_id, fields}), updateVariant: (id, fields) => API.invoke("variants.update", {id, fields}), deleteVariant: id => API.invoke("variants.delete", {id}),
+  addBarcode: p => API.invoke("barcodes.add", p), deleteBarcode: code => API.invoke("barcodes.delete", {code}), scanBarcode: code => API.invoke("barcodes.scan", {code}),
+  receiveStock: p => API.invoke("stock.receive", p), stockDetail: variant_id => API.invoke("stock.detail", {variant_id}),
+  createStocktake: p => API.invoke("stocktake.create", p), listStocktakes: () => API.invoke("stocktake.list", {}), stocktakeDetail: session_id => API.invoke("stocktake.detail", {session_id}), stocktakeScan: p => API.invoke("stocktake.scan", p), setStocktakeCounted: p => API.invoke("stocktake.set_counted", p), closeStocktake: session_id => API.invoke("stocktake.close", {session_id}),
+  listPayments: () => API.invoke("payments.list", {}), checkout: p => API.invoke("sales.checkout", p), listSales: p => API.invoke("sales.list", p), salesSummary: p => API.invoke("sales.summary", p),
   async barcodeQuery(value) {
     const code = String(value || "").trim();
     if (!code) return null;
-    const data = await this.get("/api/barcode/" + encodeURIComponent(code));
+    const data = await this.scanBarcode(code);
     return { code, data };
   },
-  post(url, body) { return this._do("POST", url, body); },
-  put(url, body) { return this._do("PUT", url, body); },
-  patch(url, body) { return this._do("PATCH", url, body); },
-  del(url) { return this._do("DELETE", url); },
+  updateVariantDetails(id, fields, modelIds) {
+    return this.invoke("variants.update_details", {
+      id, fields, model_ids: modelIds
+    });
+  },
+  exportSales(payload) { return this.invoke("sales.export_save", payload); },
+  printBarcode(variant_id) { return this.invoke("printing.barcode", {variant_id}); },
 };
 
 window.parseTagList = function (v) {

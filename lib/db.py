@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from contextlib import contextmanager
 from lib import db_schema
@@ -66,7 +67,9 @@ def _run_migrations(conn):
             current = target
     _set_schema_version(conn, current)  # 補寫舊版 DB 缺的版號
 
-def init_db(db_path):
+def init_db(db_path, require_existing=False):
+    if require_existing and not os.path.isfile(db_path):
+        raise FileNotFoundError(f"找不到正式資料庫：{db_path}")
     conn = get_conn(db_path)
     is_new = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='Setting'"

@@ -1,25 +1,49 @@
-import os, sys, threading, webbrowser
-import uvicorn
+import traceback
 from lib.db import init_db
 from lib.backup import run_auto_backup
-from api import create_app
+from lib.desktop_application import DesktopApplication
+from lib.runtime_paths import RuntimePaths
 
-PORT = int(os.environ.get("PORT", "8737"))
+def log_runtime_error(paths, message, exc):
+    paths.root_dir.mkdir(parents=True, exist_ok=True)
+    with paths.error_log_path.open("a", encoding="utf-8") as log:
+        log.write(f"{message}: {exc}\n")
+        log.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+        log.write("\n")
 
-def data_dir():
-    base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) \
-        else os.path.dirname(os.path.abspath(__file__))
-    d = os.path.join(base, "data")
-    os.makedirs(d, exist_ok=True)
-    return d
 
-def main():
-    db_path = os.path.join(data_dir(), "pos.db")
-    init_db(db_path)
-    run_auto_backup(db_path)
-    app = create_app(db_path)
-    threading.Timer(1.0, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}")).start()
-    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
+def try_log_runtime_error(paths, message, exc):
+    try:
+        log_runtime_error(paths, message, exc)
+    except Exception:
+        pass
+
+
+def prepare_runtime(paths):
+    try:
+        init_db(paths.db_path, require_existing=True)
+    except Exception as exc:
+        try_log_runtime_error(paths, "資料庫初始化失敗", exc)
+        raise
+
+    try:
+        run_auto_backup(
+            paths.db_path,
+            paths.backup_dir,
+            on_error=lambda message, exc: try_log_runtime_error(paths, message, exc),
+        )
+    except Exception as exc:
+        try_log_runtime_error(paths, "自動備份失敗", exc)
+
+def main(application_factory=None):
+    paths = RuntimePaths.detect(module_file=__file__)
+    prepare_runtime(paths)
+    application_factory = application_factory or DesktopApplication
+    try:
+        application_factory(paths).run()
+    except Exception as exc:
+        try_log_runtime_error(paths, "桌面視窗啟動失敗", exc)
+        raise
 
 if __name__ == "__main__":
     main()
