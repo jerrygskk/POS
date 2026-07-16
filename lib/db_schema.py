@@ -451,10 +451,14 @@ def _mig_attributefield_global(conn):
     groups = {}
     for r in fields:
         groups.setdefault(normalize_key(r["name"]), []).append(r)
-    # 同名不同型態衝突自動解決:衝突組中「零選項且零 VariantAttribute 使用」的欄位
-    # 直接刪除(連同其 CategoryField 綁定),再繼續合併;仍有兩個以上「有資料」的
-    # 同名不同型欄才中止回報(如正式庫零使用種子欄與各種類同名欄衝突可自動化解)。
+    # 同名不同型態衝突自動解決,依序:
+    #   ① 衝突組中「零選項且零 VariantAttribute 使用」的欄位直接刪除(連同其
+    #      CategoryField 綁定),再繼續合併。
+    #   ② 剩餘「有資料」欄若型態集合 ⊆ {select, multi},統一以 multi 為存活型態合併
+    #      (select 資料直接併入 multi,語意無損)。
+    #   ③ 仍含 text/tags 等其他型態的兩個以上有資料同名欄才中止回報。
     dropped = set()
+    force_multi = set()  # 需以 multi 存活型態合併的 normalize_key
     conflicts = []
     for key, rows in groups.items():
         if len({r["field_type"] for r in rows}) <= 1:
@@ -462,10 +466,15 @@ def _mig_attributefield_global(conn):
         keep = [r for r in rows if _field_has_data(r["field_id"])]
         keep_ids = {r["field_id"] for r in keep}
         dropped.update(r["field_id"] for r in rows if r["field_id"] not in keep_ids)
-        if len({r["field_type"] for r in keep}) > 1:
-            names = sorted({r["name"] for r in keep})
-            conflicts.append(
-                f"  {names}:field_type={sorted({r['field_type'] for r in keep})}")
+        keep_types = {r["field_type"] for r in keep}
+        if len(keep_types) <= 1:
+            continue
+        if keep_types <= {"select", "multi"}:
+            force_multi.add(key)  # select+multi → 以 multi 合併
+            continue
+        names = sorted({r["name"] for r in keep})
+        conflicts.append(
+            f"  {names}:field_type={sorted(keep_types)}")
     if conflicts:
         raise ValueError(
             "AttributeField 正規化同名但 field_type 不同,無法自動合併,"
@@ -476,11 +485,12 @@ def _mig_attributefield_global(conn):
         groups = {}
         for r in fields:
             groups.setdefault(normalize_key(r["name"]), []).append(r)
-    # field 存活對映(每組最小 field_id)
+    # field 存活對映(每組最小 field_id);force_multi 組以 multi 為存活型態
     fieldmap, survivors = {}, []
-    for rows in groups.values():
+    for key, rows in groups.items():
         survivor = min(rows, key=lambda r: r["field_id"])
-        survivors.append(survivor)
+        stype = "multi" if key in force_multi else survivor["field_type"]
+        survivors.append((survivor, stype))
         for r in rows:
             fieldmap[r["field_id"]] = survivor["field_id"]
     # 選項:先套 field 對映,再依 (新field, 正規化value) 合併,存活取最小 option_id
@@ -505,11 +515,11 @@ def _mig_attributefield_global(conn):
         CHECK(field_type IN ('select','text','multi','tags')),
       active INTEGER NOT NULL DEFAULT 1
     )""")
-    for s in survivors:
+    for s, stype in survivors:
         conn.execute(
             "INSERT INTO AttributeField_new(field_id, name, field_type, active) "
             "VALUES(?,?,?,?)",
-            (s["field_id"], s["name"], s["field_type"], s["active"]))
+            (s["field_id"], s["name"], stype, s["active"]))
     conn.execute("DROP TABLE AttributeField")
     conn.execute("ALTER TABLE AttributeField_new RENAME TO AttributeField")
     # 重建 AttributeOption(套 field 對映與選項合併)

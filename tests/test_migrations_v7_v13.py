@@ -393,6 +393,81 @@ class TestMigrationConflictAutoResolve(unittest.TestCase):
             c.close()
 
 
+class TestMigrationSelectMultiMergeToMulti(unittest.TestCase):
+    """v9 衝突自動解決:同名衝突欄型態 ⊆ {select, multi} 且皆有資料 →
+    以 multi 為存活型態合併,select 值全數併入,語意無損。"""
+
+    def test_select_multi_merged_as_multi(self):
+        db = _new_v6_db()
+        conn = sqlite3.connect(db)
+        conn.executescript("""
+          INSERT INTO Category(category_id,name) VALUES(1,'A'),(2,'B');
+          INSERT INTO Product(product_id,name,category_id) VALUES(1,'p1',1),(2,'p2',2);
+          INSERT INTO Variant(variant_id,product_id) VALUES(1,1),(2,2);
+          -- 「材質」select(最小 field_id=存活)與 multi 衝突,皆有資料
+          -- → 存活型態強制為 multi(即使存活欄原型為 select)
+          INSERT INTO AttributeField(field_id,name,category_id,field_type) VALUES
+            (1,'材質',1,'select'),
+            (2,'材質',2,'multi');
+          INSERT INTO AttributeOption(option_id,field_id,value) VALUES
+            (10,1,'鋼化玻璃'),
+            (11,2,'鏡頭貼'),
+            (12,2,'鋼化玻璃');            -- 與 opt10 同值 → 併入 opt10
+          INSERT INTO VariantAttribute(variant_id,field_id,option_id) VALUES
+            (1,1,10),                       -- select 欄使用
+            (2,2,11);                       -- multi 欄使用 → 改指存活欄
+          INSERT INTO CategoryField(category_id,field_id) VALUES(1,1),(2,2);
+        """)
+        conn.commit()
+        conn.close()
+        init_db(db)  # 不應 raise
+        c = get_conn(db)
+        try:
+            # 存活取最小 field_id=1,型態統一為 multi
+            rows = c.execute(
+                "SELECT field_id, field_type FROM AttributeField WHERE name='材質'"
+            ).fetchall()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["field_id"], 1)
+            self.assertEqual(rows[0]["field_type"], "multi")
+            # 選項照 normalize_key 去重:鋼化玻璃(併)+鏡頭貼 = 2,全掛存活欄
+            opts = {r["value"] for r in c.execute(
+                "SELECT value FROM AttributeOption WHERE field_id=1")}
+            self.assertEqual(opts, {"鋼化玻璃", "鏡頭貼"})
+            self.assertIsNone(c.execute(
+                "SELECT 1 FROM AttributeOption WHERE option_id=12").fetchone())
+            # 兩筆 VariantAttribute 引用全保留,皆改指存活欄 1
+            va = {(r["variant_id"], r["field_id"], r["option_id"]) for r in c.execute(
+                "SELECT variant_id, field_id, option_id FROM VariantAttribute")}
+            self.assertEqual(va, {(1, 1, 10), (2, 1, 11)})
+            # CategoryField 皆改指存活欄 1
+            cats = {r["category_id"] for r in c.execute(
+                "SELECT category_id FROM CategoryField WHERE field_id=1")}
+            self.assertEqual(cats, {1, 2})
+        finally:
+            c.close()
+
+    def test_select_text_still_aborts(self):
+        # select+text 皆有資料 → 非 ⊆ {select, multi} → 仍中止
+        db = _new_v6_db()
+        conn = sqlite3.connect(db)
+        conn.executescript("""
+          INSERT INTO Category(category_id,name) VALUES(1,'A'),(2,'B');
+          INSERT INTO Product(product_id,name,category_id) VALUES(1,'p',2);
+          INSERT INTO Variant(variant_id,product_id) VALUES(1,1);
+          INSERT INTO AttributeField(field_id,name,category_id,field_type) VALUES
+            (1,'材質',1,'select'),
+            (2,'材質',2,'text');
+          INSERT INTO AttributeOption(option_id,field_id,value) VALUES(1,1,'鋼化玻璃');
+          INSERT INTO VariantAttribute(variant_id,field_id,text_value) VALUES(1,2,'皮革');
+        """)
+        conn.commit()
+        conn.close()
+        with self.assertRaises(ValueError) as ctx:
+            init_db(db)
+        self.assertIn("材質", str(ctx.exception))
+
+
 class TestUpgradedMatchesFresh(unittest.TestCase):
     """全新 v13 DB 與 v6 升級後 DB 結構一致(欄位集合、型態、notnull、pk)。"""
 
