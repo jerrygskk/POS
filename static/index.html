@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=50">
+<link rel="stylesheet" href="css/pos.css?v=51">
 </head>
 <body>
 <div id="app">
   <nav>
-    <img class="nav-logo" src="img/logo.png?v=50" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=51" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="page=key">{{ label }}</button>
   </nav>
@@ -65,56 +65,16 @@
 <div class="page">
   <div class="scan-row">
     <input ref="scan" v-model="scanCode" @keyup.enter="onScan"
-           placeholder="掃描條碼(查無自動進入建檔)" class="scan-input">
-    <button class="primary" @click="startCreate('')">無條碼建檔</button>
+           placeholder="掃描條碼進貨" class="scan-input">
   </div>
   <div v-if="hit" class="pay-panel">
     <div>{{ hit.name }}|{{ attrText(hit) }}|目前庫存 {{ hit.stock }}</div>
     <label>進貨數量 <input type="number" v-model.number="qty" min="1" class="w80"></label>
     <button class="primary" @click="doReceive">入庫</button>
   </div>
-  <div v-if="creating" class="create-form">
-    <h3>快速建檔{{ newBarcode ? '(條碼 ' + newBarcode + ')' : '' }}</h3>
-    <label>商品名稱 <input v-model="form.name"></label>
-
-    <!-- ① 配件種類 -->
-    <div class="step">
-      <div class="step-title">① 配件種類</div>
-      <select v-model="form.category_id" @change="onCategoryChange">
-        <option :value="null" disabled>請選擇配件種類</option>
-        <option v-for="c in categories" :key="c.category_id" :value="c.category_id">
-          {{ c.name }}</option>
-      </select>
-    </div>
-
-    <!-- ② 手機型號(可複選,非手機類可留空) -->
-    <div class="step" :class="{locked: !form.category_id}">
-      <div class="step-title">② 適用手機型號(可複選,非手機配件可略過)</div>
-      <model-picker :models="models" v-model:model_ids="form.model_ids"></model-picker>
-    </div>
-
-    <!-- ③ 廠牌(依種類過濾) -->
-    <div class="step" :class="{locked: !form.category_id}">
-      <div class="step-title">③ 廠牌</div>
-      <select v-model="form.brand_id">
-        <option :value="null">(不指定廠牌)</option>
-        <option v-for="b in brands" :key="b.brand_id" :value="b.brand_id">
-          {{ b.name }}</option>
-      </select>
-    </div>
-
-    <!-- ④ 規格欄(依種類動態) -->
-    <div class="step" :class="{locked: !form.category_id}">
-      <div class="step-title">④ 規格</div>
-      <div v-if="!fields.length" class="hint">此種類尚未設定規格欄。</div>
-      <attr-fields :fields="fields" :options="fieldOptions" :attrs="form.attrs"
-                   :model-ids="form.model_ids" :show-empty-hint="true"></attr-fields>
-    </div>
-
-    <label>預設售價(可留空) <input type="number" v-model.number="form.price" min="0"></label>
-    <button class="primary" @click="createProduct">建檔</button>
-    <button v-if="createdVid && !newBarcode" @click="genBarcode">產生店內條碼</button>
-    <button v-if="newBarcode" @click="printBarcode">列印條碼</button>
+  <div v-if="notFound" class="pay-panel">
+    <div>查無條碼「{{ notFound }}」。進貨不建立大產品,請先至商品設定建立大產品與子產品。</div>
+    <button class="primary" @click="goSettings">前往商品設定</button>
   </div>
 </div>
 </template>
@@ -218,35 +178,16 @@
         <tr :class="{inactive: !p.active}">
           <td><button @click="toggleExpand(p.product_id)">
             {{ expanded[p.product_id] ? '收合' : '展開' }}</button></td>
-          <template v-if="editProduct && editProduct.product_id === p.product_id">
-            <td><input v-model="editProduct.name" class="w160"></td>
-            <td><select v-model="editProduct.category_id" class="w120">
-              <option v-for="c in categories" :key="c.category_id" :value="c.category_id">{{ c.name }}</option>
-            </select></td>
-            <td><select v-model="editProduct.brand_id" class="w120">
-              <option :value="null">(無)</option>
-              <option v-for="b in brands" :key="b.brand_id" :value="b.brand_id">{{ b.name }}</option>
-            </select></td>
-            <td>{{ p.variants.length }}</td>
-            <td>{{ p.active ? '啟用' : '已停用' }}</td>
-            <td>
-              <input v-model="editProduct.note" placeholder="備註" class="w160">
-              <button class="primary" @click="saveProduct">儲存</button>
-              <button @click="editProduct = null">取消</button>
-            </td>
-          </template>
-          <template v-else>
-            <td>{{ p.name }}</td>
-            <td>{{ p.category_name || '—' }}</td>
-            <td>{{ p.brand_name || '—' }}</td>
-            <td>{{ p.variants.length }}</td>
-            <td>{{ p.active ? '啟用' : '已停用' }}</td>
-            <td>
-              <button @click="startEditProduct(p)">編輯</button>
-              <button @click="toggleProductActive(p)">{{ p.active ? '停用' : '啟用' }}</button>
-              <button @click="deleteProduct(p)">刪除</button>
-            </td>
-          </template>
+          <td>{{ p.name }}</td>
+          <td>{{ p.category_name || '—' }}</td>
+          <td>{{ p.brand_name || '—' }}</td>
+          <td>{{ p.variants.length }}</td>
+          <td>{{ p.active ? '啟用' : '已停用' }}</td>
+          <td>
+            <button @click="editInSettings">至設定修改</button>
+            <button @click="toggleProductActive(p)">{{ p.active ? '停用' : '啟用' }}</button>
+            <button @click="deleteProduct(p)">刪除</button>
+          </td>
         </tr>
         <tr v-if="expanded[p.product_id]">
           <td></td>
@@ -351,82 +292,166 @@
 <template id="tpl-settings">
 <div class="page">
 
-  <!-- 卡片一:品項名稱(維護 Category) -->
-  <div class="card">
-    <div class="card-head"><h3>品項名稱</h3>
-      <button class="primary" @click="saveAll('categories')">儲存名稱修改</button></div>
-    <div class="inline-add add-before-list">
-      <input v-model="newItem.categories" placeholder="新配件種類名稱" @keyup.enter="addItem('categories')">
-      <input class="w60" v-model="newSeq.categories" placeholder="序號">
-      <button class="primary" @click="addItem('categories')">新增</button>
-    </div>
-    <sortable-list :items="categories" item-key="category_id"
-                   @save="saveSort('categories', $event)">
-      <template #row="{ item: c }">
-        <input class="name" v-model="c.name">
-        <button @click="toggleActive('categories', c)">{{ c.active ? '停用' : '啟用' }}</button>
-        <button @click="deleteItem('categories', c)">刪除</button>
-        <button @click="openCategory(c)">{{ openCat===c.category_id ? '收合' : '規格欄設定' }}</button>
-      </template>
-      <template #detail="{ item: c }">
-        <!-- 種類規格欄設定(直接展開於所選種類列下方) -->
-        <div v-if="openCat === c.category_id" class="detail-panel maint-detail">
-          <div class="card-head"><div class="step-title">「{{ openCatName }}」的規格欄</div>
-            <button class="primary" @click="saveAllFields">儲存規格欄名稱</button></div>
-          <small class="hint">這些欄位會出現在此種類的建檔畫面。</small>
-          <div class="inline-add add-before-list">
-            <input v-model="newField.name" placeholder="新規格欄名稱">
-            <select v-model="newField.field_type">
-              <option value="select">下拉選單</option>
-              <option value="text">文字</option>
-              <option value="multi">複選</option>
-              <option value="tags">特性詞條</option>
-            </select>
-            <button class="primary" @click="addField">新增規格欄</button>
-          </div>
-          <div v-for="f in catFields" :key="f.field_id" class="maint-row">
-            <input class="name" v-model="f.name">
-            <span class="tag">{{ fieldTypeLabel(f.field_type) }}</span>
-            <button @click="deleteField(f)">刪除</button>
-          </div>
-          <div v-for="f in catFields" :key="'opt'+f.field_id">
-            <div v-if="['select','multi','tags'].includes(f.field_type)" class="opt-block">
-              <div class="grp-title">「{{ f.name }}」選項</div>
-              <label v-if="f.field_type === 'select'" class="hint option-default">
-                預設選項
-                <select :value="f.default_option_id == null ? '' : f.default_option_id"
-                        @change="setDefaultOption(f, $event.target.value)">
-                  <option value="">(無)</option>
-                  <option v-for="o in (catOptions[f.field_id] || [])" :key="o.option_id"
-                          :value="o.option_id">{{ o.value }}</option>
-                </select>
-              </label>
-              <div class="inline-add option-add">
-                <input v-model="newOption[f.field_id]" placeholder="新增選項"
-                       @keyup.enter="addOption(f)">
-                <button @click="addOption(f)">加入</button>
-              </div>
-              <div class="option-list-box">
-                <div v-for="o in (catOptions[f.field_id] || [])" :key="o.option_id"
-                     class="option-row">
-                  <span class="option-value">{{ o.value }}</span>
-                  <span class="hint">{{ o.usage_count }}使用中</span>
-                  <button @click="deleteOption(f, o)">刪除</button>
-                </div>
-                <span v-if="!(catOptions[f.field_id] || []).length" class="hint">尚無選項</span>
-              </div>
-            </div>
-          </div>
+  <!-- 商品設定:左種類清單、右種類內容 -->
+  <div class="prod-settings">
+    <aside class="cat-list">
+      <div class="cat-list-title">商品種類</div>
+      <div v-for="c in categories" :key="c.category_id" class="cat-item"
+           :class="{active: c.category_id===selCatId, inactive: !c.active}"
+           @click="selectCategory(c)">
+        <span class="cat-name">{{ c.name }}</span>
+        <span v-if="!c.active" class="tag">停用</span>
+      </div>
+      <div class="cat-add">
+        <input v-model="newCatName" placeholder="新種類名稱" @keyup.enter="addCategory">
+        <button class="btn-sm" @click="addCategory">新增種類</button>
+      </div>
+    </aside>
 
-          <div class="step-title" style="margin-top:14px">共用欄</div>
-          <small class="hint">勾選後,此種類的建檔畫面會出現這些共用欄位(如顏色、商品描述)。</small>
-          <label v-for="sf in sharedFields" :key="sf.field_id" class="chk">
-            <input type="checkbox" :checked="enabledShared[sf.field_id]"
-                   @change="toggleShared(sf)"> {{ sf.name }}
-          </label>
+    <section class="cat-detail" v-if="selectedCat" :key="selCatId">
+      <div class="detail-head">
+        <input class="name cat-title" v-model="selectedCat.name"
+               @keyup.enter="saveCategoryName(selectedCat)">
+        <select :value="selectedCat.model_mode"
+                @change="setModelMode(selectedCat, $event.target.value)">
+          <option value="hidden">不使用適用型號</option>
+          <option value="required">使用適用型號</option>
+        </select>
+        <button class="btn-sm" @click="saveCategoryName(selectedCat)">儲存名稱</button>
+        <button class="btn-sm" @click="toggleCategoryActive(selectedCat)">
+          {{ selectedCat.active ? '停用' : '啟用' }}</button>
+        <button class="btn-sm danger" @click="deleteCategory(selectedCat)">刪除</button>
+      </div>
+
+      <div class="grp-title">子產品規格模板</div>
+      <small class="hint">點整列可編輯必填、預設值與選項;特性詞條為固定欄。</small>
+      <div class="tpl-list">
+        <div v-for="f in templateRows" :key="f.field_id" class="tpl-row"
+             :class="{inactive: !f.cf_active, feature: isFeature(f)}"
+             @click="openFieldPopup(f)">
+          <span class="tpl-name">{{ f.name }}</span>
+          <span class="tag">{{ fieldTypeLabel(f.field_type) }}</span>
+          <span class="tpl-req">{{ f.required && !isFeature(f) ? '必填' : '選填' }}</span>
+          <span class="tpl-def hint" v-if="defaultValueName(f)">預設 {{ defaultValueName(f) }}</span>
+          <span class="tag" v-if="isFeature(f)">固定欄</span>
+          <span class="tag" v-else-if="!f.cf_active">已停用</span>
         </div>
-      </template>
-    </sortable-list>
+      </div>
+      <button class="btn-sm" @click="openFieldPopup(null)">新增規格</button>
+      <div class="detail-line">適用型號:{{ modeLabel(selectedCat.model_mode) }}</div>
+
+      <div class="grp-title" style="margin-top:14px">此種類的大產品</div>
+      <table class="big-prod">
+        <thead><tr><th>名稱</th><th>廠牌</th><th>子產品</th><th>狀態</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr v-for="p in bigProducts" :key="p.product_id" :class="{inactive: !p.active}">
+            <td>{{ p.name }}</td>
+            <td>{{ p.brand_name || '—' }}</td>
+            <td>{{ p.variants.length }}</td>
+            <td>{{ p.active ? '啟用' : '已停用' }}</td>
+            <td>
+              <button class="btn-sm" @click="openProductPopup(p)">修改</button>
+              <button class="btn-sm" @click="toggleProductActive(p)">
+                {{ p.active ? '停用' : '啟用' }}</button>
+              <button class="btn-sm danger" @click="deleteProduct(p)">刪除</button>
+            </td>
+          </tr>
+          <tr v-if="!bigProducts.length"><td colspan="5" class="hint">此種類尚無大產品。</td></tr>
+        </tbody>
+      </table>
+      <button class="btn-sm" @click="openProductPopup(null)">新增大產品</button>
+    </section>
+    <section class="cat-detail" v-else>
+      <div class="hint">請於左側選擇或新增商品種類。</div>
+    </section>
+  </div>
+
+  <!-- 規格模板 popup(單層) -->
+  <div v-if="fieldPopup" class="modal-overlay" @click.self="fieldPopup=null">
+    <div class="modal">
+      <h3>{{ fieldPopup.mode==='new' ? '新增規格' : '修改規格' }}</h3>
+      <label>名稱 <input v-model="fieldPopup.name"></label>
+      <label>欄位型態
+        <select v-model="fieldPopup.field_type">
+          <option value="select">下拉選單</option>
+          <option value="text">文字</option>
+          <option value="multi">複選</option>
+        </select>
+      </label>
+      <label>排序 <input type="number" v-model.number="fieldPopup.sort" min="0" class="w80"></label>
+      <label>必填 <input type="checkbox" v-model="fieldPopup.required" :disabled="catHasVariant"></label>
+      <small v-if="catHasVariant" class="hint">此種類已有子產品,必填設定暫時鎖定。</small>
+      <label>規格狀態
+        <select v-model="fieldPopup.active">
+          <option :value="true">啟用</option>
+          <option :value="false">停用</option>
+        </select>
+      </label>
+      <label v-if="fieldPopup.field_type==='select'">預設值
+        <select v-model="fieldPopup.default_option_id">
+          <option :value="null">(無)</option>
+          <option v-for="o in activeOptions(fieldPopup.field_id)" :key="o.option_id"
+                  :value="o.option_id">{{ o.value }}</option>
+        </select>
+      </label>
+      <div v-if="fieldPopup.field_id!=null && ['select','multi','tags'].includes(fieldPopup.field_type)"
+           class="opt-block">
+        <div class="grp-title">選項</div>
+        <div class="inline-add option-add">
+          <input v-model="fieldPopup.newOption" placeholder="新增選項" @keyup.enter="addPopupOption">
+          <button class="btn-sm" @click="addPopupOption">加入</button>
+        </div>
+        <div class="option-list-box">
+          <div v-for="o in (tplOptions[fieldPopup.field_id] || [])" :key="o.option_id"
+               class="option-row" :class="{inactive: !o.active}">
+            <span class="option-value">{{ o.value }}</span>
+            <span class="hint">{{ o.usage_count }} 使用中</span>
+            <button class="btn-sm danger" @click="deletePopupOption(o)">刪除</button>
+          </div>
+          <span v-if="!(tplOptions[fieldPopup.field_id] || []).length" class="hint">尚無選項</span>
+        </div>
+      </div>
+      <small v-if="fieldPopup.field_id==null && ['select','multi','tags'].includes(fieldPopup.field_type)"
+             class="hint">建立後即可加入選項。</small>
+      <div class="modal-actions">
+        <button class="primary" @click="savePopupField">儲存</button>
+        <button @click="fieldPopup=null">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 大產品 popup(單層) -->
+  <div v-if="prodPopup" class="modal-overlay" @click.self="prodPopup=null">
+    <div class="modal">
+      <h3>{{ prodPopup.mode==='new' ? '新增大產品' : '修改大產品' }}</h3>
+      <label>名稱 <input v-model="prodPopup.name" @input="onProdNameInput"></label>
+      <label>廠牌
+        <span class="combo">
+          <input v-model="prodPopup.brandQuery" placeholder="搜尋或輸入廠牌"
+                 @input="onBrandQueryInput" @focus="brandMenuOpen=true" @blur="onBrandBlur">
+          <div v-if="brandMenuOpen" class="combo-menu">
+            <div v-for="b in filteredBrands" :key="b.brand_id" class="combo-item"
+                 @mousedown.prevent="pickBrand(b)">{{ b.name }}</div>
+            <div v-if="prodPopup.brandQuery.trim() && !brandExactMatch"
+                 class="combo-item combo-add" @mousedown.prevent="addInlineBrand">
+              新增「{{ prodPopup.brandQuery.trim() }}」</div>
+            <div v-if="!filteredBrands.length && !prodPopup.brandQuery.trim()"
+                 class="hint" style="padding:6px">尚無廠牌</div>
+          </div>
+        </span>
+      </label>
+      <label>備註 <input v-model="prodPopup.note" placeholder="選填"></label>
+      <label v-if="prodPopup.mode==='edit'">狀態
+        <select v-model="prodPopup.active">
+          <option :value="true">啟用</option>
+          <option :value="false">停用</option>
+        </select>
+      </label>
+      <div class="modal-actions">
+        <button class="primary" @click="saveProduct">儲存</button>
+        <button @click="prodPopup=null">取消</button>
+      </div>
+    </div>
   </div>
 
   <!-- 卡片二:廠牌 -->
@@ -442,7 +467,6 @@
                    @save="saveSort('brands', $event)">
       <template #row="{ item: b }">
         <input class="name" v-model="b.name">
-        <button @click="toggleActive('brands', b)">{{ b.active ? '停用' : '啟用' }}</button>
         <button @click="deleteItem('brands', b)">刪除</button>
         <button @click="openBrandEditor(b)">{{ openBrand===b.brand_id ? '收合' : '配件種類' }}</button>
       </template>
@@ -508,18 +532,18 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=50"></script>
-<script src="js/api.js?v=50"></script>
-<script src="js/catalogfields.js?v=50"></script>
-<script src="js/checkout.js?v=50"></script>
-<script src="js/receive.js?v=50"></script>
-<script src="js/stocktake.js?v=50"></script>
-<script src="js/records.js?v=50"></script>
-<script src="js/catalog.js?v=50"></script>
-<script src="js/sortable.js?v=50"></script>
-<script src="js/modelpicker.js?v=50"></script>
-<script src="js/attrfields.js?v=50"></script>
-<script src="js/settings.js?v=50"></script>
-<script src="js/app.js?v=50"></script>
+<script src="js/vue.global.prod.js?v=51"></script>
+<script src="js/api.js?v=51"></script>
+<script src="js/catalogfields.js?v=51"></script>
+<script src="js/checkout.js?v=51"></script>
+<script src="js/receive.js?v=51"></script>
+<script src="js/stocktake.js?v=51"></script>
+<script src="js/records.js?v=51"></script>
+<script src="js/catalog.js?v=51"></script>
+<script src="js/sortable.js?v=51"></script>
+<script src="js/modelpicker.js?v=51"></script>
+<script src="js/attrfields.js?v=51"></script>
+<script src="js/settings.js?v=51"></script>
+<script src="js/app.js?v=51"></script>
 </body>
 </html>

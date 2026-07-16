@@ -63,7 +63,7 @@ window.groupVariantsByModel = function (variants, modelOrder, editId) {
 
 window.PosPages["page-catalog"] = {
   template: "#tpl-catalog",
-  inject: ["showError"],
+  inject: ["showError", "goPage"],
   data() {
     return {
       q: "", includeInactive: false,
@@ -71,7 +71,7 @@ window.PosPages["page-catalog"] = {
       categories: [], brands: [], models: [],
       products: [], fieldsByCat: {}, fieldOptions: {},
       expanded: {}, bcInput: {}, bcError: {},
-      editProduct: null, editVariant: null,
+      editVariant: null,
       addingFor: null, newVariant: { attrs: {}, price: null, barcode: "", model_ids: [] },
     };
   },
@@ -84,12 +84,10 @@ window.PosPages["page-catalog"] = {
     },
   },
   async mounted() {
-    // ESC 取消行內編輯(款/子產品),不存檔
+    // ESC 取消行內編輯(子產品),不存檔
     this._escHandler = (ev) => {
       if (ev.key !== "Escape") return;
-      if (this.editVariant || this.editProduct) {
-        this.editVariant = null; this.editProduct = null;
-      }
+      if (this.editVariant) this.editVariant = null;
     };
     document.addEventListener("keydown", this._escHandler);
     await this.guard(async () => {
@@ -113,8 +111,9 @@ window.PosPages["page-catalog"] = {
     },
     async reload() {
       await this.refresh();
-      this.editProduct = null; this.editVariant = null; this.addingFor = null;
+      this.editVariant = null; this.addingFor = null;
     },
+    editInSettings() { this.goPage("settings"); },
     toggleExpand(pid) { this.expanded[pid] = !this.expanded[pid]; },
     groupedVariants(p) {
       const editId = this.editVariant ? this.editVariant.variant_id : null;
@@ -142,21 +141,6 @@ window.PosPages["page-catalog"] = {
       return ids;
     },
 
-    // 款編輯
-    startEditProduct(p) {
-      this.editVariant = null;
-      this.editProduct = { product_id: p.product_id, name: p.name,
-        category_id: p.category_id, brand_id: p.brand_id,
-        default_price: p.default_price, note: p.note || "" };
-    },
-    async saveProduct() {
-      const e = this.editProduct;
-      if (!e.name.trim()) { this.showError("請輸入商品名稱"); return; }
-      await this.guardReload(() => API.updateProduct(e.product_id, {
-        name: e.name.trim(), category_id: e.category_id, brand_id: e.brand_id,
-        default_price: e.default_price === "" ? null : (e.default_price ?? null),
-        note: e.note.trim() || null }));
-    },
     async toggleProductActive(p) {
       await this.guardReload(() =>
         API.updateProduct(p.product_id, { active: p.active ? 0 : 1 }));
@@ -168,7 +152,6 @@ window.PosPages["page-catalog"] = {
 
     // 變體編輯
     async startEditVariant(p, v) {
-      this.editProduct = null;
       await this.ensureFields(p.category_id);
       this.editVariant = { variant_id: v.variant_id, price: v.price,
         attrs: window.initFormAttrs(this.fieldsByCat[p.category_id], v.attributes),

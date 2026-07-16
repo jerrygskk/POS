@@ -8,8 +8,9 @@ document.addEventListener("DOMContentLoaded", () => {
     },
     methods: {
       showError(msg) { this.error = msg; setTimeout(() => this.error = "", 5000); },
+      goPage(name) { this.error = ""; this.page = name; },
     },
-    provide() { return { showError: (m) => this.showError(m) }; },
+    provide() { return { showError: (m) => this.showError(m), goPage: (n) => this.goPage(n) }; },
   });
   // 全域 mixin:各頁共用的錯誤包裝與規格顯示。
   // guard:try/catch → showError(失敗不 reload);guardReload:成功後呼叫該頁 reload/reloadAll。

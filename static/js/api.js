@@ -16,7 +16,7 @@ const API = {
   },
   async invoke(action, payload) {
     const allowed = new Set([
-      "categories.list", "categories.create", "categories.update", "categories.delete", "categories.sort", "categories.fields", "categories.set_common_fields",
+      "categories.list", "categories.create", "categories.update", "categories.delete", "categories.sort", "categories.fields", "categories.set_common_fields", "categories.set_field",
       "brands.list", "brands.create", "brands.update", "brands.delete", "brands.sort", "brands.set_categories",
       "phone_brands.list", "phone_brands.create", "phone_brands.update", "phone_brands.delete", "phone_brands.sort",
       "models.list", "models.create", "models.update", "models.delete", "models.sort",
@@ -44,6 +44,7 @@ const API = {
   updateCategory: (id, fields) => API.invoke("categories.update", {id, fields}), deleteCategory: id => API.invoke("categories.delete", {id}),
   sortCategories: ids => API.invoke("categories.sort", {ids}), categoryFields: id => API.invoke("categories.fields", {id}),
   setCategoryCommonFields: (id, field_ids) => API.invoke("categories.set_common_fields", {id, field_ids}),
+  setCategoryField: (category_id, field_id, fields) => API.invoke("categories.set_field", {category_id, field_id, fields}),
   listBrands: p => API.invoke("brands.list", p), createBrand: p => API.invoke("brands.create", p), updateBrand: (id, fields) => API.invoke("brands.update", {id, fields}), deleteBrand: id => API.invoke("brands.delete", {id}), sortBrands: ids => API.invoke("brands.sort", {ids}), setBrandCategories: (id, category_ids) => API.invoke("brands.set_categories", {id, category_ids}),
   listPhoneBrands: p => API.invoke("phone_brands.list", p), createPhoneBrand: p => API.invoke("phone_brands.create", p), updatePhoneBrand: (id, fields) => API.invoke("phone_brands.update", {id, fields}), deletePhoneBrand: id => API.invoke("phone_brands.delete", {id}), sortPhoneBrands: ids => API.invoke("phone_brands.sort", {ids}),
   listModels: p => API.invoke("models.list", p), createModel: p => API.invoke("models.create", p), updateModel: (id, fields) => API.invoke("models.update", {id, fields}), deleteModel: id => API.invoke("models.delete", {id}), sortModels: ids => API.invoke("models.sort", {ids}),

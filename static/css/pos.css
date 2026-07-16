@@ -238,3 +238,59 @@ table.sub td:last-child { white-space: nowrap; }
 .chk-list { display: flex; flex-direction: column; gap: 4px; max-height: 240px;
   overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 8px;
   margin-top: 6px; max-width: 420px; }
+
+/* ── 商品設定單頁:左種類清單 + 右種類內容 ── */
+.prod-settings { display: flex; gap: 16px; margin-bottom: 18px; align-items: flex-start; }
+.cat-list { flex: 0 0 220px; background: var(--surface); border-radius: 8px; padding: 10px;
+  display: flex; flex-direction: column; gap: 4px; }
+.cat-list-title { font-weight: bold; color: var(--text-2); padding: 2px 6px 6px; }
+.cat-item { display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 8px 10px; border-radius: 8px; cursor: pointer; user-select: none; }
+.cat-item:hover { background: var(--hover); }
+.cat-item.active { background: var(--accent-soft); color: var(--primary-active); font-weight: 600; }
+.cat-item.inactive .cat-name { color: var(--text-3); }
+.cat-add { display: flex; gap: 6px; margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--hover); }
+.cat-add input { flex: 1; min-width: 0; }
+.cat-detail { flex: 1; background: var(--surface); border-radius: 8px; padding: 16px;
+  min-width: 0; max-width: 720px; }
+.detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 14px; }
+.detail-head .cat-title { flex: 1; min-width: 160px; font-size: 18px; font-weight: 600; }
+.detail-line { color: var(--text-2); font-size: 14px; margin-top: 8px; }
+.tpl-list { border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  margin: 6px 0 8px; }
+.tpl-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--hover); cursor: pointer; }
+.tpl-row:last-child { border-bottom: 0; }
+.tpl-row:not(.feature):hover { background: var(--hover); }
+.tpl-row.feature { cursor: default; background: var(--surface-alt); }
+.tpl-row.inactive .tpl-name { color: var(--text-3); }
+.tpl-name { font-weight: 600; min-width: 6em; }
+.tpl-req { color: var(--text-2); font-size: 14px; }
+.tpl-def { margin-left: auto; }
+table.big-prod { margin: 6px 0 8px; }
+table.big-prod td:last-child { white-space: nowrap; }
+
+/* ── 單層 popup(不巢狀) ── */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 16px; overflow-y: auto; z-index: 100; }
+.modal { --label-w: 6em; background: var(--surface); border-radius: 10px; padding: 20px;
+  width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.25); }
+.modal > label { display: grid; grid-template-columns: var(--label-w) 1fr;
+  align-items: center; gap: 8px; }
+.modal > label input[type="checkbox"] { justify-self: start; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
+
+/* 廠牌可搜尋下拉(popup 內,非第二層 popup) */
+.combo { position: relative; display: block; }
+.combo input { width: 100%; }
+.combo-menu { position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  margin-top: 2px; max-height: 220px; overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18); }
+.combo-item { padding: 8px 12px; cursor: pointer; }
+.combo-item:hover { background: var(--hover); }
+.combo-item.combo-add { color: var(--primary-hover); font-weight: 600; }
