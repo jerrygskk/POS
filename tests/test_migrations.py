@@ -1,4 +1,4 @@
-import unittest, tempfile, os
+import unittest, tempfile, os, sqlite3
 from unittest import mock
 from lib import db_schema
 from lib.db import get_conn, init_db, _get_schema_version
@@ -22,13 +22,21 @@ class TestMigrations(unittest.TestCase):
         self.assertEqual(_version(self.db), db_schema.SCHEMA_VERSION)
 
     def test_legacy_db_gets_version_backfilled(self):
-        # 模擬舊版 DB:建好後移除 schema_version
-        init_db(self.db)
-        conn = get_conn(self.db)
-        conn.execute("DELETE FROM Setting WHERE key='schema_version'")
+        # 模擬真實舊版 DB:無 schema_version,且結構為舊式(含 category_id 的
+        # AttributeField)。不可用「全新 v13 DB 再刪版號」模擬——那會讓凍結的
+        # v3→v4 遷移在全域化後的 AttributeField 上重跑而失敗,並非真實舊版樣態。
+        conn = sqlite3.connect(self.db)
+        conn.executescript("""
+          CREATE TABLE AttributeField(
+            field_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+            category_id INTEGER, field_type TEXT NOT NULL DEFAULT 'select',
+            sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(category_id, name));
+          CREATE TABLE Setting(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        """)
         conn.commit()
         conn.close()
-        # 再跑 init_db 應補回版號
+        # init_db:無版號視為初版,跑完整 migration 並補回版號至最新
         init_db(self.db)
         self.assertEqual(_version(self.db), db_schema.SCHEMA_VERSION)
 

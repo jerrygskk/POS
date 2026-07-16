@@ -35,9 +35,9 @@ class TestProducts(ApiTestCase):
 
     def _create(self):
         return self.c.post("/api/products", json={
-            "name": "HODA 鋼化玻璃", "category_id": self.cid, "default_price": 590,
+            "name": "HODA 鋼化玻璃", "category_id": self.cid,
             "variants": [
-                {"attributes": {"規格": "亮面"},
+                {"attributes": {"規格": "亮面"}, "price": 590,
                  "barcodes": [{"barcode": "FX100000001", "source": "factory"}]},
                 {"attributes": {"規格": "霧面"},
                  "price": 690, "barcodes": []},
@@ -47,7 +47,7 @@ class TestProducts(ApiTestCase):
         r = self._create()
         self.assertEqual(len(r["variant_ids"]), 2)
         hit = self.c.get("/api/barcode/FX100000001").json()
-        self.assertEqual(hit["price"], 590)          # 用款預設價
+        self.assertEqual(hit["price"], 590)          # 售價存於子產品
         self.assertEqual(hit["attributes"]["規格"], "亮面")
         self.assertEqual(hit["stock"], 0)
 

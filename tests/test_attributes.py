@@ -127,7 +127,7 @@ class TestAttributes(ApiTestCase):
         self.c.put(f"/api/fields/{fid}", json={"default_option_id": oid})
         self.c.put(f"/api/options/{oid}/models", json={"model_ids": [mid]})
         self.c.post("/api/products", json={
-            "name": "膜", "category_id": cid, "default_price": 100,
+            "name": "膜", "category_id": cid,
             "variants": [
                 {"attributes": {"版型": "亮面"}, "barcodes": []},
                 {"attributes": {"版型": "亮面"}, "barcodes": []},
@@ -149,14 +149,15 @@ class TestAttributes(ApiTestCase):
                 "SELECT COUNT(*) FROM VariantAttribute WHERE option_id=?", (oid,)
             ).fetchone()[0], 2)
             self.assertIsNone(conn.execute(
-                "SELECT default_option_id FROM AttributeField WHERE field_id=?", (fid,)
+                "SELECT default_option_id FROM CategoryField WHERE field_id=?", (fid,)
             ).fetchone()[0])
             self.assertEqual(conn.execute(
                 "SELECT COUNT(*) FROM OptionModel WHERE option_id=?", (oid,)
             ).fetchone()[0], 0)
 
     def test_unreferenced_delete_removes_option_and_clears_default(self):
-        fid = self.c.post("/api/fields", json={"name": "版型"}).json()["field_id"]
+        cid = self.create_category("保護貼")
+        fid = self.create_field("版型", cid)
         oid = self._opt(fid, "亮面")
         self.c.put(f"/api/fields/{fid}", json={"default_option_id": oid})
 
@@ -167,7 +168,7 @@ class TestAttributes(ApiTestCase):
         self.assertEqual(self.c.get(f"/api/options?field_id={fid}&all=1").json(), [])
         with get_conn(self.db) as conn:
             self.assertIsNone(conn.execute(
-                "SELECT default_option_id FROM AttributeField WHERE field_id=?", (fid,)
+                "SELECT default_option_id FROM CategoryField WHERE field_id=?", (fid,)
             ).fetchone()[0])
             self.assertIsNone(conn.execute(
                 "SELECT option_id FROM AttributeOption WHERE option_id=?", (oid,)

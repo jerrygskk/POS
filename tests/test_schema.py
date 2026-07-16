@@ -27,9 +27,10 @@ class TestSchema(ConnTestCase):
         self.assertEqual(n, 2)  # 種子不重複:商品描述、顏色
 
     def test_default_fields(self):
+        # AttributeField 全域化後無 sort 欄,依插入順序(field_id)驗證種子
         conn = get_conn(self.db)
         rows = [(r["name"], r["field_type"]) for r in conn.execute(
-            "SELECT name, field_type FROM AttributeField ORDER BY sort")]
+            "SELECT name, field_type FROM AttributeField ORDER BY field_id")]
         self.assertEqual(rows, [("商品描述", "text"), ("顏色", "select")])
 
     def test_product_has_category_and_brand_id(self):
@@ -39,11 +40,12 @@ class TestSchema(ConnTestCase):
         self.assertIn("brand_id", cols)
         self.assertNotIn("category", cols)  # 舊字串欄退場
 
-    def test_seed_fields_are_shared(self):
-        # 種子欄皆為共用欄(category_id NULL)
+    def test_seed_fields_are_global(self):
+        # AttributeField 全域化後種子欄即全域欄(不再有 category_id);全新 DB 應只有 2 欄
         conn = get_conn(self.db)
-        n = conn.execute(
-            "SELECT COUNT(*) c FROM AttributeField WHERE category_id IS NULL").fetchone()["c"]
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(AttributeField)")}
+        self.assertNotIn("category_id", cols)
+        n = conn.execute("SELECT COUNT(*) c FROM AttributeField").fetchone()["c"]
         self.assertEqual(n, 2)
 
     def test_phonemodel_has_series_column(self):
@@ -70,6 +72,13 @@ class TestPhoneBrandMigration(unittest.TestCase):
             product_id INTEGER, attributes TEXT NOT NULL DEFAULT '{}');
           CREATE TABLE VariantModel(variant_id INTEGER, model_id INTEGER,
             PRIMARY KEY(variant_id, model_id));
+          -- 舊式 AttributeField(含 category_id):AttributeField 全域化後,SCHEMA 不再
+          -- 提供此欄,凍結的 v3→v4 遷移需舊式表才能沿其欄位重建,故 fixture 自建。
+          CREATE TABLE AttributeField(
+            field_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+            category_id INTEGER, field_type TEXT NOT NULL DEFAULT 'select',
+            sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(category_id, name));
           CREATE TABLE Setting(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         """)
         conn.execute("INSERT INTO PhoneModel(brand,name) VALUES('iPhone','15')")   # 1
@@ -138,6 +147,12 @@ class TestVariantAttributeMigration(unittest.TestCase):
             UNIQUE(phone_brand_id, name));
           CREATE TABLE VariantModel(variant_id INTEGER NOT NULL, model_id INTEGER NOT NULL,
             PRIMARY KEY(variant_id, model_id));
+          -- 舊式 AttributeField(含 category_id):見 TestPhoneBrandMigration 說明。
+          CREATE TABLE AttributeField(
+            field_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+            category_id INTEGER, field_type TEXT NOT NULL DEFAULT 'select',
+            sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(category_id, name));
           CREATE TABLE Setting(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         """)
         conn.execute("INSERT INTO Product(name) VALUES('膜')")

@@ -158,13 +158,13 @@ class SettingsLayersTests(unittest.TestCase):
             product = conn.execute("INSERT INTO Product(name,category_id) VALUES('膜',?)", (cid,)).lastrowid
             variant = conn.execute("INSERT INTO Variant(product_id) VALUES(?)", (product,)).lastrowid
             conn.execute("INSERT INTO VariantAttribute(variant_id,field_id,option_id) VALUES(?,?,?)", (variant, fid, oid))
-            conn.execute("UPDATE AttributeField SET default_option_id=? WHERE field_id=?", (oid, fid))
+            conn.execute("UPDATE CategoryField SET default_option_id=? WHERE field_id=? AND category_id=?", (oid, fid, cid))
             conn.commit()
         out = self.facade.invoke("options.delete", {"id": oid})
         self.assertFalse(out["deleted"])
         with db_conn(self.db) as conn:
             self.assertEqual(0, conn.execute("SELECT active FROM AttributeOption WHERE option_id=?", (oid,)).fetchone()[0])
-            self.assertIsNone(conn.execute("SELECT default_option_id FROM AttributeField WHERE field_id=?", (fid,)).fetchone()[0])
+            self.assertIsNone(conn.execute("SELECT default_option_id FROM CategoryField WHERE field_id=?", (fid,)).fetchone()[0])
 
     def test_settings_frontend_uses_bridge_transport_with_bounded_wait(self):
         source = (Path(__file__).parents[1] / "static/js/api.js").read_text(encoding="utf-8")

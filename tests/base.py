@@ -74,10 +74,10 @@ class ApiTestCase(unittest.TestCase):
 
     def create_product(self, attrs, name="膜", price=100, barcode="B1",
                        source="store"):
-        """建單變體款(self.cid 種類),回傳 API json。"""
+        """建單變體款(self.cid 種類),回傳 API json。售價存於子產品。"""
         return self.c.post("/api/products", json={
-            "name": name, "category_id": self.cid, "default_price": price,
-            "variants": [{"attributes": attrs,
+            "name": name, "category_id": self.cid,
+            "variants": [{"attributes": attrs, "price": price,
                           "barcodes": [{"barcode": barcode, "source": source}]}]
         }).json()
 

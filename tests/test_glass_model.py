@@ -173,7 +173,8 @@ class TestV3toV4Migration(unittest.TestCase):
         conn = get_conn(db)
         try:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(AttributeField)")}
-            self.assertIn("default_option_id", cols)
+            # 升級鏈跑到 v13:AttributeField 全域化,default_option_id 已移至 CategoryField
+            self.assertNotIn("default_option_id", cols)
             # 既有 VariantAttribute 資料保留
             self.assertEqual(conn.execute(
                 "SELECT COUNT(*) FROM VariantAttribute").fetchone()[0], 1)

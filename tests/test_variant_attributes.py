@@ -5,8 +5,11 @@ from base import ApiTestCase
 class TestVariantAttributes(ApiTestCase):
     def setUp(self):
         super().setUp()
-        # 專屬 select 欄「規格」+ 選項;共用 text 欄「商品描述」為種子
+        # 專屬 select 欄「規格」+ 選項;共用 text 欄「商品描述」須綁定本種類方可使用
         self.make_category_with_field("規格", options=("亮面", "霧面"))
+        desc = [f for f in self.c.get("/api/fields?common=1").json()
+                if f["name"] == "商品描述"][0]["field_id"]
+        self.c.put(f"/api/categories/{self.cid}/fields-common", json={"field_ids": [desc]})
 
     def _opt_id(self, value):
         return [o for o in self.c.get(f"/api/options?field_id={self.fid}").json()

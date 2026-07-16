@@ -26,7 +26,7 @@ class ProductIn(BaseModel):
     name: str
     category_id: int
     brand_id: int | None = None
-    default_price: int | None = None
+    brand_name: str | None = None
     note: str | None = None
     variants: list[VariantIn] = []
 
@@ -35,7 +35,7 @@ class ProductPatch(BaseModel):
     name: str | None = None
     category_id: int | None = None
     brand_id: int | None = None
-    default_price: int | None = None
+    brand_name: str | None = None
     note: str | None = None
     active: int | None = None
 

@@ -1,6 +1,15 @@
 from lib.application_errors import ValidationError
 from lib.db import in_clause, next_sort, stock_map
+from lib.normalize import normalize_key
 from lib.product_rules import FIELD_TYPES
+
+FEATURE_FIELD_KEY = normalize_key("特性詞條")  # 固定欄位:不需綁定即可使用
+
+# 有效啟用(規格 §8.2):Category.active AND Product.active AND Variant.active
+#   AND 沒有未解決的 VariantIssue。VariantIssue 條件本階段恆 True(掛勾),
+#   階段 6 接上時改為:AND NOT EXISTS(SELECT 1 FROM VariantIssue vi
+#   WHERE vi.variant_id=v.variant_id)。此處常數以 c/p/v 別名表示三表。
+EFFECTIVE_ACTIVE = "c.active=1 AND p.active=1 AND v.active=1"
 
 
 def set_variant_models(conn, variant_id, model_ids):
@@ -28,32 +37,72 @@ def _empty(v):
     return not str(v).strip()
 
 
+def _resolve_field(conn, name, category_id):
+    """依欄名解析欄位:須為該種類已綁定且啟用的模板欄位;特性詞條為全域固定例外。"""
+    field = conn.execute(
+        "SELECT f.field_id,f.field_type FROM AttributeField f "
+        "JOIN CategoryField cf ON cf.field_id=f.field_id "
+        "WHERE f.name=? AND f.active=1 AND cf.category_id=? AND cf.active=1 LIMIT 1",
+        (name, category_id)).fetchone()
+    if field is not None:
+        return field
+    if normalize_key(name) == FEATURE_FIELD_KEY:
+        return conn.execute(
+            "SELECT field_id,field_type FROM AttributeField WHERE name=? AND active=1 "
+            "ORDER BY field_id LIMIT 1", (name,)).fetchone()
+    return None
+
+
 def set_variant_attributes(conn, vid, category_id, attributes):
-    conn.execute("DELETE FROM VariantAttribute WHERE variant_id=?", (vid,))
+    """寫入子產品規格值。規格 §12.3:讀取修改前現值逐值比較——
+    原已存在的停用選項可保留或移除,不得新增停用選項值(新建亦不得直接指定停用值)。
+    停用/未綁定欄位的既有值原樣保留,不由本次覆寫刪除。"""
+    # 修改前現值:逐欄 option_id 集合(供停用值差異驗證)
+    prev = {}
+    for r in conn.execute(
+            "SELECT field_id, option_id FROM VariantAttribute "
+            "WHERE variant_id=? AND option_id IS NOT NULL", (vid,)):
+        prev.setdefault(r["field_id"], set()).add(r["option_id"])
+    # 本次可覆寫的欄位=該種類啟用中的模板欄位(+特性詞條);其餘欄位既有值保留
+    editable = {r[0] for r in conn.execute(
+        "SELECT f.field_id FROM AttributeField f JOIN CategoryField cf ON cf.field_id=f.field_id "
+        "WHERE cf.category_id=? AND cf.active=1 AND f.active=1", (category_id,))}
+    if editable:
+        qs = in_clause(list(editable))
+        conn.execute(f"DELETE FROM VariantAttribute WHERE variant_id=? AND field_id IN ({qs})",
+                     (vid, *editable))
     for name, value in (attributes or {}).items():
         if _empty(value): continue
-        field = conn.execute("SELECT field_id,field_type FROM AttributeField WHERE name=? AND active=1 AND (category_id=? OR category_id IS NULL) ORDER BY (category_id IS NULL) LIMIT 1", (name, category_id)).fetchone()
-        if field is None: raise ValidationError(f"規格欄「{name}」不存在")
+        field = _resolve_field(conn, name, category_id)
+        if field is None: raise ValidationError(f"規格欄「{name}」不存在或未套用於此種類")
         fid, kind = field["field_id"], field["field_type"]
+        if fid not in editable:
+            # 特性詞條等未在 editable 名單者,先清本欄既有值再寫入
+            conn.execute("DELETE FROM VariantAttribute WHERE variant_id=? AND field_id=?", (vid, fid))
         values = value if isinstance(value, (list, tuple)) else [value]
         values = list(dict.fromkeys(str(x).strip() for x in values if str(x).strip()))
         if kind == "text":
             conn.execute("INSERT INTO VariantAttribute(variant_id,field_id,text_value) VALUES(?,?,?)", (vid, fid, str(value)))
             continue
         if kind == "select" and len(values) != 1: raise ValidationError(f"規格欄「{name}」格式不正確")
+        original = prev.get(fid, set())
         for val in values:
-            row = conn.execute("SELECT option_id FROM AttributeOption WHERE field_id=? AND value=?", (fid, val)).fetchone()
+            row = conn.execute("SELECT option_id,active FROM AttributeOption WHERE field_id=? AND value=?", (fid, val)).fetchone()
             if row is None and kind == "tags":
                 conn.execute("INSERT OR IGNORE INTO AttributeOption(field_id,value,sort) VALUES(?,?,?)", (fid, val, next_sort(conn, "AttributeOption", "field_id=?", (fid,))))
-                row = conn.execute("SELECT option_id FROM AttributeOption WHERE field_id=? AND value=?", (fid, val)).fetchone()
+                row = conn.execute("SELECT option_id,active FROM AttributeOption WHERE field_id=? AND value=?", (fid, val)).fetchone()
             if row is None: raise ValidationError(f"規格欄「{name}」查無選項「{val}」")
-            conn.execute("INSERT INTO VariantAttribute(variant_id,field_id,option_id) VALUES(?,?,?)", (vid, fid, row["option_id"]))
+            oid = row["option_id"]
+            # §12.3:停用選項僅允許沿用既有值,不得新增
+            if not row["active"] and oid not in original:
+                raise ValidationError(f"規格欄「{name}」的選項「{val}」已停用,不可指定")
+            conn.execute("INSERT INTO VariantAttribute(variant_id,field_id,option_id) VALUES(?,?,?)", (vid, fid, oid))
 
 
 def attr_rows(conn, ids):
     if not ids: return []
     qs=in_clause(ids)
-    return conn.execute(f"SELECT va.variant_id,f.name field_name,f.field_type,o.value option_value,va.text_value,(va.option_id IS NOT NULL AND va.option_id=f.default_option_id) is_default FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id LEFT JOIN AttributeOption o ON va.option_id=o.option_id WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,f.sort,f.field_id,o.sort,o.option_id", ids).fetchall()
+    return conn.execute(f"SELECT va.variant_id,f.name field_name,f.field_type,o.value option_value,va.text_value,(va.option_id IS NOT NULL AND va.option_id=cf.default_option_id) is_default FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id JOIN Variant v ON va.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id LEFT JOIN CategoryField cf ON cf.field_id=va.field_id AND cf.category_id=p.category_id LEFT JOIN AttributeOption o ON va.option_id=o.option_id WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,cf.sort,f.field_id,o.sort,o.option_id", ids).fetchall()
 
 
 def attrs_by_variant(conn, ids):
@@ -80,7 +129,7 @@ def variant_sort_keys(conn, ids):
     keys={vid:[0,0,[],[]] for vid in ids}
     if not ids:return {}
     qs=in_clause(ids)
-    for r in conn.execute(f"SELECT va.variant_id,f.field_type,f.sort fsort,f.field_id,o.sort osort,o.option_id,o.value oval FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id LEFT JOIN AttributeOption o ON va.option_id=o.option_id WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,f.sort,f.field_id,o.sort,o.option_id",ids):
+    for r in conn.execute(f"SELECT va.variant_id,f.field_type,cf.sort fsort,f.field_id,o.sort osort,o.option_id,o.value oval FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id JOIN Variant v ON va.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id LEFT JOIN CategoryField cf ON cf.field_id=va.field_id AND cf.category_id=p.category_id LEFT JOIN AttributeOption o ON va.option_id=o.option_id WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,cf.sort,f.field_id,o.sort,o.option_id",ids):
         k=keys[r["variant_id"]]
         if r["field_type"]=="tags":
             if r["oval"]=="抗AR":k[1]=1
@@ -100,7 +149,7 @@ def has_records(conn, ids):
 
 def catalog(conn, include_inactive=False, category_id=None, brand_id=None, model_id=None):
     clauses=[];args=[]
-    if not include_inactive:clauses.append("p.active=1")
+    if not include_inactive:clauses.append("p.active=1 AND (c.active=1 OR c.category_id IS NULL)")
     if category_id is not None:clauses.append("p.category_id=?");args.append(category_id)
     if brand_id is not None:clauses.append("p.brand_id=?");args.append(brand_id)
     where=" WHERE "+" AND ".join(clauses) if clauses else ""
@@ -120,9 +169,9 @@ def catalog(conn, include_inactive=False, category_id=None, brand_id=None, model
     for p in products:
         vs=[]
         for r in sorted(by.get(p["product_id"],[]),key=lambda x:(sorts[x["variant_id"]],x["variant_id"])):
-            vid=r["variant_id"];vs.append({"variant_id":vid,"attributes":attrs.get(vid,{}),"attr_display":disp.get(vid,""),"price":r["price"],"effective_price":r["price"] if r["price"] is not None else p["default_price"],"stock":stocks.get(vid,0),"active":bool(r["active"]),"models":models.get(vid,[]),"barcodes":bars.get(vid,[])})
+            vid=r["variant_id"];vs.append({"variant_id":vid,"attributes":attrs.get(vid,{}),"attr_display":disp.get(vid,""),"price":r["price"],"effective_price":r["price"],"stock":stocks.get(vid,0),"active":bool(r["active"]),"models":models.get(vid,[]),"barcodes":bars.get(vid,[])})
         if model_id is not None and not vs:continue
-        out.append({"product_id":p["product_id"],"name":p["name"],"category_id":p["category_id"],"category_name":p["category_name"],"brand_id":p["brand_id"],"brand_name":p["brand_name"],"default_price":p["default_price"],"note":p["note"],"active":bool(p["active"]),"variants":vs})
+        out.append({"product_id":p["product_id"],"name":p["name"],"category_id":p["category_id"],"category_name":p["category_name"],"brand_id":p["brand_id"],"brand_name":p["brand_name"],"note":p["note"],"active":bool(p["active"]),"variants":vs})
     return out
 
 

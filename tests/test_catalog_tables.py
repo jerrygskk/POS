@@ -74,22 +74,18 @@ class TestCatalogTables(ConnTestCase):
             self.conn.execute(
                 "INSERT INTO CategoryField(category_id,field_id) VALUES(1,?)", (fid,))
 
-    # AttributeField UNIQUE(category_id,name):同種類同名違反;NULL 共用欄 SQLite 視為相異(允許)
+    # AttributeField 全域化:DDL 層無 UNIQUE(name),正規化同名去重交應用層
     def test_attributefield_unique(self):
-        self.conn.execute("INSERT INTO Category(name) VALUES('手機殼')")
-        self.conn.execute(
-            "INSERT INTO AttributeField(name,category_id) VALUES('版型',1)")
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute(
-                "INSERT INTO AttributeField(name,category_id) VALUES('版型',1)")
-        # category_id NULL 對 SQLite UNIQUE 視為相異,共用欄同名 DDL 層允許(去重交應用層)
-        self.conn.execute("INSERT INTO AttributeField(name) VALUES('顏色')")
-        self.conn.execute("INSERT INTO AttributeField(name) VALUES('顏色')")
+        self.conn.execute("INSERT INTO AttributeField(name) VALUES('版型')")
+        self.conn.execute("INSERT INTO AttributeField(name) VALUES('版型')")
+        n = self.conn.execute(
+            "SELECT COUNT(*) c FROM AttributeField WHERE name='版型'").fetchone()["c"]
+        self.assertEqual(n, 2)
 
     # AttributeOption UNIQUE(field_id,value)
     def test_attributeoption_unique(self):
         self.conn.execute(
-            "INSERT INTO AttributeField(name,category_id) VALUES('顏色',NULL)")
+            "INSERT INTO AttributeField(name) VALUES('顏色')")
         fid = self.conn.execute(
             "SELECT field_id FROM AttributeField WHERE name='顏色'").fetchone()["field_id"]
         self.conn.execute(

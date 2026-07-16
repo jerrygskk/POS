@@ -24,8 +24,8 @@ class TestProductLayers(ConnTestCase):
     def test_create_product_variant_and_scan_barcode(self):
         created = self.facade.invoke("products.create", {
             "name": "測試商品", "category_id": self.category_id,
-            "default_price": 590,
-            "variants": [{"attributes": {}, "barcodes": [{"barcode": "F001", "source": "factory"}]}],
+            "variants": [{"attributes": {}, "price": 590,
+                          "barcodes": [{"barcode": "F001", "source": "factory"}]}],
         })
         hit = self.facade.invoke("barcodes.scan", {"code": "F001"})
         self.assertEqual(hit["variant_id"], created["variant_ids"][0])
@@ -45,8 +45,7 @@ class TestProductLayers(ConnTestCase):
 
     def test_catalog_and_search_are_available_through_facade(self):
         made = self.facade.invoke("products.create", {
-            "name": "Alpha", "category_id": self.category_id,
-            "default_price": 120, "variants": [{}],
+            "name": "Alpha", "category_id": self.category_id, "variants": [{}],
         })
         rows = self.facade.invoke("products.list", {"q": "alp"})
         catalog = self.facade.invoke("catalog.list", {"q": "alp", "include_inactive": False})

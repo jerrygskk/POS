@@ -2,7 +2,8 @@ from collections.abc import Mapping
 
 from lib.application import TransactionRunner
 from lib.application_errors import ConflictError, NotFoundError, ValidationError
-from lib.db import db_conn, in_clause
+from lib.db import db_conn, in_clause, next_sort
+from lib.normalize import normalize_display, normalize_key
 from lib.product_rules import next_store_barcode
 from lib import product_data
 
@@ -58,10 +59,10 @@ def _validate_variant(value):
 def _validate_action_payload(action, payload):
     id_actions={"products.update","products.delete","variants.update","variants.set_models","variants.update_details","variants.delete"}
     if action=="products.create":
-        _allow(payload,{"name","category_id","brand_id","default_price","note","variants"})
+        _allow(payload,{"name","category_id","brand_id","brand_name","note","variants"})
         if not isinstance(payload.get("name"),str) or not _is_int(payload.get("category_id")):raise ValidationError("商品資料格式不正確")
         if payload.get("brand_id") is not None and not _is_int(payload["brand_id"]):raise ValidationError("廠牌格式不正確")
-        if payload.get("default_price") is not None and not _is_int(payload["default_price"]):raise ValidationError("售價格式不正確")
+        if payload.get("brand_name") is not None and not isinstance(payload["brand_name"],str):raise ValidationError("廠牌名稱格式不正確")
         if payload.get("note") is not None and not isinstance(payload["note"],str):raise ValidationError("備註格式不正確")
         if not isinstance(payload.get("variants",[]),list):raise ValidationError("子產品清單格式不正確")
         for item in payload.get("variants",[]):_validate_variant(item)
@@ -80,10 +81,11 @@ def _validate_action_payload(action, payload):
         if "fields" in payload:
             fields=_mapping(payload["fields"],"更新欄位")
             if action=="products.update":
-                _allow(fields,{"name","category_id","brand_id","default_price","note","active"})
+                _allow(fields,{"name","category_id","brand_id","brand_name","note","active"})
                 if fields.get("name") is not None and not isinstance(fields["name"],str):raise ValidationError("商品名稱格式不正確")
-                for key in ("category_id","brand_id","default_price","active"):
+                for key in ("category_id","brand_id","active"):
                     if fields.get(key) is not None and not _is_int(fields[key]):raise ValidationError(f"{key} 格式不正確")
+                if fields.get("brand_name") is not None and not isinstance(fields["brand_name"],str):raise ValidationError("廠牌名稱格式不正確")
                 if fields.get("note") is not None and not isinstance(fields["note"],str):raise ValidationError("備註格式不正確")
             else:_validate_variant(fields)
         if "model_ids" in payload:_int_list(payload["model_ids"],"型號")
@@ -118,12 +120,11 @@ class ProductRepository:
         if row is None or not row["active"]:
             raise ValidationError("商品種類不存在或已停用")
 
-    def require_active_brand(self, brand_id):
+    def require_brand(self, brand_id):
         if brand_id is None:
             return
-        row = self.one("SELECT active FROM Brand WHERE brand_id=?", (brand_id,))
-        if row is None or not row["active"]:
-            raise ValidationError("廠牌不存在或已停用")
+        if self.one("SELECT 1 FROM Brand WHERE brand_id=?", (brand_id,)) is None:
+            raise ValidationError("廠牌不存在")
 
     def require_variant(self, variant_id):
         if self.one("SELECT 1 FROM Variant WHERE variant_id=?", (variant_id,)) is None:
@@ -138,13 +139,40 @@ class ProductService:
     def __init__(self, repository):
         self.repo = repository
 
+    def _resolve_brand(self, category_id, brand_id, brand_name):
+        """廠牌解析:brand_name(inline)以 normalize_key 比對既有,同名沿用,否則建立;
+        回傳最終 brand_id。呼叫端另建 BrandCategory 關聯。"""
+        if brand_name is not None and brand_name.strip():
+            key = normalize_key(brand_name)
+            for r in self.repo.all("SELECT brand_id,name FROM Brand"):
+                if normalize_key(r["name"]) == key:
+                    return r["brand_id"]
+            cur = self.repo.execute("INSERT INTO Brand(name,sort) VALUES(?,?)",
+                                    (normalize_display(brand_name), next_sort(self.repo.connection, "Brand")))
+            return cur.lastrowid
+        self.repo.require_brand(brand_id)
+        return brand_id
+
+    def _same_category_name_exists(self, category_id, name, exclude_pid=None):
+        key = normalize_key(name)
+        sql = "SELECT product_id,name FROM Product WHERE category_id=?"
+        args = [category_id]
+        if exclude_pid is not None:
+            sql += " AND product_id<>?"; args.append(exclude_pid)
+        return any(normalize_key(r["name"]) == key for r in self.repo.all(sql, args))
+
     def create(self, payload):
         self.repo.require_active_category(payload["category_id"])
-        self.repo.require_active_brand(payload.get("brand_id"))
+        brand_id = self._resolve_brand(payload["category_id"], payload.get("brand_id"),
+                                       payload.get("brand_name"))
+        if self._same_category_name_exists(payload["category_id"], payload["name"]):
+            raise ConflictError("此種類已有同名大產品")
         cur = self.repo.execute(
-            "INSERT INTO Product(name,category_id,brand_id,default_price,note) VALUES(?,?,?,?,?)",
-            (payload["name"], payload["category_id"], payload.get("brand_id"),
-             payload.get("default_price"), payload.get("note")))
+            "INSERT INTO Product(name,category_id,brand_id,note) VALUES(?,?,?,?)",
+            (payload["name"], payload["category_id"], brand_id, payload.get("note")))
+        if brand_id is not None:
+            self.repo.execute("INSERT OR IGNORE INTO BrandCategory(brand_id,category_id) VALUES(?,?)",
+                              (brand_id, payload["category_id"]))
         variant_ids = []
         for variant in payload.get("variants", []):
             variant_ids.append(self._create_variant(cur.lastrowid, payload["category_id"], variant)[0])
@@ -162,9 +190,13 @@ class ProductService:
         return vid, codes
 
     def add_variant(self, product_id, payload):
-        row = self.repo.one("SELECT category_id FROM Product WHERE product_id=?", (product_id,))
+        row = self.repo.one("SELECT category_id,active FROM Product WHERE product_id=?", (product_id,))
         if row is None:
             raise NotFoundError("找不到商品")
+        # 子產品建立要求 Category 與 Product 皆 active(規格 §8.2)
+        if not row["active"]:
+            raise ValidationError("大產品已停用,不可新增子產品")
+        self.repo.require_active_category(row["category_id"])
         vid, codes = self._create_variant(product_id, row["category_id"], payload)
         return {"variant_id": vid, "barcodes": codes}
 
@@ -183,9 +215,10 @@ class ProductService:
 
     def scan(self, code):
         row = self.repo.one(
-            "SELECT v.variant_id,v.product_id,COALESCE(v.price,p.default_price) price,"
-            "p.name,(p.active AND v.active) active FROM Barcode b "
+            "SELECT v.variant_id,v.product_id,v.price price,p.name,"
+            "(COALESCE(c.active,1) AND p.active AND v.active) active FROM Barcode b "
             "JOIN Variant v ON b.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id "
+            "LEFT JOIN Category c ON p.category_id=c.category_id "
             "WHERE b.barcode=?", (code,))
         if row is None:
             raise NotFoundError("找不到此條碼")
@@ -196,10 +229,11 @@ class ProductService:
                 "stock": product_data.stock_of(self.repo.connection, vid), "active": bool(row["active"])}
 
     def search(self, payload):
-        sql = ("SELECT v.variant_id,p.name,COALESCE(v.price,p.default_price) price,"
+        sql = ("SELECT v.variant_id,p.name,v.price price,"
                "c.name category_name,b.name brand_name FROM Variant v "
                "JOIN Product p ON v.product_id=p.product_id LEFT JOIN Category c ON p.category_id=c.category_id "
-               "LEFT JOIN Brand b ON p.brand_id=b.brand_id WHERE p.active=1 AND v.active=1")
+               "LEFT JOIN Brand b ON p.brand_id=b.brand_id "
+               "WHERE p.active=1 AND v.active=1 AND (c.active=1 OR c.category_id IS NULL)")
         args = []
         for key, column in (("category_id", "p.category_id"), ("brand_id", "p.brand_id")):
             if payload.get(key) is not None:
@@ -230,8 +264,21 @@ class ProductService:
 
     def update_product(self, pid, fields):
         self.repo.require_product(pid)
+        row = self.repo.one("SELECT category_id FROM Product WHERE product_id=?", (pid,))
+        fields = dict(fields)
+        category_id = fields.get("category_id") if fields.get("category_id") is not None else row["category_id"]
         if fields.get("category_id") is not None: self.repo.require_active_category(fields["category_id"])
-        if fields.get("brand_id") is not None: self.repo.require_active_brand(fields["brand_id"])
+        # 廠牌 inline 新增(brand_name)或指定 brand_id
+        if fields.pop("brand_name", None) is not None or "brand_id" in fields:
+            brand_id = self._resolve_brand(category_id, fields.get("brand_id"), fields.get("brand_name"))
+            fields["brand_id"] = brand_id
+            if brand_id is not None and category_id is not None:
+                self.repo.execute("INSERT OR IGNORE INTO BrandCategory(brand_id,category_id) VALUES(?,?)",
+                                  (brand_id, category_id))
+        fields.pop("brand_name", None)
+        if fields.get("name") is not None and category_id is not None:
+            if self._same_category_name_exists(category_id, fields["name"], exclude_pid=pid):
+                raise ConflictError("此種類已有同名大產品")
         _update_by_id(self.repo.connection, "Product", "product_id", pid, fields)
         return {"ok": True}
 

@@ -70,17 +70,16 @@ class TestCatalogApi(ApiTestCase):
         self.c.put(f"/api/brands/{b2}/categories", json={"category_ids": [case]})
         got = [x["name"] for x in self.c.get(f"/api/brands?category_id={glass}").json()]
         self.assertEqual(got, ["HODA"])
-        # 停用的廠牌不入該過濾清單
-        self.c.patch(f"/api/brands/{b1}", json={"active": 0})
-        self.assertEqual(self.c.get(f"/api/brands?category_id={glass}").json(), [])
+        # 廠牌無 active(規格 §7.2):掛鋼化玻璃者僅 HODA
+        self.assertEqual([x["name"] for x in self.c.get(f"/api/brands?category_id={case}").json()], ["犀牛盾"])
 
-    def test_build_with_inactive_brand_422(self):
+    def test_brand_zero_ref_hard_delete_clears_brandcategory(self):
+        # 零引用廠牌可硬刪並清 BrandCategory(規格 §7.2)
+        bid = self.c.post("/api/brands", json={"name": "臨時廠"}).json()["brand_id"]
         cid = self.c.post("/api/categories", json={"name": "鋼化玻璃"}).json()["category_id"]
-        bid = self.c.post("/api/brands", json={"name": "舊廠"}).json()["brand_id"]
-        self.c.patch(f"/api/brands/{bid}", json={"active": 0})
-        r = self.c.post("/api/products", json={"name": "X", "category_id": cid,
-            "brand_id": bid, "variants": [{"attributes": {}, "barcodes": []}]})
-        self.assertEqual(r.status_code, 422)
+        self.c.put(f"/api/brands/{bid}/categories", json={"category_ids": [cid]})
+        self.assertEqual(self.c.delete(f"/api/brands/{bid}").status_code, 200)
+        self.assertEqual(self.c.get(f"/api/brands?category_id={cid}").json(), [])
 
     # ---- 手機品牌 CRUD + 停用不入建檔下拉 + 刪除 409 ----
     def _add_phone_brand(self, name):
@@ -194,9 +193,11 @@ class TestCatalogApi(ApiTestCase):
         # 專屬欄「版型」含選項
         fid = self.c.post("/api/fields", json={"name": "版型", "category_id": cid}).json()["field_id"]
         self.c.post("/api/options", json={"field_id": fid, "value": "亮面"})
-        # 啟用共用欄「顏色」
+        # 啟用共用欄「顏色」;另掛一個種類使其成為共用(shared=綁定≥2 種類)
         color = [f for f in self.c.get("/api/fields?common=1").json()
                  if f["name"] == "顏色"][0]["field_id"]
+        other = self.c.post("/api/categories", json={"name": "手機殼"}).json()["category_id"]
+        self.c.put(f"/api/categories/{other}/fields-common", json={"field_ids": [color]})
         self.c.put(f"/api/categories/{cid}/fields-common", json={"field_ids": [color]})
         fields = self.c.get(f"/api/categories/{cid}/fields").json()
         names = [f["name"] for f in fields]
@@ -221,13 +222,13 @@ class TestCatalogApi(ApiTestCase):
         ip = self._add_phone_brand("iPhone")
         m15 = self.c.post("/api/models", json={"phone_brand_id": ip, "name": "15"}).json()["model_id"]
         m16 = self.c.post("/api/models", json={"phone_brand_id": ip, "name": "16"}).json()["model_id"]
-        # 共用欄「顏色」補選項(正規化後 select 值須為既有選項)
+        # 共用欄「顏色」須綁定本種類方可套用;補選項(正規化後 select 值須為既有選項)
         color = [f for f in self.c.get("/api/fields?common=1").json()
                  if f["name"] == "顏色"][0]["field_id"]
+        self.c.put(f"/api/categories/{cid}/fields-common", json={"field_ids": [color]})
         for v in ("黑", "白"):
             self.c.post("/api/options", json={"field_id": color, "value": v})
         r = self.c.post("/api/products", json={"name": "共用殼", "category_id": cid,
-            "default_price": 100,
             "variants": [
                 {"attributes": {"顏色": "黑"}, "model_ids": [m15, m16],
                  "barcodes": [{"barcode": "C1", "source": "store"}]},

@@ -10,9 +10,9 @@ class TestCatalog(ApiTestCase):
 
     def _create(self):
         return self.c.post("/api/products", json={
-            "name": "HODA 鋼化玻璃", "category_id": self.cid, "default_price": 590,
+            "name": "HODA 鋼化玻璃", "category_id": self.cid,
             "variants": [
-                {"attributes": {"規格": "亮面"},
+                {"attributes": {"規格": "亮面"}, "price": 590,
                  "barcodes": [{"barcode": "FX100000001", "source": "factory"}]},
                 {"attributes": {"規格": "霧面"}, "price": 690,
                  "barcodes": [{"barcode": "FX100000002", "source": "factory"}]},
@@ -29,13 +29,13 @@ class TestCatalog(ApiTestCase):
         p = cat[0]
         self.assertEqual(p["product_id"], pid)
         self.assertEqual(p["name"], "HODA 鋼化玻璃")
-        self.assertEqual(p["default_price"], 590)
+        self.assertNotIn("default_price", p)             # 大產品不再保存預設售價
         self.assertTrue(p["active"])
         self.assertEqual(len(p["variants"]), 2)
         v0, v1 = p["variants"]
         self.assertEqual(v0["attributes"]["規格"], "亮面")
-        self.assertIsNone(v0["price"])
-        self.assertEqual(v0["effective_price"], 590)     # 用款預設價
+        self.assertEqual(v0["price"], 590)
+        self.assertEqual(v0["effective_price"], 590)     # 售價存於子產品
         self.assertEqual(v0["stock"], 5)
         self.assertTrue(v0["active"])
         self.assertEqual(v0["barcodes"][0]["barcode"], "FX100000001")
@@ -64,10 +64,10 @@ class TestCatalog(ApiTestCase):
     def test_put_product(self):
         r = self._create()
         pid = r["product_id"]
-        self.c.put(f"/api/products/{pid}", json={"name": "新名稱", "default_price": None})
+        self.c.put(f"/api/products/{pid}", json={"name": "新名稱", "note": "備註"})
         p = self.c.get("/api/catalog").json()[0]
         self.assertEqual(p["name"], "新名稱")
-        self.assertIsNone(p["default_price"])
+        self.assertEqual(p["note"], "備註")
 
     def test_put_variant(self):
         r = self._create()

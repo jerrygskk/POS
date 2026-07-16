@@ -6,12 +6,14 @@ from lib.settings_service import SettingsFacade
 
 router = APIRouter(prefix="/api")
 
-class CategoryNew(BaseModel): name: str; sort: int | None = None
-class CategoryPatch(BaseModel): name: str | None = None; sort: int | None = None; active: int | None = None
-class BrandNew(CategoryNew): pass
-class BrandPatch(CategoryPatch): pass
-class PhoneBrandNew(CategoryNew): pass
-class PhoneBrandPatch(CategoryPatch): pass
+class SimpleNew(BaseModel): name: str; sort: int | None = None
+class SimplePatch(BaseModel): name: str | None = None; sort: int | None = None; active: int | None = None
+class CategoryNew(SimpleNew): model_mode: str | None = None
+class CategoryPatch(SimplePatch): model_mode: str | None = None
+class BrandNew(SimpleNew): pass
+class BrandPatch(SimplePatch): pass
+class PhoneBrandNew(SimpleNew): pass
+class PhoneBrandPatch(SimplePatch): pass
 class ModelNew(BaseModel):
     phone_brand_id: int; name: str; alias: str | None = None; series: str | None = None; sort: int | None = None
 class ModelPatch(BaseModel):
@@ -19,6 +21,9 @@ class ModelPatch(BaseModel):
 class SortIds(BaseModel): ids: list[int]
 class IdList(BaseModel): category_ids: list[int] = []
 class FieldIdList(BaseModel): field_ids: list[int] = []
+class CategoryFieldPatch(BaseModel):
+    sort: int | None = None; required: int | None = None
+    default_option_id: int | None = None; active: int | None = None
 
 def _call(request, action, payload=None):
     try: return SettingsFacade(request.app.state.db_path).invoke(action, payload or {})
@@ -66,3 +71,5 @@ def delete_model(mid:int,request:Request): return _call(request,"models.delete",
 def category_fields(cid:int,request:Request): return _call(request,"categories.fields",{"id":cid})
 @router.put("/categories/{cid}/fields-common")
 def common_fields(cid:int,body:FieldIdList,request:Request): return _call(request,"categories.set_common_fields",{"id":cid,"field_ids":body.field_ids})
+@router.put("/categories/{cid}/fields/{fid}")
+def set_category_field(cid:int,fid:int,body:CategoryFieldPatch,request:Request): return _call(request,"categories.set_field",{"category_id":cid,"field_id":fid,"fields":body.model_dump(exclude_unset=True)})

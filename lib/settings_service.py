@@ -4,7 +4,10 @@ from collections.abc import Mapping
 from lib.application import TransactionRunner
 from lib.application_errors import ConflictError, NotFoundError, ValidationError
 from lib.db import db_conn, in_clause, next_sort
+from lib.normalize import normalize_key
 from lib.product_rules import FIELD_TYPES
+
+FEATURE_FIELD_KEY = normalize_key("特性詞條")  # 固定欄位:不可停用/刪除
 
 
 _ACTION_RULES = {
@@ -26,10 +29,11 @@ _ACTION_RULES = {
     "options.set_models": ({"id": int, "model_ids": "int_list"}, {}),
     "categories.fields": ({"id": int}, {}),
     "categories.set_common_fields": ({"id": int, "field_ids": "int_list"}, {}),
+    "categories.set_field": ({"category_id": int, "field_id": int, "fields": Mapping}, {}),
 }
 
 _UPDATE_FIELD_RULES = {
-    "categories.update": {"name": str, "sort": int, "active": (bool, int)},
+    "categories.update": {"name": str, "sort": int, "active": (bool, int), "model_mode": str},
     "brands.update": {"name": str, "sort": int, "active": (bool, int)},
     "phone_brands.update": {"name": str, "sort": int, "active": (bool, int)},
     "models.update": {
@@ -48,6 +52,12 @@ _UPDATE_FIELD_RULES = {
         "default_option_id": (int, type(None)),
     },
     "options.update": {"value": str, "sort": int, "active": (bool, int)},
+    "categories.set_field": {
+        "sort": int,
+        "required": (bool, int),
+        "default_option_id": (int, type(None)),
+        "active": (bool, int),
+    },
 }
 for _kind in ("categories", "brands", "phone_brands"):
     _ACTION_RULES[f"{_kind}.create"] = ({"name": str}, {"sort": (int, type(None))})
@@ -55,6 +65,10 @@ for _kind in ("categories", "brands", "phone_brands"):
     _ACTION_RULES[f"{_kind}.delete"] = ({"id": int}, {})
     _ACTION_RULES[f"{_kind}.sort"] = ({"ids": "int_list"}, {})
     _ACTION_RULES[f"{_kind}.list"] = ({}, {"all": (bool, int), "category_id": (int, type(None))})
+# 種類另支援 model_mode(適用型號模式)讀寫
+_ACTION_RULES["categories.create"] = ({"name": str}, {"sort": (int, type(None)), "model_mode": (str, type(None))})
+
+MODEL_MODES = ("required", "hidden")
 
 
 def _valid_type(value, expected):
@@ -128,13 +142,14 @@ class SettingsService:
         "brands": ("Brand", "brand_id", "brand_id", "查無此廠牌"),
         "phone_brands": ("PhoneBrand", "phone_brand_id", "phone_brand_id", "查無此手機品牌"),
     }
+    NO_ACTIVE = {"brands"}  # 廠牌無 active(規格 §7.2:不參與營運狀態)
 
     def __init__(self, repository):
         self.repo = repository
 
     def simple_list(self, kind, all=False):
         table, id_col, _, _ = self.SIMPLE[kind]
-        where = "" if all else " WHERE active=1"
+        where = "" if all or kind in self.NO_ACTIVE else " WHERE active=1"
         return self.repo.rows(f"SELECT * FROM {table}{where} ORDER BY sort,{id_col}")
 
     def simple_create(self, kind, payload):
@@ -142,13 +157,25 @@ class SettingsService:
         sort = payload.get("sort")
         if sort is None:
             sort = next_sort(self.repo.connection, table)
-        cur = self.repo.execute(f"INSERT INTO {table}(name,sort) VALUES(?,?)", (payload["name"], sort))
+        if kind == "categories":
+            mode = payload.get("model_mode") or "hidden"
+            if mode not in MODEL_MODES:
+                raise ValidationError("適用型號模式不正確")
+            cur = self.repo.execute("INSERT INTO Category(name,sort,model_mode) VALUES(?,?,?)",
+                                    (payload["name"], sort, mode))
+        else:
+            cur = self.repo.execute(f"INSERT INTO {table}(name,sort) VALUES(?,?)", (payload["name"], sort))
         return {result_key: cur.lastrowid}
 
     def simple_update(self, kind, item_id, fields):
         table, id_col, _, message = self.SIMPLE[kind]
         self.repo.require(table, id_col, item_id, message)
-        fields = {k: v for k, v in fields.items() if k in {"name", "sort", "active"}}
+        allowed = {"name", "sort"} if kind in self.NO_ACTIVE else {"name", "sort", "active"}
+        if kind == "categories":
+            allowed = allowed | {"model_mode"}
+            if fields.get("model_mode") is not None and fields["model_mode"] not in MODEL_MODES:
+                raise ValidationError("適用型號模式不正確")
+        fields = {k: v for k, v in fields.items() if k in allowed}
         if fields:
             sets = ",".join(f"{key}=?" for key in fields)
             self.repo.execute(f"UPDATE {table} SET {sets} WHERE {id_col}=?", (*fields.values(), item_id))
@@ -166,11 +193,22 @@ class SettingsService:
             if self.repo.one(f"SELECT 1 FROM {ref_table} WHERE {ref_col}=? LIMIT 1", (item_id,)):
                 raise ConflictError(ref_message)
         if kind == "categories":
+            # 專用欄:只被本種類綁定的全域欄位(規格 §9.2)
+            specific = [r["field_id"] for r in self.repo.execute(
+                "SELECT field_id FROM CategoryField WHERE category_id=? AND field_id IN "
+                "(SELECT field_id FROM CategoryField GROUP BY field_id HAVING COUNT(*)=1)",
+                (item_id,))]
             self.repo.execute("DELETE FROM CategoryField WHERE category_id=?", (item_id,))
             self.repo.execute("DELETE FROM BrandCategory WHERE category_id=?", (item_id,))
-            self.repo.execute("UPDATE AttributeField SET default_option_id=NULL WHERE category_id=?", (item_id,))
-            self.repo.execute("DELETE FROM AttributeOption WHERE field_id IN (SELECT field_id FROM AttributeField WHERE category_id=?)", (item_id,))
-            self.repo.execute("DELETE FROM AttributeField WHERE category_id=?", (item_id,))
+            for fid in specific:
+                # 有任何 VariantAttribute 引用即保留(規格 §9.2:專用且從未使用才清)
+                if self.repo.one("SELECT 1 FROM VariantAttribute WHERE field_id=? LIMIT 1", (fid,)):
+                    continue
+                self.repo.execute(
+                    "DELETE FROM OptionModel WHERE option_id IN "
+                    "(SELECT option_id FROM AttributeOption WHERE field_id=?)", (fid,))
+                self.repo.execute("DELETE FROM AttributeOption WHERE field_id=?", (fid,))
+                self.repo.execute("DELETE FROM AttributeField WHERE field_id=?", (fid,))
         elif kind == "brands":
             self.repo.execute("DELETE FROM BrandCategory WHERE brand_id=?", (item_id,))
         self.repo.execute(f"DELETE FROM {table} WHERE {id_col}=?", (item_id,))
@@ -188,7 +226,7 @@ class SettingsService:
     def list_brands(self, all=False, category_id=None):
         if category_id is None:
             return self.simple_list("brands", all)
-        return self.repo.rows("SELECT b.* FROM Brand b JOIN BrandCategory bc ON b.brand_id=bc.brand_id WHERE bc.category_id=? AND b.active=1 ORDER BY b.sort,b.brand_id", (category_id,))
+        return self.repo.rows("SELECT b.* FROM Brand b JOIN BrandCategory bc ON b.brand_id=bc.brand_id WHERE bc.category_id=? ORDER BY b.sort,b.brand_id", (category_id,))
 
     def set_brand_categories(self, item_id, ids):
         self.repo.require("Brand", "brand_id", item_id, "查無此廠牌")
@@ -224,27 +262,84 @@ class SettingsService:
             if self.repo.one(f"SELECT 1 FROM {table} WHERE model_id=?", (item_id,)): raise ConflictError(msg)
         self.repo.execute("DELETE FROM PhoneModel WHERE model_id=?", (item_id,)); return {"ok": True}
 
+    def _field_categories(self, field_id):
+        """該全域欄位綁定的種類 id 清單。"""
+        return [r["category_id"] for r in self.repo.execute(
+            "SELECT category_id FROM CategoryField WHERE field_id=? ORDER BY category_id", (field_id,))]
+
     def list_fields(self, category_id=None, common=False):
-        sql, args = "SELECT * FROM AttributeField WHERE active=1", []
-        if common: sql += " AND category_id IS NULL"
-        elif category_id is not None: sql += " AND category_id=?"; args.append(category_id)
-        return self.repo.rows(sql + " ORDER BY sort,field_id", args)
+        # 指定種類:回該種類模板欄位(CategoryField),含 sort/required/default/active
+        if category_id is not None:
+            rows = self.repo.rows(
+                "SELECT f.field_id,f.name,f.field_type,f.active,cf.sort,cf.required,"
+                "cf.default_option_id,cf.active cf_active "
+                "FROM AttributeField f JOIN CategoryField cf ON cf.field_id=f.field_id "
+                "WHERE cf.category_id=? AND f.active=1 ORDER BY cf.sort,f.field_id",
+                (category_id,))
+            for r in rows:
+                r["category_id"] = category_id
+            return rows
+        # 全域清單:合成 category_id(僅綁一個種類→該種類,否則 None=共用)
+        single = {}
+        for r in self.repo.execute("SELECT field_id, category_id FROM CategoryField"):
+            single.setdefault(r["field_id"], []).append(r["category_id"])
+        rows = self.repo.rows("SELECT field_id,name,field_type,active FROM AttributeField WHERE active=1 ORDER BY field_id")
+        out = []
+        for f in rows:
+            cats = single.get(f["field_id"], [])
+            f["category_id"] = cats[0] if len(cats) == 1 else None
+            if common and len(cats) == 1:  # 專屬單一種類的欄位不列入共用池
+                continue
+            out.append(f)
+        return out
 
     def create_field(self, p):
+        # A 殼:建全域 AttributeField;附 category_id 時同交易補綁 CategoryField
         if p.get("field_type", "select") not in FIELD_TYPES: raise ValidationError("不支援的規格欄類型")
         if p.get("default_option_id") is not None: raise ValidationError("新建規格欄不可設定預設選項")
-        if p.get("category_id") is not None: self.repo.require("Category", "category_id", p["category_id"], "查無此種類")
-        cur = self.repo.execute("INSERT INTO AttributeField(name,category_id,field_type,sort) VALUES(?,?,?,?)", (p["name"], p.get("category_id"), p.get("field_type", "select"), next_sort(self.repo.connection, "AttributeField")))
-        return {"field_id": cur.lastrowid}
+        cur = self.repo.execute("INSERT INTO AttributeField(name,field_type) VALUES(?,?)",
+                                (p["name"], p.get("field_type", "select")))
+        fid = cur.lastrowid
+        if p.get("category_id") is not None:
+            self.repo.require("Category", "category_id", p["category_id"], "查無此種類")
+            sort = next_sort(self.repo.connection, "CategoryField", "category_id=?", (p["category_id"],))
+            self.repo.execute("INSERT INTO CategoryField(category_id,field_id,sort) VALUES(?,?,?)",
+                              (p["category_id"], fid, sort))
+        return {"field_id": fid}
 
     def update_field(self, item_id, fields):
         self.repo.require("AttributeField", "field_id", item_id, "查無此規格欄")
-        fields = {k:v for k,v in fields.items() if k in {"name","sort","active","field_type","default_option_id"}}
-        if "field_type" in fields and fields["field_type"] not in FIELD_TYPES: raise ValidationError("不支援的規格欄類型")
-        if "default_option_id" in fields and fields["default_option_id"] is not None:
-            row = self.repo.one("SELECT field_id FROM AttributeOption WHERE option_id=?", (fields["default_option_id"],))
-            if row is None or row[0] != item_id: raise ValidationError("預設選項不屬於此規格欄")
-        if fields: self.repo.execute("UPDATE AttributeField SET " + ",".join(f"{k}=?" for k in fields) + " WHERE field_id=?", (*fields.values(), item_id))
+        fields = {k: v for k, v in fields.items()
+                  if k in {"name", "sort", "active", "field_type", "default_option_id"}}
+        if "field_type" in fields:
+            if fields["field_type"] not in FIELD_TYPES: raise ValidationError("不支援的規格欄類型")
+            # 欄位已被使用鎖型態(規格 §10.2)
+            if self.repo.one("SELECT 1 FROM VariantAttribute WHERE field_id=? LIMIT 1", (item_id,)):
+                raise ValidationError("欄位已被使用,不可變更型態")
+        name_row = self.repo.one("SELECT name FROM AttributeField WHERE field_id=?", (item_id,))
+        if fields.get("active") == 0 and normalize_key(name_row[0]) == FEATURE_FIELD_KEY:
+            raise ValidationError("特性詞條為固定欄位,不可停用")
+        # 過渡轉接:default_option_id / sort 落到 CategoryField(前端改版後移除)
+        if "default_option_id" in fields:
+            dv = fields.pop("default_option_id")
+            cats = self._field_categories(item_id)
+            if len(cats) != 1:
+                raise ValidationError("此欄位未綁定或綁定多個種類,請以種類模板設定預設選項")
+            if dv is not None:
+                row = self.repo.one("SELECT field_id FROM AttributeOption WHERE option_id=?", (dv,))
+                if row is None or row[0] != item_id: raise ValidationError("預設選項不屬於此規格欄")
+            self.repo.execute("UPDATE CategoryField SET default_option_id=? WHERE field_id=? AND category_id=?",
+                              (dv, item_id, cats[0]))
+        if "sort" in fields:
+            sv = fields.pop("sort")
+            cats = self._field_categories(item_id)
+            if len(cats) == 1:
+                self.repo.execute("UPDATE CategoryField SET sort=? WHERE field_id=? AND category_id=?",
+                                  (sv, item_id, cats[0]))
+        af = {k: v for k, v in fields.items() if k in {"name", "field_type", "active"}}
+        if af:
+            self.repo.execute("UPDATE AttributeField SET " + ",".join(f"{k}=?" for k in af) +
+                              " WHERE field_id=?", (*af.values(), item_id))
         return {"ok": True}
 
     def list_options(self, field_id, all=False, model_ids=None):
@@ -265,6 +360,9 @@ class SettingsService:
     def update_option(self,item_id,fields):
         self.repo.require("AttributeOption","option_id",item_id,"查無此選項")
         fields={k:v for k,v in fields.items() if k in {"value","sort","active"} and v is not None}
+        # 停用選項若為任何種類模板預設值,同交易清空(規格 §12.2)
+        if fields.get("active")==0:
+            self.repo.execute("UPDATE CategoryField SET default_option_id=NULL WHERE default_option_id=?",(item_id,))
         try:
             if fields:self.repo.execute("UPDATE AttributeOption SET "+",".join(f"{k}=?" for k in fields)+" WHERE option_id=?",(*fields.values(),item_id))
         except sqlite3.IntegrityError as exc: raise ConflictError("此選項值已存在") from exc
@@ -272,7 +370,7 @@ class SettingsService:
 
     def delete_option(self,item_id):
         self.repo.require("AttributeOption","option_id",item_id,"查無此選項"); count=self.repo.one("SELECT COUNT(DISTINCT variant_id) FROM VariantAttribute WHERE option_id=?",(item_id,))[0]
-        self.repo.execute("UPDATE AttributeField SET default_option_id=NULL WHERE default_option_id=?",(item_id,)); self.repo.execute("DELETE FROM OptionModel WHERE option_id=?",(item_id,))
+        self.repo.execute("UPDATE CategoryField SET default_option_id=NULL WHERE default_option_id=?",(item_id,)); self.repo.execute("DELETE FROM OptionModel WHERE option_id=?",(item_id,))
         self.repo.execute("UPDATE AttributeOption SET active=0 WHERE option_id=?" if count else "DELETE FROM AttributeOption WHERE option_id=?",(item_id,)); return {"ok":True,"deleted":not bool(count)}
 
     def option_models(self,item_id):
@@ -281,19 +379,89 @@ class SettingsService:
     def set_option_models(self,item_id,ids):
         self.repo.require("AttributeOption","option_id",item_id,"查無此選項"); self.repo.replace_links("OptionModel","option_id",item_id,"model_id",ids,"型號不存在"); return {"ok":True}
 
+    def _category_has_variant(self, category_id):
+        return self.repo.one(
+            "SELECT 1 FROM Variant v JOIN Product p ON v.product_id=p.product_id "
+            "WHERE p.category_id=? LIMIT 1", (category_id,)) is not None
+
     def category_fields(self,cid):
         self.repo.require("Category","category_id",cid,"查無此種類")
-        rows=self.repo.rows("SELECT field_id,name,field_type,default_option_id,sort,category_id FROM AttributeField WHERE active=1 AND (category_id=? OR field_id IN (SELECT field_id FROM CategoryField WHERE category_id=?)) ORDER BY (category_id IS NULL),sort,field_id",(cid,cid)); out=[]
+        # 種類模板:綁定且啟用的欄位(CategoryField.active AND AttributeField.active)
+        rows=self.repo.rows(
+            "SELECT f.field_id,f.name,f.field_type,cf.sort,cf.required,cf.default_option_id "
+            "FROM CategoryField cf JOIN AttributeField f ON f.field_id=cf.field_id "
+            "WHERE cf.category_id=? AND cf.active=1 AND f.active=1 ORDER BY cf.sort,f.field_id",(cid,))
+        counts={r["field_id"]:r["c"] for r in self.repo.execute(
+            "SELECT field_id,COUNT(*) c FROM CategoryField GROUP BY field_id")}
+        out=[]
         for f in rows:
             opts=[] if f["field_type"]=="text" else self.repo.rows("SELECT option_id,value,sort FROM AttributeOption WHERE field_id=? AND active=1 ORDER BY sort,option_id",(f["field_id"],)); dv=self.repo.one("SELECT value FROM AttributeOption WHERE option_id=?",(f["default_option_id"],)) if f["default_option_id"] is not None else None
-            out.append({"field_id":f["field_id"],"name":f["name"],"field_type":f["field_type"],"default_option_id":f["default_option_id"],"default_value":dv[0] if dv else None,"shared":f["category_id"] is None,"options":opts})
+            out.append({"field_id":f["field_id"],"name":f["name"],"field_type":f["field_type"],"required":f["required"],"default_option_id":f["default_option_id"],"default_value":dv[0] if dv else None,"shared":counts.get(f["field_id"],0)>=2,"options":opts})
         return out
 
     def set_category_common_fields(self, cid, ids):
         self.repo.require("Category", "category_id", cid, "查無此種類")
-        self.repo.replace_links(
-            "CategoryField", "category_id", cid, "field_id", ids, "規格欄不存在"
-        )
+        for fid in ids:
+            if not self.repo.one("SELECT 1 FROM AttributeField WHERE field_id=?", (fid,)):
+                raise ValidationError("規格欄不存在")
+        # 專屬本種類的欄位(僅綁本種類)不由共用勾選管理,保留不動
+        counts = {r["field_id"]: r["c"] for r in self.repo.execute(
+            "SELECT field_id,COUNT(*) c FROM CategoryField GROUP BY field_id")}
+        current = [r["field_id"] for r in self.repo.execute(
+            "SELECT field_id FROM CategoryField WHERE category_id=?", (cid,))]
+        keep = {fid for fid in current if counts.get(fid, 0) == 1}
+        # 特性詞條為固定欄位(規格 §11.2):綁定不得被解除,一律保留不受傳入清單影響
+        keep |= {r["field_id"] for r in self.repo.execute("SELECT field_id,name FROM AttributeField")
+                 if normalize_key(r["name"]) == FEATURE_FIELD_KEY}
+        desired = set(ids) - keep
+        for fid in current:
+            if fid in keep or fid in desired:
+                continue
+            self.repo.execute("DELETE FROM CategoryField WHERE category_id=? AND field_id=?", (cid, fid))
+        for fid in desired:
+            if fid not in current:
+                sort = next_sort(self.repo.connection, "CategoryField", "category_id=?", (cid,))
+                self.repo.execute("INSERT OR IGNORE INTO CategoryField(category_id,field_id,sort) VALUES(?,?,?)",
+                                  (cid, fid, sort))
+        return {"ok": True}
+
+    def set_field(self, category_id, field_id, fields):
+        """種類模板欄位設定(CategoryField 為唯一真實來源):sort/required/default/active。"""
+        self.repo.require("Category", "category_id", category_id, "查無此種類")
+        self.repo.require("AttributeField", "field_id", field_id, "查無此規格欄")
+        existing = self.repo.one(
+            "SELECT sort,required,default_option_id,active FROM CategoryField "
+            "WHERE category_id=? AND field_id=?", (category_id, field_id))
+        name = self.repo.one("SELECT name FROM AttributeField WHERE field_id=?", (field_id,))[0]
+        is_feature = normalize_key(name) == FEATURE_FIELD_KEY
+        cur = (dict(existing) if existing
+               else {"sort": 0, "required": 0, "default_option_id": None, "active": 1})
+        new = dict(cur)
+        for k in ("sort", "required", "default_option_id", "active"):
+            if k in fields and fields[k] is not None:
+                new[k] = int(fields[k]) if k in ("sort", "required", "active") else fields[k]
+        if is_feature and int(new["active"]) == 0:
+            raise ValidationError("特性詞條為固定欄位,不可停用")
+        if "required" in fields and int(new["required"]) != int(cur["required"]):
+            if self._category_has_variant(category_id):
+                raise ValidationError("此種類已有子產品,暫不可變更必填設定")
+        if new["default_option_id"] is not None:
+            row = self.repo.one("SELECT field_id FROM AttributeOption WHERE option_id=?",
+                                (new["default_option_id"],))
+            if row is None or row[0] != field_id:
+                raise ValidationError("預設選項不屬於此規格欄")
+        if existing:
+            self.repo.execute(
+                "UPDATE CategoryField SET sort=?,required=?,default_option_id=?,active=? "
+                "WHERE category_id=? AND field_id=?",
+                (new["sort"], new["required"], new["default_option_id"], new["active"],
+                 category_id, field_id))
+        else:
+            self.repo.execute(
+                "INSERT INTO CategoryField(category_id,field_id,sort,required,default_option_id,active) "
+                "VALUES(?,?,?,?,?,?)",
+                (category_id, field_id, new["sort"], new["required"],
+                 new["default_option_id"], new["active"]))
         return {"ok": True}
 
 
@@ -313,7 +481,7 @@ class SettingsFacade:
                 if op=="delete": return s.simple_delete(simple[kind],payload["id"])
                 return s.resort(simple[kind],payload["ids"])
             handlers={
-                "brands.set_categories":lambda:s.set_brand_categories(payload["id"],payload.get("category_ids",[])),"models.list":lambda:s.list_models(bool(payload.get("all")),payload.get("phone_brand_id")),"models.create":lambda:s.create_model(payload),"models.update":lambda:s.update_model(payload["id"],payload.get("fields",{})),"models.delete":lambda:s.delete_model(payload["id"]),"models.sort":lambda:s.resort("models",payload["ids"]),"fields.list":lambda:s.list_fields(payload.get("category_id"),bool(payload.get("common"))),"fields.create":lambda:s.create_field(payload),"fields.update":lambda:s.update_field(payload["id"],payload.get("fields",{})),"options.list":lambda:s.list_options(payload["field_id"],bool(payload.get("all")),payload.get("model_ids",[])),"options.create":lambda:s.create_option(payload),"options.update":lambda:s.update_option(payload["id"],payload.get("fields",{})),"options.delete":lambda:s.delete_option(payload["id"]),"options.models":lambda:s.option_models(payload["id"]),"options.set_models":lambda:s.set_option_models(payload["id"],payload.get("model_ids",[])),"categories.fields":lambda:s.category_fields(payload["id"]),"categories.set_common_fields":lambda:s.set_category_common_fields(payload["id"],payload.get("field_ids",[])),}
+                "brands.set_categories":lambda:s.set_brand_categories(payload["id"],payload.get("category_ids",[])),"models.list":lambda:s.list_models(bool(payload.get("all")),payload.get("phone_brand_id")),"models.create":lambda:s.create_model(payload),"models.update":lambda:s.update_model(payload["id"],payload.get("fields",{})),"models.delete":lambda:s.delete_model(payload["id"]),"models.sort":lambda:s.resort("models",payload["ids"]),"fields.list":lambda:s.list_fields(payload.get("category_id"),bool(payload.get("common"))),"fields.create":lambda:s.create_field(payload),"fields.update":lambda:s.update_field(payload["id"],payload.get("fields",{})),"options.list":lambda:s.list_options(payload["field_id"],bool(payload.get("all")),payload.get("model_ids",[])),"options.create":lambda:s.create_option(payload),"options.update":lambda:s.update_option(payload["id"],payload.get("fields",{})),"options.delete":lambda:s.delete_option(payload["id"]),"options.models":lambda:s.option_models(payload["id"]),"options.set_models":lambda:s.set_option_models(payload["id"],payload.get("model_ids",[])),"categories.fields":lambda:s.category_fields(payload["id"]),"categories.set_common_fields":lambda:s.set_category_common_fields(payload["id"],payload.get("field_ids",[])),"categories.set_field":lambda:s.set_field(payload["category_id"],payload["field_id"],payload.get("fields",{})),}
             if action not in handlers: raise ValidationError("不支援的設定操作")
             return handlers[action]()
         return self.runner.run(work)
