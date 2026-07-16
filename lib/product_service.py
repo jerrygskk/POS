@@ -56,8 +56,32 @@ def _validate_variant(value):
         for item in value["barcodes"]: _validate_barcode(item)
 
 
+def _validate_draft(value):
+    value = _mapping(value, "子產品")
+    _allow(value, {"draft_id", "attributes", "price", "active", "model_ids", "barcodes"})
+    if value.get("draft_id") is not None and not isinstance(value["draft_id"], str):
+        raise ValidationError("draft_id 格式不正確")
+    if "attributes" in value: _mapping(value["attributes"], "規格")
+    if value.get("price") is not None and not _is_int(value["price"]): raise ValidationError("售價格式不正確")
+    if value.get("active") is not None and not _is_int(value["active"]): raise ValidationError("啟用狀態格式不正確")
+    if "model_ids" in value: _int_list(value["model_ids"], "型號")
+    if "barcodes" in value:
+        if not isinstance(value["barcodes"], list): raise ValidationError("條碼清單格式不正確")
+        for item in value["barcodes"]: _validate_barcode(item)
+
+
 def _validate_action_payload(action, payload):
     id_actions={"products.update","products.delete","variants.update","variants.set_models","variants.update_details","variants.delete"}
+    if action=="variants.batch_create":
+        _allow(payload,{"product_id","drafts"})
+        if not _is_int(payload.get("product_id")):raise ValidationError("商品識別碼格式不正確")
+        if not isinstance(payload.get("drafts"),list) or not payload["drafts"]:raise ValidationError("尚未加入任何子產品")
+        for item in payload["drafts"]:_validate_draft(item)
+        return
+    if action=="variants.field_usage":
+        _allow(payload,{"category_id","field_id"})
+        if not _is_int(payload.get("category_id")) or not _is_int(payload.get("field_id")):raise ValidationError("識別碼格式不正確")
+        return
     if action=="products.create":
         _allow(payload,{"name","category_id","brand_id","brand_name","note","variants"})
         if not isinstance(payload.get("name"),str) or not _is_int(payload.get("category_id")):raise ValidationError("商品資料格式不正確")
@@ -317,6 +341,7 @@ class ProductService:
 class ProductFacade:
     ACTIONS = {"products.create", "products.list", "catalog.list", "products.update", "products.delete",
                "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.delete",
+               "variants.batch_create", "variants.field_usage",
                "barcodes.scan", "barcodes.add", "barcodes.delete"}
 
     def __init__(self, db_path):
@@ -339,6 +364,11 @@ class ProductFacade:
             if action == "variants.set_models": return s.update_variant(payload["id"], {}, payload.get("model_ids", []))
             if action == "variants.update_details": return s.update_variant(payload["id"], payload.get("fields", {}), payload.get("model_ids", []))
             if action == "variants.delete": return s.delete_variant(payload["id"])
+            if action == "variants.batch_create":
+                from lib.variant_batch_service import VariantBatchService
+                return VariantBatchService(connection).batch_create(payload)
+            if action == "variants.field_usage":
+                return product_data.option_usage_in_category(connection, payload["field_id"], payload["category_id"])
             if action == "barcodes.scan": return s.scan(payload["code"])
             if action == "barcodes.delete": return s.delete_barcode(payload["code"])
             return s.add_barcode(payload)

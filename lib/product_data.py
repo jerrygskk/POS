@@ -140,6 +140,25 @@ def variant_sort_keys(conn, ids):
     return {vid:(k[0],k[1],tuple(k[2]),tuple(k[3])) for vid,k in keys.items()}
 
 
+def option_usage_in_category(conn, field_id, category_id):
+    """回傳指定欄位在指定種類內各選項的使用次數排序清單。
+    可重用:特性詞條選取器與後續規格候選選單皆走「該種類用過的值優先＋搜尋全部」。
+    使用次數=該種類內以此選項為值的子產品數。
+    排序:使用次數多→少、既有 sort、選項值、option_id(穩定)。含停用選項(帶 active)。"""
+    rows = conn.execute(
+        "SELECT o.option_id, o.value, o.active, o.sort, "
+        "COUNT(DISTINCT va.variant_id) usage_count "
+        "FROM AttributeOption o "
+        "LEFT JOIN VariantAttribute va ON va.option_id=o.option_id "
+        "AND va.variant_id IN (SELECT v.variant_id FROM Variant v "
+        "JOIN Product p ON v.product_id=p.product_id WHERE p.category_id=?) "
+        "WHERE o.field_id=? "
+        "GROUP BY o.option_id ORDER BY usage_count DESC, o.sort, o.value, o.option_id",
+        (category_id, field_id)).fetchall()
+    return [{"option_id": r["option_id"], "value": r["value"],
+             "active": bool(r["active"]), "usage_count": r["usage_count"]} for r in rows]
+
+
 def stock_of(conn, vid): return conn.execute("SELECT COALESCE(SUM(qty),0) s FROM StockMovement WHERE variant_id=?",(vid,)).fetchone()["s"]
 def has_records(conn, ids):
     if not ids:return False

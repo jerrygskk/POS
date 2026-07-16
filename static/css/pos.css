@@ -294,3 +294,15 @@ table.big-prod td:last-child { white-space: nowrap; }
 .combo-item { padding: 8px 12px; cursor: pointer; }
 .combo-item:hover { background: var(--hover); }
 .combo-item.combo-add { color: var(--primary-hover); font-weight: 600; }
+
+/* 特性詞條選取器(批次新增子產品) */
+.tag-selector { display: flex; flex-direction: column; gap: 8px;
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+.tag-selector .tag-x { border: none; background: transparent; color: inherit;
+  cursor: pointer; padding: 0 0 0 4px; font-size: 12px; }
+.tag-selector .tag-count { opacity: 0.6; font-size: 11px; margin-left: 4px; }
+.tag-selector .tag-more { font-style: italic; }
+.tag-selector .chip.inactive { opacity: 0.6; border-style: dashed; }
+.tag-reactivate { color: var(--primary-hover); font-size: 11px; margin-left: 4px; }
+.tag-search { display: flex; gap: 6px; align-items: center; }
+.tag-search input { flex: 1; }

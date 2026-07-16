@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=51">
+<link rel="stylesheet" href="css/pos.css?v=52">
 </head>
 <body>
 <div id="app">
   <nav>
-    <img class="nav-logo" src="img/logo.png?v=51" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=52" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="page=key">{{ label }}</button>
   </nav>
@@ -169,6 +169,7 @@
     <input v-model="q" @keyup.enter="reload" placeholder="關鍵字(名稱／規格),按 Enter">
     <button class="primary" @click="reload">查詢</button>
     <label class="chk"><input type="checkbox" v-model="includeInactive" @change="reload"> 顯示已停用</label>
+    <button @click="goPage('variant-batch')">新增子產品</button>
   </div>
   <table>
     <thead><tr><th></th><th>名稱</th><th>種類</th><th>廠牌</th>
@@ -287,6 +288,104 @@
     </tbody>
   </table>
   <div v-if="!products.length" class="done-msg" style="background:#6b7280">查無符合的商品。</div>
+</div>
+</template>
+<template id="tpl-variant-batch">
+<div class="page">
+  <div class="scan-row">
+    <button @click="goCatalog">返回商品資料庫</button>
+    <select v-model.number="catId" @change="onCategoryChange">
+      <option :value="null">選擇種類</option>
+      <option v-for="c in categories" :key="c.category_id" :value="c.category_id">{{ c.name }}</option>
+    </select>
+    <select v-model.number="productId" @change="onProductChange" :disabled="catId==null">
+      <option :value="null">選擇大產品</option>
+      <option v-for="p in catProducts" :key="p.product_id" :value="p.product_id">{{ p.name }}</option>
+    </select>
+    <span v-if="catId!=null && !catProducts.length" class="hint">此種類尚無大產品,請先於設定建立。</span>
+  </div>
+
+  <template v-if="product">
+    <div class="pay-panel">
+      共通大產品:{{ product.name }}｜種類 {{ product.category_name || '—' }}｜廠牌
+      {{ product.brand_name || '—' }}｜備註 {{ product.note || '—' }}
+    </div>
+
+    <div class="create-form">
+      <div class="spec-box">
+        <div class="step-title">規格</div>
+        <attr-fields :fields="formalFields" :options="fieldOptions"
+                     :attrs="input.attrs" :model-ids="input.model_ids"></attr-fields>
+      </div>
+      <div v-if="featureField" class="spec-box">
+        <div class="step-title">{{ featureField.name }}(選填)</div>
+        <tag-selector v-model="input.attrs[featureField.name]" :usage="tagUsage"></tag-selector>
+      </div>
+      <div v-if="modelMode==='required'" class="spec-box">
+        <div class="step-title">適用手機型號</div>
+        <model-picker :models="models" v-model:model_ids="input.model_ids"></model-picker>
+      </div>
+      <div class="scan-row">
+        <label>售價 <input type="number" v-model.number="input.price" min="0" class="w100"></label>
+        <label>原廠條碼 <input v-model="input.barcode" placeholder="可留空"></label>
+        <label class="chk"><input type="checkbox" v-model="input.store"> 配自取碼</label>
+        <button class="primary" @click="addDraft">加入預覽</button>
+      </div>
+    </div>
+
+    <table v-if="drafts.length">
+      <thead><tr><th>操作</th><th>規格</th><th>特性詞條</th>
+        <th v-if="modelMode==='required'">適用型號</th>
+        <th>售價</th><th>條碼</th><th>狀態</th><th>問題</th></tr></thead>
+      <tbody>
+        <tr v-for="(d, i) in drafts" :key="d.draft_id" :class="{inactive: draftErrors(d).length}">
+          <td>
+            <button class="btn-sm" @click="openEdit(i)">修改</button>
+            <button class="btn-sm danger" @click="removeDraft(i)">刪除</button>
+          </td>
+          <td>{{ draftSpecText(d) }}</td>
+          <td>{{ draftTags(d) || '—' }}</td>
+          <td v-if="modelMode==='required'">{{ draftModels(d) || '—' }}</td>
+          <td>{{ d.price == null || d.price === '' ? '未定價' : d.price }}</td>
+          <td>{{ draftBarcode(d) }}</td>
+          <td>啟用</td>
+          <td class="neg"><div v-for="msg in draftErrors(d)" :key="msg">{{ msg }}</div></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="scan-row">
+      <button v-if="lastDeleted" @click="undoDelete">復原刪除</button>
+      <span class="hint">預覽 {{ drafts.length }} 筆</span>
+      <button class="primary" :disabled="!drafts.length" @click="commitAll">建立全部子產品</button>
+    </div>
+    <div v-if="doneMsg" class="done-msg">{{ doneMsg }}</div>
+  </template>
+
+  <!-- 修改 draft(單層 popup,深複本;取消/Escape 不影響原 draft)-->
+  <div v-if="editing" class="modal-overlay" @click.self="cancelEdit">
+    <div class="modal">
+      <h3>修改子產品</h3>
+      <div class="step-title">規格</div>
+      <attr-fields :fields="formalFields" :options="fieldOptions"
+                   :attrs="editing.draft.attrs" :model-ids="editing.draft.model_ids"></attr-fields>
+      <template v-if="featureField">
+        <div class="step-title">{{ featureField.name }}</div>
+        <tag-selector v-model="editing.draft.attrs[featureField.name]" :usage="tagUsage"></tag-selector>
+      </template>
+      <template v-if="modelMode==='required'">
+        <div class="step-title">適用手機型號</div>
+        <model-picker :models="models" v-model:model_ids="editing.draft.model_ids"></model-picker>
+      </template>
+      <label>售價 <input type="number" v-model.number="editing.draft.price" min="0" class="w100"></label>
+      <label>原廠條碼 <input v-model="editing.draft.barcode"></label>
+      <label class="chk"><input type="checkbox" v-model="editing.draft.store"> 配自取碼</label>
+      <div class="modal-actions">
+        <button class="primary" @click="applyEdit">套用</button>
+        <button @click="cancelEdit">取消</button>
+      </div>
+    </div>
+  </div>
 </div>
 </template>
 <template id="tpl-settings">
@@ -532,18 +631,19 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=51"></script>
-<script src="js/api.js?v=51"></script>
-<script src="js/catalogfields.js?v=51"></script>
-<script src="js/checkout.js?v=51"></script>
-<script src="js/receive.js?v=51"></script>
-<script src="js/stocktake.js?v=51"></script>
-<script src="js/records.js?v=51"></script>
-<script src="js/catalog.js?v=51"></script>
-<script src="js/sortable.js?v=51"></script>
-<script src="js/modelpicker.js?v=51"></script>
-<script src="js/attrfields.js?v=51"></script>
-<script src="js/settings.js?v=51"></script>
-<script src="js/app.js?v=51"></script>
+<script src="js/vue.global.prod.js?v=52"></script>
+<script src="js/api.js?v=52"></script>
+<script src="js/catalogfields.js?v=52"></script>
+<script src="js/checkout.js?v=52"></script>
+<script src="js/receive.js?v=52"></script>
+<script src="js/stocktake.js?v=52"></script>
+<script src="js/records.js?v=52"></script>
+<script src="js/catalog.js?v=52"></script>
+<script src="js/variant_batch.js?v=52"></script>
+<script src="js/sortable.js?v=52"></script>
+<script src="js/modelpicker.js?v=52"></script>
+<script src="js/attrfields.js?v=52"></script>
+<script src="js/settings.js?v=52"></script>
+<script src="js/app.js?v=52"></script>
 </body>
 </html>
