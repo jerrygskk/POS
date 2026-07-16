@@ -69,7 +69,7 @@ window.PosPages["page-catalog"] = {
       q: "", includeInactive: false,
       fCategory: null, fBrand: null, fModel: null,
       categories: [], brands: [], models: [],
-      products: [], fieldsByCat: {}, fieldOptions: {},
+      products: [], fieldsByCat: {}, fieldOptions: {}, fieldUsageByCat: {},
       expanded: {}, bcInput: {}, bcError: {},
       editVariant: null,
       addingFor: null, newVariant: { attrs: {}, price: null, barcode: "", model_ids: [] },
@@ -125,9 +125,19 @@ window.PosPages["page-catalog"] = {
       await this.guard(async () => {
         const fields = await API.categoryFields(cid);
         this.fieldsByCat[cid] = fields;
-        // select/multi 欄選項另帶 model_ids(限定型號),供勾選框/下拉依適用型號過濾
+        // select/multi 欄選項(供自增比對與型號過濾)
         await window.CatalogFields.loadFieldsWithOptions(fields, this.fieldOptions);
+        // 該種類使用次數排序候選(select/multi 改用候選選取器)
+        const usage = {};
+        await window.CatalogFields.loadFieldUsage(cid, fields, usage);
+        this.fieldUsageByCat[cid] = usage;
       });
+    },
+    async reloadFieldUsage(cid) {
+      if (cid == null || !this.fieldsByCat[cid]) return;
+      const usage = {};
+      await window.CatalogFields.loadFieldUsage(cid, this.fieldsByCat[cid], usage);
+      this.fieldUsageByCat[cid] = usage;
     },
     modelIdsByNames(cat_names) {
       // 依顯示名稱反查 model_id:後端回傳的 v.models 是別名(無別名=全名),
@@ -168,10 +178,12 @@ window.PosPages["page-catalog"] = {
           price: e.price === "" ? null : (e.price ?? null)
         }, e.model_ids);
         await this.reload();
+        await this.reloadFieldUsage(e._cat);
       } catch (err) {
         this.showError(err.message);
         // 雙寫可能部分成功,重新載入拉回後端真實狀態,避免畫面停在舊資料
         await this.reload();
+        await this.reloadFieldUsage(e._cat);
       }
     },
     async toggleVariantActive(p, v) {
@@ -237,6 +249,7 @@ window.PosPages["page-catalog"] = {
           price: n.price === "" ? null : (n.price ?? null),
           model_ids: n.model_ids, barcodes });
       });
+      await this.reloadFieldUsage(p.category_id);
     },
   },
 };

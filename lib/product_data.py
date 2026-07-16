@@ -53,16 +53,39 @@ def _resolve_field(conn, name, category_id):
     return None
 
 
+def cleanup_unused_options(conn, option_ids):
+    """硬刪使用數已歸零且非任何種類模板預設值的選項(連同 OptionModel)。
+
+    傳入候選 option_id 集合(通常為剛因子產品修改/刪除而被移除引用者);
+    逐一檢查:仍被任何 VariantAttribute 引用者跳過;被任何
+    CategoryField.default_option_id 引用者跳過;其餘硬刪。回傳實際刪除的 id 清單。"""
+    deleted = []
+    for oid in {o for o in (option_ids or ()) if o is not None}:
+        if conn.execute("SELECT 1 FROM VariantAttribute WHERE option_id=? LIMIT 1",
+                        (oid,)).fetchone():
+            continue
+        if conn.execute("SELECT 1 FROM CategoryField WHERE default_option_id=? LIMIT 1",
+                        (oid,)).fetchone():
+            continue
+        conn.execute("DELETE FROM OptionModel WHERE option_id=?", (oid,))
+        conn.execute("DELETE FROM AttributeOption WHERE option_id=?", (oid,))
+        deleted.append(oid)
+    return deleted
+
+
 def set_variant_attributes(conn, vid, category_id, attributes):
     """寫入子產品規格值。規格 §12.3:讀取修改前現值逐值比較——
     原已存在的停用選項可保留或移除,不得新增停用選項值(新建亦不得直接指定停用值)。
     停用/未綁定欄位的既有值原樣保留,不由本次覆寫刪除。"""
-    # 修改前現值:逐欄 option_id 集合(供停用值差異驗證)
+    # 修改前現值:逐欄 option_id 集合(供停用值差異驗證);另收集全部舊引用選項,
+    # 供覆寫後清理使用數歸零的孤兒選項。
     prev = {}
+    prev_option_ids = set()
     for r in conn.execute(
             "SELECT field_id, option_id FROM VariantAttribute "
             "WHERE variant_id=? AND option_id IS NOT NULL", (vid,)):
         prev.setdefault(r["field_id"], set()).add(r["option_id"])
+        prev_option_ids.add(r["option_id"])
     # 本次可覆寫的欄位=該種類啟用中的模板欄位(+特性詞條);其餘欄位既有值保留
     editable = {r[0] for r in conn.execute(
         "SELECT f.field_id FROM AttributeField f JOIN CategoryField cf ON cf.field_id=f.field_id "
@@ -97,6 +120,8 @@ def set_variant_attributes(conn, vid, category_id, attributes):
             if not row["active"] and oid not in original:
                 raise ValidationError(f"規格欄「{name}」的選項「{val}」已停用,不可指定")
             conn.execute("INSERT INTO VariantAttribute(variant_id,field_id,option_id) VALUES(?,?,?)", (vid, fid, oid))
+    # 覆寫後清理:舊引用中已無任何子產品使用者硬刪(default 引用除外)
+    cleanup_unused_options(conn, prev_option_ids)
 
 
 def attr_rows(conn, ids):
@@ -155,8 +180,16 @@ def option_usage_in_category(conn, field_id, category_id):
         "WHERE o.field_id=? "
         "GROUP BY o.option_id ORDER BY usage_count DESC, o.sort, o.value, o.option_id",
         (category_id, field_id)).fetchall()
+    # 各選項限定型號(特別色):供候選清單依適用型號過濾;未綁型號者恆通用
+    om = {}
+    for r in conn.execute(
+            "SELECT om.option_id, om.model_id FROM OptionModel om "
+            "JOIN AttributeOption o ON o.option_id=om.option_id "
+            "WHERE o.field_id=? ORDER BY om.model_id", (field_id,)):
+        om.setdefault(r["option_id"], []).append(r["model_id"])
     return [{"option_id": r["option_id"], "value": r["value"],
-             "active": bool(r["active"]), "usage_count": r["usage_count"]} for r in rows]
+             "active": bool(r["active"]), "usage_count": r["usage_count"],
+             "model_ids": om.get(r["option_id"], [])} for r in rows]
 
 
 def stock_of(conn, vid): return conn.execute("SELECT COALESCE(SUM(qty),0) s FROM StockMovement WHERE variant_id=?",(vid,)).fetchone()["s"]

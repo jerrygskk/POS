@@ -314,22 +314,83 @@ class TestMigrationV7toV13(unittest.TestCase):
 
 
 class TestMigrationConflictAborts(unittest.TestCase):
-    """v9 前置檢查:正規化同名但 field_type 不同 → 中止並列出衝突。"""
+    """v9 前置檢查:兩個「有資料」的同名不同型欄 → 中止並列出衝突。"""
 
-    def test_same_name_diff_type_raises(self):
+    def test_two_data_bearing_conflicts_raise(self):
         db = _new_v6_db()
         conn = sqlite3.connect(db)
         conn.executescript("""
           INSERT INTO Category(category_id,name) VALUES(1,'A'),(2,'B');
+          INSERT INTO Product(product_id,name,category_id) VALUES(1,'p',2);
+          INSERT INTO Variant(variant_id,product_id) VALUES(1,1);
           INSERT INTO AttributeField(field_id,name,category_id,field_type) VALUES
             (1,'尺寸',1,'select'),
             (2,'尺寸',2,'text');            -- 正規化同名、型態不同
+          INSERT INTO AttributeOption(option_id,field_id,value) VALUES(1,1,'L');
+          -- 兩欄皆有資料:field1 有選項、field2 有 VariantAttribute 文字值
+          INSERT INTO VariantAttribute(variant_id,field_id,text_value) VALUES(1,2,'大');
         """)
         conn.commit()
         conn.close()
         with self.assertRaises(ValueError) as ctx:
             init_db(db)
         self.assertIn("尺寸", str(ctx.exception))
+
+
+class TestMigrationConflictAutoResolve(unittest.TestCase):
+    """v9 衝突自動解決:衝突組中零選項且零使用者直接刪除(連同 CategoryField 綁定),
+    再繼續合併;不再中止。"""
+
+    def test_zero_usage_conflict_field_dropped(self):
+        db = _new_v6_db()
+        conn = sqlite3.connect(db)
+        conn.executescript("""
+          INSERT INTO Category(category_id,name) VALUES(1,'A'),(2,'B');
+          INSERT INTO Product(product_id,name,category_id) VALUES(1,'p',1);
+          INSERT INTO Variant(variant_id,product_id) VALUES(1,1);
+          -- 種子零使用「顏色」(text,無選項無使用)與各種類「顏色」select 衝突
+          INSERT INTO AttributeField(field_id,name,category_id,field_type) VALUES
+            (1,'顏色',NULL,'text'),         -- 零選項零使用 → 應被自動刪除
+            (2,'顏色',1,'select'),          -- 有資料(選項+使用)
+            (3,'顏色',2,'select');          -- 有資料(選項)
+          INSERT INTO AttributeOption(option_id,field_id,value) VALUES
+            (10,2,'黑'),(11,3,'白');
+          INSERT INTO VariantAttribute(variant_id,field_id,option_id) VALUES(1,2,10);
+          -- 種子欄有 CategoryField 綁定,應一併丟棄
+          INSERT INTO CategoryField(category_id,field_id) VALUES(1,1),(1,2),(2,3);
+        """)
+        conn.commit()
+        conn.close()
+        init_db(db)  # 不應 raise
+        c = get_conn(db)
+        try:
+            # 種子 text 顏色(field1)已刪除
+            self.assertIsNone(c.execute(
+                "SELECT 1 FROM AttributeField WHERE field_id=1").fetchone())
+            # 六(此處二)個 select 顏色合併為一個全域欄
+            rows = c.execute(
+                "SELECT COUNT(*) n FROM AttributeField WHERE name='顏色' "
+                "AND field_type='select'").fetchone()
+            self.assertEqual(rows["n"], 1)
+            survivor = c.execute(
+                "SELECT field_id FROM AttributeField WHERE name='顏色'").fetchone()["field_id"]
+            self.assertEqual(survivor, 2)  # 存活取最小 field_id
+            # 使用中的規格值改指存活欄
+            va = c.execute("SELECT field_id FROM VariantAttribute WHERE variant_id=1").fetchone()
+            self.assertEqual(va["field_id"], 2)
+            # 兩選項(黑/白)合併入存活欄
+            opt = c.execute(
+                "SELECT COUNT(*) n FROM AttributeOption WHERE field_id=2").fetchone()["n"]
+            self.assertEqual(opt, 2)
+            # 種子欄的 CategoryField 綁定(1,1)已丟棄;無指向已刪欄的列
+            self.assertIsNone(c.execute(
+                "SELECT 1 FROM CategoryField WHERE field_id=1").fetchone())
+            # (2,3)→改指存活欄 2,與 (1,2) 併存
+            cats = {r["category_id"] for r in c.execute(
+                "SELECT category_id FROM CategoryField WHERE field_id=2")}
+            self.assertEqual(cats, {1, 2})
+        finally:
+            c.close()
 
 
 class TestUpgradedMatchesFresh(unittest.TestCase):

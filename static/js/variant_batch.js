@@ -1,48 +1,72 @@
 window.PosPages = window.PosPages || {};
 window.PosComponents = window.PosComponents || {};
 
-// 特性詞條選取器(A＋C):該種類使用次數前 8 常用 chip ＋ 搜尋全部 ＋ 新增 ＋ 停用重啟提示。
-// v-model 綁逗號字串(與 tags 欄一致);usage 為 API.fieldUsage 回傳(依使用次數排序,含停用)。
-window.PosComponents["tag-selector"] = {
+// 選項候選選取器(A＋C):該種類使用次數前 8 常用 chip ＋ 搜尋全部 ＋ 新增 ＋ 停用重啟提示。
+// 通用於特性詞條(tags)、multi(多選)與 select(單選)。
+// props:
+//   modelValue  multiple=陣列(multi)或逗號字串(tags);single=字串(select)
+//   usage       API.fieldUsage 回傳(依使用次數排序,含停用,帶 model_ids)
+//   multiple    true=可多選(tags/multi);false=單選(select,再選即取代)
+//   asList      multiple 時 modelValue 型別:true=陣列(multi)、false=逗號字串(tags)
+//   modelIds    目前適用型號(依 OptionModel 過濾特別色候選)
+//   placeholder 搜尋框提示字
+window.PosComponents["opt-picker"] = {
   props: {
-    modelValue: { type: String, default: "" },
+    modelValue: { default: "" },
     usage: { type: Array, default: () => [] },
+    multiple: { type: Boolean, default: false },
+    asList: { type: Boolean, default: false },
+    modelIds: { type: Array, default: () => [] },
+    placeholder: { type: String, default: "搜尋或輸入" },
   },
   emits: ["update:modelValue"],
   data() { return { query: "", showMore: false }; },
   computed: {
-    selected() { return window.parseTagList(this.modelValue); },
+    selected() {
+      if (this.multiple)
+        return this.asList
+          ? (Array.isArray(this.modelValue) ? this.modelValue.slice() : [])
+          : window.parseTagList(this.modelValue);
+      const s = (this.modelValue == null ? "" : String(this.modelValue)).trim();
+      return s ? [s] : [];
+    },
     selectedKeys() { return new Set(this.selected.map(s => s.toLowerCase())); },
+    pool() {
+      // 依適用型號過濾特別色候選(usage row 帶 model_ids)
+      return window.CatalogFields.filterOptions(this.usage, this.modelIds);
+    },
     available() {
-      // 未選取的啟用選項,依使用次數排序
-      return this.usage.filter(o => o.active && !this.selectedKeys.has(o.value.toLowerCase()));
+      return this.pool.filter(o => o.active && !this.selectedKeys.has(o.value.toLowerCase()));
     },
     topChips() { return this.available.slice(0, 8); },
     moreChips() { return this.available.slice(8); },
     matches() {
       const q = this.query.trim().toLowerCase();
       if (!q) return [];
-      return this.usage.filter(o => o.value.toLowerCase().includes(q)
+      return this.pool.filter(o => o.value.toLowerCase().includes(q)
         && !this.selectedKeys.has(o.value.toLowerCase())).slice(0, 12);
     },
     exactExists() {
       const q = this.query.trim().toLowerCase();
       if (!q) return true;
-      return this.usage.some(o => o.value.toLowerCase() === q)
+      return this.pool.some(o => o.value.toLowerCase() === q)
         || this.selectedKeys.has(q);
     },
   },
   methods: {
     isDisabledVal(val) {
-      const o = this.usage.find(u => u.value.toLowerCase() === val.toLowerCase());
+      const o = this.pool.find(u => u.value.toLowerCase() === val.toLowerCase());
       return !!(o && !o.active);
     },
-    emitList(list) { this.$emit("update:modelValue", list.join(", ")); },
+    emitList(list) {
+      if (!this.multiple) { this.$emit("update:modelValue", list.length ? list[list.length - 1] : ""); return; }
+      this.$emit("update:modelValue", this.asList ? list.slice() : list.join(", "));
+    },
     add(val) {
       val = String(val).trim();
       if (!val) return;
       if (this.selectedKeys.has(val.toLowerCase())) return;
-      this.emitList(this.selected.concat([val]));
+      this.emitList(this.multiple ? this.selected.concat([val]) : [val]);
     },
     remove(val) {
       this.emitList(this.selected.filter(s => s.toLowerCase() !== val.toLowerCase()));
@@ -70,7 +94,7 @@ window.PosComponents["tag-selector"] = {
       </template>
     </div>
     <div class="tag-search">
-      <input v-model="query" placeholder="搜尋或輸入特性詞條" @keyup.enter.stop="addFromSearch">
+      <input v-model="query" :placeholder="placeholder" @keyup.enter.stop="addFromSearch">
       <button type="button" class="btn-sm" v-if="query.trim() && !exactExists"
               @click="addFromSearch">新增「{{ query.trim() }}」</button>
     </div>
@@ -83,6 +107,14 @@ window.PosComponents["tag-selector"] = {
   </div>`,
 };
 
+// 相容別名:特性詞條選取器(tags 逗號字串多選)。
+window.PosComponents["tag-selector"] = {
+  props: { modelValue: { type: String, default: "" }, usage: { type: Array, default: () => [] } },
+  emits: ["update:modelValue"],
+  template: `<opt-picker :model-value="modelValue" :usage="usage" :multiple="true" :as-list="false"
+    placeholder="搜尋或輸入特性詞條" @update:model-value="$emit('update:modelValue', $event)"></opt-picker>`,
+};
+
 // 新增子產品內容頁:draft array 單一資料來源、連續建檔、預覽表、單層修改 popup。
 window.PosPages["page-variant-batch"] = {
   template: "#tpl-variant-batch",
@@ -91,7 +123,7 @@ window.PosPages["page-variant-batch"] = {
     return {
       categories: [], products: [], models: [],
       catId: null, productId: null,
-      fields: [], fieldOptions: {}, tagUsage: [],
+      fields: [], fieldOptions: {}, fieldUsage: {}, tagUsage: [],
       input: this.blankInput(),
       drafts: [], seq: 0,
       editing: null, lastDeleted: null,
@@ -125,7 +157,7 @@ window.PosPages["page-variant-batch"] = {
     },
     async onCategoryChange() {
       this.productId = null;
-      this.fields = []; this.fieldOptions = {}; this.tagUsage = [];
+      this.fields = []; this.fieldOptions = {}; this.fieldUsage = {}; this.tagUsage = [];
       this.drafts = []; this.commitErrors = {};
     },
     async onProductChange() {
@@ -134,6 +166,8 @@ window.PosPages["page-variant-batch"] = {
       await this.guard(async () => {
         this.fields = await API.categoryFields(this.catId);
         await window.CatalogFields.loadFieldsWithOptions(this.formalFields, this.fieldOptions);
+        this.fieldUsage = {};
+        await window.CatalogFields.loadFieldUsage(this.catId, this.formalFields, this.fieldUsage);
         if (this.featureField)
           this.tagUsage = await API.fieldUsage(this.catId, this.featureField.field_id);
         this.input = this.blankInput();
@@ -250,7 +284,10 @@ window.PosPages["page-variant-batch"] = {
         this.drafts = [];            // 成功才清空
         this.input = this.blankInput();
         this.input.attrs = window.initFormAttrs(this.fields, {});
-        this.tagUsage = await API.fieldUsage(this.catId, this.featureField.field_id);
+        this.fieldUsage = {};
+        await window.CatalogFields.loadFieldUsage(this.catId, this.formalFields, this.fieldUsage);
+        if (this.featureField)
+          this.tagUsage = await API.fieldUsage(this.catId, this.featureField.field_id);
       } catch (err) {
         // 失敗保留全部 draft,逐筆標示錯誤
         const map = {};

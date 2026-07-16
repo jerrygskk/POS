@@ -184,6 +184,16 @@ window.PosPages["page-settings"] = {
         this.tplOptions[p.field_id] = await API.listOptions({ field_id: p.field_id, all: 1 });
       });
     },
+    async cleanupFieldOptions() {
+      const p = this.fieldPopup;
+      if (p.field_id == null) return;
+      if (!confirm("將永久刪除此規格欄中未使用且非預設值的選項,無法復原。確定繼續?")) return;
+      await this.guard(async () => {
+        const r = await API.cleanupOptions(p.field_id);
+        this.tplOptions[p.field_id] = await API.listOptions({ field_id: p.field_id, all: 1 });
+        alert(`已清理 ${r.deleted} 個未使用選項。`);
+      });
+    },
     async deletePopupOption(o) {
       const p = this.fieldPopup;
       const message = o.usage_count > 0

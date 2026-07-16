@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=52">
+<link rel="stylesheet" href="css/pos.css?v=53">
 </head>
 <body>
 <div id="app">
   <nav>
-    <img class="nav-logo" src="img/logo.png?v=52" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=53" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="page=key">{{ label }}</button>
   </nav>
@@ -207,6 +207,7 @@
                   <td>
                     <template v-if="editVariant && editVariant.variant_id === v.variant_id">
                       <attr-fields :fields="fieldsByCat[p.category_id] || []" :options="fieldOptions"
+                                   :usage="fieldUsageByCat[p.category_id] || {}"
                                    :attrs="editVariant.attrs" :model-ids="editVariant.model_ids"
                                    tags-style="chips"></attr-fields>
                     </template>
@@ -264,6 +265,7 @@
                       <div class="spec-box">
                       <div class="step-title">規格</div>
                       <attr-fields :fields="fieldsByCat[p.category_id] || []" :options="fieldOptions"
+                                   :usage="fieldUsageByCat[p.category_id] || {}"
                                    :attrs="newVariant.attrs" :model-ids="newVariant.model_ids"></attr-fields>
                       </div>
                       <div class="step-title">適用手機型號(可略過)</div>
@@ -314,7 +316,7 @@
     <div class="create-form">
       <div class="spec-box">
         <div class="step-title">規格</div>
-        <attr-fields :fields="formalFields" :options="fieldOptions"
+        <attr-fields :fields="formalFields" :options="fieldOptions" :usage="fieldUsage"
                      :attrs="input.attrs" :model-ids="input.model_ids"></attr-fields>
       </div>
       <div v-if="featureField" class="spec-box">
@@ -367,7 +369,7 @@
     <div class="modal">
       <h3>修改子產品</h3>
       <div class="step-title">規格</div>
-      <attr-fields :fields="formalFields" :options="fieldOptions"
+      <attr-fields :fields="formalFields" :options="fieldOptions" :usage="fieldUsage"
                    :attrs="editing.draft.attrs" :model-ids="editing.draft.model_ids"></attr-fields>
       <template v-if="featureField">
         <div class="step-title">{{ featureField.name }}</div>
@@ -499,6 +501,7 @@
         <div class="inline-add option-add">
           <input v-model="fieldPopup.newOption" placeholder="新增選項" @keyup.enter="addPopupOption">
           <button class="btn-sm" @click="addPopupOption">加入</button>
+          <button class="btn-sm" @click="cleanupFieldOptions" title="硬刪使用數為 0 且非預設值的選項">清理未使用選項</button>
         </div>
         <div class="option-list-box">
           <div v-for="o in (tplOptions[fieldPopup.field_id] || [])" :key="o.option_id"
@@ -631,19 +634,19 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=52"></script>
-<script src="js/api.js?v=52"></script>
-<script src="js/catalogfields.js?v=52"></script>
-<script src="js/checkout.js?v=52"></script>
-<script src="js/receive.js?v=52"></script>
-<script src="js/stocktake.js?v=52"></script>
-<script src="js/records.js?v=52"></script>
-<script src="js/catalog.js?v=52"></script>
-<script src="js/variant_batch.js?v=52"></script>
-<script src="js/sortable.js?v=52"></script>
-<script src="js/modelpicker.js?v=52"></script>
-<script src="js/attrfields.js?v=52"></script>
-<script src="js/settings.js?v=52"></script>
-<script src="js/app.js?v=52"></script>
+<script src="js/vue.global.prod.js?v=53"></script>
+<script src="js/api.js?v=53"></script>
+<script src="js/catalogfields.js?v=53"></script>
+<script src="js/checkout.js?v=53"></script>
+<script src="js/receive.js?v=53"></script>
+<script src="js/stocktake.js?v=53"></script>
+<script src="js/records.js?v=53"></script>
+<script src="js/catalog.js?v=53"></script>
+<script src="js/variant_batch.js?v=53"></script>
+<script src="js/sortable.js?v=53"></script>
+<script src="js/modelpicker.js?v=53"></script>
+<script src="js/attrfields.js?v=53"></script>
+<script src="js/settings.js?v=53"></script>
+<script src="js/app.js?v=53"></script>
 </body>
 </html>

@@ -27,12 +27,13 @@ const context = {
   }}}},
   console, setTimeout, clearTimeout,
 };
+context.window.CatalogFields = { filterOptions: (list) => list || [] };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);  // api.js
 vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);  // variant_batch.js
 const window = context.window;
 const page = window.PosPages["page-variant-batch"];
-const tagSel = window.PosComponents["tag-selector"];
+const optPicker = window.PosComponents["opt-picker"];
 
 function mkState(extra) {
   const s = { showError: () => {}, goPage: () => {} };
@@ -141,17 +142,18 @@ s.buildPayload = () => { const arr = origBuild(); arr.__fail = true; return arr;
         self.assertEqual(out["keptDrafts"], 1)
 
     def test_tag_selector_add_remove_emits_comma_string(self):
+        # opt-picker(multiple=true, asList=false)= 特性詞條/tags 模式:逗號字串
         out = self._run(r'''
 function mkTag(model, usage) {
-  const s = { $emit: (ev, val) => { s._emitted = val; }, modelValue: model, usage: usage || [] };
-  for (const k of Object.keys(tagSel.methods)) s[k] = tagSel.methods[k].bind(s);
-  // computed 以 getter 掛上
-  for (const k of Object.keys(tagSel.computed))
-    Object.defineProperty(s, k, { get: tagSel.computed[k].bind(s), configurable: true });
-  Object.assign(s, tagSel.data());
+  const s = { $emit: (ev, val) => { s._emitted = val; }, modelValue: model,
+              usage: usage || [], multiple: true, asList: false, modelIds: [] };
+  for (const k of Object.keys(optPicker.methods)) s[k] = optPicker.methods[k].bind(s);
+  for (const k of Object.keys(optPicker.computed))
+    Object.defineProperty(s, k, { get: optPicker.computed[k].bind(s), configurable: true });
+  Object.assign(s, optPicker.data());
   return s;
 }
-let s = mkTag("A", [{option_id:1,value:"B",active:true,usage_count:3}]);
+let s = mkTag("A", [{option_id:1,value:"B",active:true,usage_count:3,model_ids:[]}]);
 s.add("B");
 out.added = s._emitted;
 s = mkTag("A, B", []);
@@ -161,6 +163,48 @@ done();
 ''')
         self.assertEqual(out["added"], "A, B")
         self.assertEqual(out["removed"], "B")
+
+    def test_opt_picker_single_select_replaces_value(self):
+        # opt-picker(multiple=false)= select 模式:再選即取代,emit 字串
+        out = self._run(r'''
+function mkSel(model, usage) {
+  const s = { $emit: (ev, val) => { s._emitted = val; }, modelValue: model,
+              usage: usage || [], multiple: false, asList: false, modelIds: [] };
+  for (const k of Object.keys(optPicker.methods)) s[k] = optPicker.methods[k].bind(s);
+  for (const k of Object.keys(optPicker.computed))
+    Object.defineProperty(s, k, { get: optPicker.computed[k].bind(s), configurable: true });
+  Object.assign(s, optPicker.data());
+  return s;
+}
+let s = mkSel("紅", [{option_id:1,value:"藍",active:true,usage_count:3,model_ids:[]}]);
+s.add("藍");
+out.replaced = s._emitted;       // 單選取代 → "藍"
+s = mkSel("紅", []);
+s.remove("紅");
+out.cleared = s._emitted;        // 移除 → ""
+done();
+''')
+        self.assertEqual(out["replaced"], "藍")
+        self.assertEqual(out["cleared"], "")
+
+    def test_opt_picker_multi_emits_array(self):
+        # opt-picker(multiple=true, asList=true)= multi 模式:陣列
+        out = self._run(r'''
+function mkMulti(model, usage) {
+  const s = { $emit: (ev, val) => { s._emitted = val; }, modelValue: model,
+              usage: usage || [], multiple: true, asList: true, modelIds: [] };
+  for (const k of Object.keys(optPicker.methods)) s[k] = optPicker.methods[k].bind(s);
+  for (const k of Object.keys(optPicker.computed))
+    Object.defineProperty(s, k, { get: optPicker.computed[k].bind(s), configurable: true });
+  Object.assign(s, optPicker.data());
+  return s;
+}
+let s = mkMulti(["A"], [{option_id:1,value:"B",active:true,usage_count:1,model_ids:[]}]);
+s.add("B");
+out.added = s._emitted;          // ["A","B"]
+done();
+''')
+        self.assertEqual(out["added"], ["A", "B"])
 
 
 if __name__ == "__main__":

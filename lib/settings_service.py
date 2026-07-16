@@ -27,6 +27,7 @@ _ACTION_RULES = {
     "options.delete": ({"id": int}, {}),
     "options.models": ({"id": int}, {}),
     "options.set_models": ({"id": int, "model_ids": "int_list"}, {}),
+    "options.cleanup": ({}, {"field_id": (int, type(None))}),
     "categories.fields": ({"id": int}, {}),
     "categories.set_common_fields": ({"id": int, "field_ids": "int_list"}, {}),
     "categories.set_field": ({"category_id": int, "field_id": int, "fields": Mapping}, {}),
@@ -373,6 +374,20 @@ class SettingsService:
         self.repo.execute("UPDATE CategoryField SET default_option_id=NULL WHERE default_option_id=?",(item_id,)); self.repo.execute("DELETE FROM OptionModel WHERE option_id=?",(item_id,))
         self.repo.execute("UPDATE AttributeOption SET active=0 WHERE option_id=?" if count else "DELETE FROM AttributeOption WHERE option_id=?",(item_id,)); return {"ok":True,"deleted":not bool(count)}
 
+    def cleanup_options(self, field_id=None):
+        """手動清理未使用選項:使用數為 0 且非任何種類模板 default_option_id 者硬刪。
+        field_id 指定則限該欄,否則全域。回傳實際刪除筆數。"""
+        from lib import product_data
+        if field_id is not None:
+            self.repo.require("AttributeField", "field_id", field_id, "查無此規格欄")
+            ids = [r["option_id"] for r in self.repo.execute(
+                "SELECT option_id FROM AttributeOption WHERE field_id=?", (field_id,))]
+        else:
+            ids = [r["option_id"] for r in self.repo.execute(
+                "SELECT option_id FROM AttributeOption")]
+        deleted = product_data.cleanup_unused_options(self.repo.connection, ids)
+        return {"ok": True, "deleted": len(deleted)}
+
     def option_models(self,item_id):
         self.repo.require("AttributeOption","option_id",item_id,"查無此選項"); return {"model_ids":[r[0] for r in self.repo.execute("SELECT model_id FROM OptionModel WHERE option_id=? ORDER BY model_id",(item_id,))]}
 
@@ -481,7 +496,7 @@ class SettingsFacade:
                 if op=="delete": return s.simple_delete(simple[kind],payload["id"])
                 return s.resort(simple[kind],payload["ids"])
             handlers={
-                "brands.set_categories":lambda:s.set_brand_categories(payload["id"],payload.get("category_ids",[])),"models.list":lambda:s.list_models(bool(payload.get("all")),payload.get("phone_brand_id")),"models.create":lambda:s.create_model(payload),"models.update":lambda:s.update_model(payload["id"],payload.get("fields",{})),"models.delete":lambda:s.delete_model(payload["id"]),"models.sort":lambda:s.resort("models",payload["ids"]),"fields.list":lambda:s.list_fields(payload.get("category_id"),bool(payload.get("common"))),"fields.create":lambda:s.create_field(payload),"fields.update":lambda:s.update_field(payload["id"],payload.get("fields",{})),"options.list":lambda:s.list_options(payload["field_id"],bool(payload.get("all")),payload.get("model_ids",[])),"options.create":lambda:s.create_option(payload),"options.update":lambda:s.update_option(payload["id"],payload.get("fields",{})),"options.delete":lambda:s.delete_option(payload["id"]),"options.models":lambda:s.option_models(payload["id"]),"options.set_models":lambda:s.set_option_models(payload["id"],payload.get("model_ids",[])),"categories.fields":lambda:s.category_fields(payload["id"]),"categories.set_common_fields":lambda:s.set_category_common_fields(payload["id"],payload.get("field_ids",[])),"categories.set_field":lambda:s.set_field(payload["category_id"],payload["field_id"],payload.get("fields",{})),}
+                "brands.set_categories":lambda:s.set_brand_categories(payload["id"],payload.get("category_ids",[])),"models.list":lambda:s.list_models(bool(payload.get("all")),payload.get("phone_brand_id")),"models.create":lambda:s.create_model(payload),"models.update":lambda:s.update_model(payload["id"],payload.get("fields",{})),"models.delete":lambda:s.delete_model(payload["id"]),"models.sort":lambda:s.resort("models",payload["ids"]),"fields.list":lambda:s.list_fields(payload.get("category_id"),bool(payload.get("common"))),"fields.create":lambda:s.create_field(payload),"fields.update":lambda:s.update_field(payload["id"],payload.get("fields",{})),"options.list":lambda:s.list_options(payload["field_id"],bool(payload.get("all")),payload.get("model_ids",[])),"options.create":lambda:s.create_option(payload),"options.update":lambda:s.update_option(payload["id"],payload.get("fields",{})),"options.delete":lambda:s.delete_option(payload["id"]),"options.cleanup":lambda:s.cleanup_options(payload.get("field_id")),"options.models":lambda:s.option_models(payload["id"]),"options.set_models":lambda:s.set_option_models(payload["id"],payload.get("model_ids",[])),"categories.fields":lambda:s.category_fields(payload["id"]),"categories.set_common_fields":lambda:s.set_category_common_fields(payload["id"],payload.get("field_ids",[])),"categories.set_field":lambda:s.set_field(payload["category_id"],payload["field_id"],payload.get("fields",{})),}
             if action not in handlers: raise ValidationError("不支援的設定操作")
             return handlers[action]()
         return self.runner.run(work)

@@ -323,19 +323,28 @@ class ProductService:
     def delete_variant(self, vid):
         self.repo.require_variant(vid)
         if product_data.has_records(self.repo.connection, [vid]): raise ConflictError("子產品已有交易紀錄，無法刪除")
+        touched = {r["option_id"] for r in self.repo.all(
+            "SELECT DISTINCT option_id FROM VariantAttribute WHERE variant_id=? AND option_id IS NOT NULL", (vid,))}
         for table in ("VariantAttribute", "VariantModel", "Barcode"):
             self.repo.execute(f"DELETE FROM {table} WHERE variant_id=?", (vid,))
-        self.repo.execute("DELETE FROM Variant WHERE variant_id=?", (vid,)); return {"ok": True}
+        self.repo.execute("DELETE FROM Variant WHERE variant_id=?", (vid,))
+        product_data.cleanup_unused_options(self.repo.connection, touched)
+        return {"ok": True}
 
     def delete_product(self, pid):
         self.repo.require_product(pid)
         vids = [r["variant_id"] for r in self.repo.all("SELECT variant_id FROM Variant WHERE product_id=?", (pid,))]
         if product_data.has_records(self.repo.connection, vids): raise ConflictError("商品已有交易紀錄，無法刪除")
+        touched = set()
         if vids:
             qs = in_clause(vids)
+            touched = {r["option_id"] for r in self.repo.all(
+                f"SELECT DISTINCT option_id FROM VariantAttribute WHERE variant_id IN ({qs}) AND option_id IS NOT NULL", vids)}
             for table in ("VariantAttribute", "VariantModel", "Barcode", "Variant"):
                 self.repo.execute(f"DELETE FROM {table} WHERE variant_id IN ({qs})", vids)
-        self.repo.execute("DELETE FROM Product WHERE product_id=?", (pid,)); return {"ok": True}
+        self.repo.execute("DELETE FROM Product WHERE product_id=?", (pid,))
+        product_data.cleanup_unused_options(self.repo.connection, touched)
+        return {"ok": True}
 
 
 class ProductFacade:

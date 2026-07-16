@@ -436,20 +436,46 @@ def _mig_attributefield_global(conn):
     fields = conn.execute(
         "SELECT field_id, name, field_type, active FROM AttributeField "
         "ORDER BY field_id").fetchall()
+
+    def _field_has_data(fid):
+        # 「有資料」= 有任一選項或任一 VariantAttribute 使用
+        if conn.execute("SELECT 1 FROM AttributeOption WHERE field_id=? LIMIT 1",
+                        (fid,)).fetchone():
+            return True
+        if conn.execute("SELECT 1 FROM VariantAttribute WHERE field_id=? LIMIT 1",
+                        (fid,)).fetchone():
+            return True
+        return False
+
     # 依正規化名分組,檢查同名不同型態
     groups = {}
     for r in fields:
         groups.setdefault(normalize_key(r["name"]), []).append(r)
+    # 同名不同型態衝突自動解決:衝突組中「零選項且零 VariantAttribute 使用」的欄位
+    # 直接刪除(連同其 CategoryField 綁定),再繼續合併;仍有兩個以上「有資料」的
+    # 同名不同型欄才中止回報(如正式庫零使用種子欄與各種類同名欄衝突可自動化解)。
+    dropped = set()
     conflicts = []
     for key, rows in groups.items():
-        types = {r["field_type"] for r in rows}
-        if len(types) > 1:
-            names = sorted({r["name"] for r in rows})
-            conflicts.append(f"  {names}:field_type={sorted(types)}")
+        if len({r["field_type"] for r in rows}) <= 1:
+            continue
+        keep = [r for r in rows if _field_has_data(r["field_id"])]
+        keep_ids = {r["field_id"] for r in keep}
+        dropped.update(r["field_id"] for r in rows if r["field_id"] not in keep_ids)
+        if len({r["field_type"] for r in keep}) > 1:
+            names = sorted({r["name"] for r in keep})
+            conflicts.append(
+                f"  {names}:field_type={sorted({r['field_type'] for r in keep})}")
     if conflicts:
         raise ValueError(
             "AttributeField 正規化同名但 field_type 不同,無法自動合併,"
             "請人工處理後再升級:\n" + "\n".join(conflicts))
+    # 移除被刪欄:排除於合併與各引用重建之外(其 CategoryField 綁定一併丟棄)
+    if dropped:
+        fields = [r for r in fields if r["field_id"] not in dropped]
+        groups = {}
+        for r in fields:
+            groups.setdefault(normalize_key(r["name"]), []).append(r)
     # field 存活對映(每組最小 field_id)
     fieldmap, survivors = {}, []
     for rows in groups.values():
@@ -563,6 +589,8 @@ def _mig_attributefield_global(conn):
     )""")
     seen_cf = set()
     for r in cf:
+        if r["field_id"] in dropped:
+            continue  # 被刪衝突欄的綁定一併丟棄
         nf = fieldmap.get(r["field_id"], r["field_id"])
         ndo = (optionmap.get(r["default_option_id"], r["default_option_id"])
                if r["default_option_id"] is not None else None)

@@ -17,6 +17,9 @@ window.PosComponents["attr-fields"] = {
     options: { type: Object, default: () => ({}) },
     attrs: { type: Object, required: true },
     modelIds: { type: Array, default: () => [] },
+    // usage: field_id → 該種類使用次數排序候選(API.fieldUsage);有值的 select/multi
+    // 欄改用候選選取器(該種類用過的值優先＋搜尋全部＋新增),否則沿用原下拉/勾選。
+    usage: { type: Object, default: () => ({}) },
     tagsStyle: { type: String, default: "datalist" },
     showEmptyHint: { type: Boolean, default: false },
   },
@@ -40,7 +43,11 @@ window.PosComponents["attr-fields"] = {
     <template v-if="f.field_type === 'multi'">
       <div class="attr-name">{{ f.name }}</div>
       <div class="chip-box">
-        <div class="chip-wrap">
+        <opt-picker v-if="usage[f.field_id]" :model-value="attrs[f.name]"
+                    @update:model-value="attrs[f.name] = $event"
+                    :usage="usage[f.field_id]" :multiple="true" :as-list="true"
+                    :model-ids="modelIds" :placeholder="'搜尋或輸入' + f.name"></opt-picker>
+        <div v-else class="chip-wrap">
           <label v-for="o in optionsFor(f)" :key="o.option_id" class="chip"
                  :class="{ on: (attrs[f.name] || []).includes(o.value) }">
             <input type="checkbox" :value="o.value" v-model="attrs[f.name]">
@@ -68,12 +75,22 @@ window.PosComponents["attr-fields"] = {
         <option v-for="o in (f.options || [])" :key="o.option_id" :value="o.value"></option>
       </datalist>
     </label>
-    <label v-else-if="f.field_type === 'select'">{{ f.name }}
-      <input :list="datalistId(f)" v-model="attrs[f.name]">
-      <datalist :id="datalistId(f)">
-        <option v-for="o in optionsFor(f)" :key="o.option_id" :value="o.value"></option>
-      </datalist>
-    </label>
+    <template v-else-if="f.field_type === 'select'">
+      <template v-if="usage[f.field_id]">
+        <div class="attr-name">{{ f.name }}</div>
+        <div class="chip-box">
+          <opt-picker :model-value="attrs[f.name]" @update:model-value="attrs[f.name] = $event"
+                      :usage="usage[f.field_id]" :multiple="false" :model-ids="modelIds"
+                      :placeholder="'搜尋或輸入' + f.name"></opt-picker>
+        </div>
+      </template>
+      <label v-else>{{ f.name }}
+        <input :list="datalistId(f)" v-model="attrs[f.name]">
+        <datalist :id="datalistId(f)">
+          <option v-for="o in optionsFor(f)" :key="o.option_id" :value="o.value"></option>
+        </datalist>
+      </label>
+    </template>
     <label v-else>{{ f.name }}
       <input v-model="attrs[f.name]">
     </label>
