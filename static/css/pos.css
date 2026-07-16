@@ -115,6 +115,16 @@ tr.inactive > td { opacity: 0.55; }
 .bc-more { color: var(--text-2); font-size: 12px; margin-left: 2px; }
 .bc-err { color: var(--danger); font-size: 13px; margin-top: 4px; white-space: normal; }
 
+/* 待處理徽章與問題說明 */
+.badge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 4px;
+  background: var(--danger); color: #fff; font-size: 12px; line-height: 16px;
+  text-align: center; border-radius: 8px; }
+.issue-box { margin-top: 6px; padding: 6px 8px; border-radius: 6px;
+  background: rgba(220, 38, 38, 0.08); white-space: normal; }
+.issue-tag { display: inline-block; padding: 0 6px; margin-bottom: 4px;
+  background: var(--danger); color: #fff; font-size: 12px; border-radius: 4px; }
+.issue-line { color: var(--danger); font-size: 13px; }
+
 /* 設定頁維護卡片 */
 .card { background: var(--surface); padding: 16px; border-radius: 8px;
   margin-bottom: 18px; max-width: 760px; }

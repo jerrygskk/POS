@@ -71,7 +71,10 @@ def _validate_draft(value):
 
 
 def _validate_action_payload(action, payload):
-    id_actions={"products.update","products.delete","variants.update","variants.set_models","variants.update_details","variants.delete"}
+    id_actions={"products.update","products.delete","variants.update","variants.set_models","variants.update_details","variants.delete","variants.activate"}
+    if action=="variants.issues":
+        _allow(payload,set())
+        return
     if action=="variants.batch_create":
         _allow(payload,{"product_id","drafts"})
         if not _is_int(payload.get("product_id")):raise ValidationError("商品識別碼格式不正確")
@@ -91,11 +94,12 @@ def _validate_action_payload(action, payload):
         if not isinstance(payload.get("variants",[]),list):raise ValidationError("子產品清單格式不正確")
         for item in payload.get("variants",[]):_validate_variant(item)
     elif action in ("products.list","catalog.list"):
-        allowed={"q","category_id","brand_id","model_id"}|({"include_inactive"} if action=="catalog.list" else set());_allow(payload,allowed)
+        allowed={"q","category_id","brand_id","model_id"}|({"include_inactive","pending"} if action=="catalog.list" else set());_allow(payload,allowed)
         if not isinstance(payload.get("q",""),str):raise ValidationError("查詢字串格式不正確")
         for key in ("category_id","brand_id","model_id"):
             if payload.get(key) is not None and not _is_int(payload[key]):raise ValidationError("篩選條件格式不正確")
-        if "include_inactive" in payload and not isinstance(payload["include_inactive"],bool):raise ValidationError("停用篩選格式不正確")
+        for key in ("include_inactive","pending"):
+            if key in payload and not isinstance(payload[key],bool):raise ValidationError("篩選格式不正確")
     elif action in id_actions:
         allowed={"id"}
         if action in ("products.update","variants.update","variants.update_details"):allowed.add("fields")
@@ -240,7 +244,8 @@ class ProductService:
     def scan(self, code):
         row = self.repo.one(
             "SELECT v.variant_id,v.product_id,v.price price,p.name,"
-            "(COALESCE(c.active,1) AND p.active AND v.active) active FROM Barcode b "
+            "(COALESCE(c.active,1) AND p.active AND v.active AND "
+            "NOT EXISTS(SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id)) active FROM Barcode b "
             "JOIN Variant v ON b.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id "
             "LEFT JOIN Category c ON p.category_id=c.category_id "
             "WHERE b.barcode=?", (code,))
@@ -283,7 +288,8 @@ class ProductService:
 
     def catalog(self, payload):
         data = product_data.catalog(self.repo.connection, payload.get("include_inactive", False),
-                                    payload.get("category_id"), payload.get("brand_id"), payload.get("model_id"))
+                                    payload.get("category_id"), payload.get("brand_id"), payload.get("model_id"),
+                                    pending=payload.get("pending", False))
         return product_data.filter_catalog(data, payload.get("q", ""))
 
     def update_product(self, pid, fields):
@@ -310,10 +316,28 @@ class ProductService:
         self.repo.require_variant(vid)
         row = self.repo.one("SELECT p.category_id FROM Variant v JOIN Product p ON v.product_id=p.product_id WHERE v.variant_id=?", (vid,))
         fields = dict(fields); marker = "attributes" in fields; attrs = fields.pop("attributes", None)
+        # 修改前是否為待處理筆(僅對既有問題筆重驗,不新標記正常子產品)
+        had_issues = self.repo.one("SELECT 1 FROM VariantIssue WHERE variant_id=?", (vid,)) is not None
+        activating = fields.get("active") == 1
         _update_by_id(self.repo.connection, "Variant", "variant_id", vid, fields)
         if marker: product_data.set_variant_attributes(self.repo.connection, vid, row["category_id"], attrs)
         if model_ids is not None: product_data.set_variant_models(self.repo.connection, vid, model_ids)
+        if had_issues:
+            from lib.variant_issue_service import VariantIssueService
+            state = VariantIssueService(self.repo.connection).revalidate(vid)
+            # 待處理筆改由完整驗證把關啟用:仍有問題不得啟用(繞過雙擊/行內編輯亦擋)
+            if activating and state["issues"]:
+                raise ValidationError("子產品仍有待處理問題,無法啟用", details=state["issues"])
         return {"ok": True}
+
+    def activate_variant(self, vid):
+        self.repo.require_variant(vid)
+        from lib.variant_issue_service import VariantIssueService
+        return VariantIssueService(self.repo.connection).activate(vid)
+
+    def list_issues(self):
+        from lib.variant_issue_service import VariantIssueService
+        return VariantIssueService(self.repo.connection).summary()
 
     def delete_barcode(self, code):
         if self.repo.execute("DELETE FROM Barcode WHERE barcode=?", (code,)).rowcount == 0:
@@ -350,7 +374,7 @@ class ProductService:
 class ProductFacade:
     ACTIONS = {"products.create", "products.list", "catalog.list", "products.update", "products.delete",
                "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.delete",
-               "variants.batch_create", "variants.field_usage",
+               "variants.batch_create", "variants.field_usage", "variants.activate", "variants.issues",
                "barcodes.scan", "barcodes.add", "barcodes.delete"}
 
     def __init__(self, db_path):
@@ -373,6 +397,8 @@ class ProductFacade:
             if action == "variants.set_models": return s.update_variant(payload["id"], {}, payload.get("model_ids", []))
             if action == "variants.update_details": return s.update_variant(payload["id"], payload.get("fields", {}), payload.get("model_ids", []))
             if action == "variants.delete": return s.delete_variant(payload["id"])
+            if action == "variants.activate": return s.activate_variant(payload["id"])
+            if action == "variants.issues": return s.list_issues()
             if action == "variants.batch_create":
                 from lib.variant_batch_service import VariantBatchService
                 return VariantBatchService(connection).batch_create(payload)

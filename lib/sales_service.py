@@ -80,9 +80,11 @@ class SalesRepository:
 
     def variant_is_active(self, variant_id):
         # 有效啟用(規格 §8.2):Category.active AND Product.active AND Variant.active
-        # (VariantIssue 條件階段 6 接上)
+        # AND 無未解決 VariantIssue
         return self.connection.execute(
-            "SELECT (COALESCE(c.active,1) AND p.active AND v.active) ok FROM Variant v "
+            "SELECT (COALESCE(c.active,1) AND p.active AND v.active AND "
+            "NOT EXISTS(SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id)) ok "
+            "FROM Variant v "
             "JOIN Product p ON v.product_id=p.product_id "
             "LEFT JOIN Category c ON p.category_id=c.category_id WHERE v.variant_id=?",
             (variant_id,),).fetchone()

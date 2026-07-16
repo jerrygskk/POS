@@ -66,7 +66,7 @@ window.PosPages["page-catalog"] = {
   inject: ["showError", "goPage"],
   data() {
     return {
-      q: "", includeInactive: false,
+      q: "", includeInactive: false, pending: false, pendingCount: 0,
       fCategory: null, fBrand: null, fModel: null,
       categories: [], brands: [], models: [],
       products: [], fieldsByCat: {}, fieldOptions: {}, fieldUsageByCat: {},
@@ -106,8 +106,22 @@ window.PosPages["page-catalog"] = {
       await this.guard(async () => {
         this.products = await API.listCatalog({q: this.q,
           include_inactive: this.includeInactive, category_id: this.fCategory,
-          brand_id: this.fBrand, model_id: this.fModel});
+          brand_id: this.fBrand, model_id: this.fModel, pending: this.pending});
+        const summary = await API.variantIssues();
+        this.pendingCount = summary.pending_variant_count || 0;
       });
+    },
+    // 待處理問題轉正式中文說明(missing_required/duplicate_barcode/duplicate_signature)
+    issueText(it) {
+      if (it.issue_type === "missing_required")
+        return `缺少必填「${it.field_name || it.source_value || "規格"}」`;
+      if (it.issue_type === "duplicate_barcode")
+        return `條碼「${it.source_value}」與其他子產品重複` +
+          (it.related_label ? `（${it.related_label}）` : "");
+      if (it.issue_type === "duplicate_signature")
+        return "規格與其他子產品重複" +
+          (it.related_label ? `（${it.related_label}）` : "");
+      return "資料異常";
     },
     async reload() {
       await this.refresh();

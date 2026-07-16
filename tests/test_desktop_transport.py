@@ -16,7 +16,7 @@ STATIC = ROOT / "static"
 
 
 class StaticDesktopContractTests(unittest.TestCase):
-    def test_index_local_resources_are_relative_and_exist_at_version_53(self):
+    def test_index_local_resources_are_relative_and_exist_at_version_54(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         import re
         resources = re.findall(r'(?:src|href)="([^"]+)"', html)
@@ -26,7 +26,7 @@ class StaticDesktopContractTests(unittest.TestCase):
             self.assertFalse(value.startswith("/"), value)
             path, _, query = value.partition("?")
             self.assertTrue((STATIC / path).is_file(), value)
-            self.assertEqual(query, "v=53", value)
+            self.assertEqual(query, "v=54", value)
 
     def test_formal_javascript_contains_no_network_transport_or_api_urls(self):
         forbidden = ("/api", "fetch(", "XMLHttpRequest", "axios", "window.open", "API._do", "_waitForBridge")

@@ -6,10 +6,10 @@ from lib.product_rules import FIELD_TYPES
 FEATURE_FIELD_KEY = normalize_key("特性詞條")  # 固定欄位:不需綁定即可使用
 
 # 有效啟用(規格 §8.2):Category.active AND Product.active AND Variant.active
-#   AND 沒有未解決的 VariantIssue。VariantIssue 條件本階段恆 True(掛勾),
-#   階段 6 接上時改為:AND NOT EXISTS(SELECT 1 FROM VariantIssue vi
-#   WHERE vi.variant_id=v.variant_id)。此處常數以 c/p/v 別名表示三表。
-EFFECTIVE_ACTIVE = "c.active=1 AND p.active=1 AND v.active=1"
+#   AND 沒有未解決的 VariantIssue。以下常數以 c/p/v 別名表示三表;
+#   VARIANT_NO_ISSUE 需子查詢的 v 別名即為 Variant。
+VARIANT_NO_ISSUE = "NOT EXISTS (SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id)"
+EFFECTIVE_ACTIVE = "c.active=1 AND p.active=1 AND v.active=1 AND " + VARIANT_NO_ISSUE
 
 
 def set_variant_models(conn, variant_id, model_ids):
@@ -199,7 +199,58 @@ def has_records(conn, ids):
     return any(conn.execute(f"SELECT 1 FROM {t} WHERE variant_id IN ({qs}) LIMIT 1",ids).fetchone() for t in ("SaleItem","StockMovement"))
 
 
-def catalog(conn, include_inactive=False, category_id=None, brand_id=None, model_id=None):
+def variant_issues(conn, ids):
+    """回傳 {variant_id: [issue_dict,...]}。issue_dict 含 issue_type、field_id、
+    field_name(缺必填欄名)、source_value、related_variant_id 與 related_label
+    (對照子產品的「大產品名 規格 條碼」摘要),供前端一次列出全部問題。"""
+    out = {}
+    if not ids:
+        return out
+    qs = in_clause(ids)
+    rows = conn.execute(
+        f"SELECT vi.issue_id, vi.variant_id, vi.issue_type, vi.field_id, "
+        f"vi.source_value, vi.related_variant_id, f.name field_name "
+        f"FROM VariantIssue vi LEFT JOIN AttributeField f ON vi.field_id=f.field_id "
+        f"WHERE vi.variant_id IN ({qs}) ORDER BY vi.variant_id, vi.issue_id", ids).fetchall()
+    related_ids = [r["related_variant_id"] for r in rows if r["related_variant_id"] is not None]
+    labels = _variant_labels(conn, related_ids)
+    for r in rows:
+        out.setdefault(r["variant_id"], []).append({
+            "issue_type": r["issue_type"], "field_id": r["field_id"],
+            "field_name": r["field_name"], "source_value": r["source_value"],
+            "related_variant_id": r["related_variant_id"],
+            "related_label": labels.get(r["related_variant_id"], "")})
+    return out
+
+
+def _variant_labels(conn, ids):
+    """對照子產品摘要:{variant_id: '大產品名｜規格｜條碼'}。"""
+    out = {}
+    ids = [i for i in dict.fromkeys(ids) if i is not None]
+    if not ids:
+        return out
+    qs = in_clause(ids)
+    names = {r["variant_id"]: r["name"] for r in conn.execute(
+        f"SELECT v.variant_id, p.name FROM Variant v JOIN Product p "
+        f"ON v.product_id=p.product_id WHERE v.variant_id IN ({qs})", ids)}
+    disp = display_attrs(conn, ids)
+    bars = {}
+    for r in conn.execute(
+            f"SELECT variant_id, barcode FROM Barcode WHERE variant_id IN ({qs}) "
+            f"ORDER BY variant_id, barcode", ids):
+        bars.setdefault(r["variant_id"], []).append(r["barcode"])
+    for vid in ids:
+        parts = [names.get(vid, "")]
+        if disp.get(vid):
+            parts.append(disp[vid])
+        if bars.get(vid):
+            parts.append("、".join(bars[vid]))
+        out[vid] = "｜".join(p for p in parts if p)
+    return out
+
+
+def catalog(conn, include_inactive=False, category_id=None, brand_id=None, model_id=None,
+            pending=False):
     clauses=[];args=[]
     if not include_inactive:clauses.append("p.active=1 AND (c.active=1 OR c.category_id IS NULL)")
     if category_id is not None:clauses.append("p.category_id=?");args.append(category_id)
@@ -207,12 +258,15 @@ def catalog(conn, include_inactive=False, category_id=None, brand_id=None, model
     where=" WHERE "+" AND ".join(clauses) if clauses else ""
     products=conn.execute("SELECT p.*,c.name category_name,b.name brand_name FROM Product p LEFT JOIN Category c ON p.category_id=c.category_id LEFT JOIN Brand b ON p.brand_id=b.brand_id"+where+" ORDER BY c.sort,p.category_id,b.sort,p.name,p.product_id",args).fetchall()
     pids=[p["product_id"] for p in products]; rows=[]
+    # 待處理篩選需納入停用中的問題子產品(問題筆恆停用)
     if pids:
-        qs=in_clause(pids);active="" if include_inactive else " AND active=1"
+        qs=in_clause(pids);active="" if (include_inactive or pending) else " AND active=1"
         rows=conn.execute(f"SELECT * FROM Variant WHERE product_id IN ({qs}){active} ORDER BY product_id,variant_id",pids).fetchall()
     if model_id is not None:
         allowed={r[0] for r in conn.execute("SELECT variant_id FROM VariantModel WHERE model_id=?",(model_id,))};rows=[r for r in rows if r["variant_id"] in allowed]
-    ids=[r["variant_id"] for r in rows]; attrs=attrs_by_variant(conn,ids);disp=display_attrs(conn,ids);models=models_by_variant(conn,ids);sorts=variant_sort_keys(conn,ids);stocks=stock_map(conn,ids)
+    ids=[r["variant_id"] for r in rows]; attrs=attrs_by_variant(conn,ids);disp=display_attrs(conn,ids);models=models_by_variant(conn,ids);sorts=variant_sort_keys(conn,ids);stocks=stock_map(conn,ids);issues=variant_issues(conn,ids)
+    if pending:
+        rows=[r for r in rows if issues.get(r["variant_id"])]
     bars={}
     for r in conn.execute("SELECT variant_id,barcode,source FROM Barcode ORDER BY variant_id,barcode"):bars.setdefault(r["variant_id"],[]).append({"barcode":r["barcode"],"source":r["source"]})
     by={}
@@ -221,8 +275,8 @@ def catalog(conn, include_inactive=False, category_id=None, brand_id=None, model
     for p in products:
         vs=[]
         for r in sorted(by.get(p["product_id"],[]),key=lambda x:(sorts[x["variant_id"]],x["variant_id"])):
-            vid=r["variant_id"];vs.append({"variant_id":vid,"attributes":attrs.get(vid,{}),"attr_display":disp.get(vid,""),"price":r["price"],"effective_price":r["price"],"stock":stocks.get(vid,0),"active":bool(r["active"]),"models":models.get(vid,[]),"barcodes":bars.get(vid,[])})
-        if model_id is not None and not vs:continue
+            vid=r["variant_id"];vs.append({"variant_id":vid,"attributes":attrs.get(vid,{}),"attr_display":disp.get(vid,""),"price":r["price"],"effective_price":r["price"],"stock":stocks.get(vid,0),"active":bool(r["active"]),"models":models.get(vid,[]),"barcodes":bars.get(vid,[]),"issues":issues.get(vid,[])})
+        if (model_id is not None or pending) and not vs:continue
         out.append({"product_id":p["product_id"],"name":p["name"],"category_id":p["category_id"],"category_name":p["category_name"],"brand_id":p["brand_id"],"brand_name":p["brand_name"],"note":p["note"],"active":bool(p["active"]),"variants":vs})
     return out
 
