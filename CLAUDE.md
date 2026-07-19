@@ -2,7 +2,29 @@
 
 維護者最看重的部分。違反這些會直接消耗信任與時間。
 
-> **新對話開始工作前**：完整讀取 `docs/handover.md`（不入庫）、`CLAUDE.md`、`DEVELOPER.md`；交接表記錄目前進度、待辦與已議定決策。
+> **新對話開始工作前**：完整讀取 `docs/handover.md`（不入庫）、`CLAUDE.md`、`DEVELOPER.md`、`PITFALLS.md`；交接表記錄目前進度、待辦與已議定決策。
+
+## 這是什麼
+
+- **技術棧**：Python + FastAPI + SQLite ＋ Vue 3 無建置前端（prod 版），pywebview 桌面殼；使用者為手機配件行店員
+- **目標環境**：Windows；PyInstaller `--onefile` 打包
+- **文件分工**：`README.md`＝使用者門面；`DEVELOPER.md`＝技術文件（架構／慣例／測試／打包／版號／版本記錄）；`PITFALLS.md`＝踩雷速查表（症狀→解法）；`CLAUDE.md`＝協作規則（本檔）；`docs/handover.md`＝跨對話交接（不入庫）
+
+## 任務對照表（動手前先讀哪裡）
+
+依任務對照下表（皆在 DEVELOPER.md 與 PITFALLS.md）。寫過的雷再踩會被直接點名。
+
+| 要做的事 | 動手前先讀 |
+|----------|------------|
+| 改 schema／migration／種子 | DEVELOPER §2 慣例（DDL 唯一來源 `db_schema.py`）；PITFALLS SQL 組 |
+| 商品／規格欄／選項邏輯 | DEVELOPER §2 慣例（規格值正規化、選項生命週期、限定型號） |
+| 條碼／自取碼 | DEVELOPER §2 慣例（條碼混合、TL 保留字頭、交易語意） |
+| 前端版面／樣式／JS | DEVELOPER §2 UI 風格規範；PITFALLS VUE 組 |
+| 設定頁 | DEVELOPER §2 設定頁結構；PITFALLS VUE-1（v-if 動態 `:key` 雷） |
+| 測試 | DEVELOPER §3；PITFALLS TEST 組 |
+| 打包 | DEVELOPER §4；PITFALLS PKG 組 |
+| 版號／發布 | DEVELOPER §5＋本檔 C 節 |
+| Shell／commit 操作 | PITFALLS PS 組 |
 
 ## A. 溝通與節奏
 
