@@ -253,7 +253,9 @@ table.sub td:last-child { white-space: nowrap; }
 .prod-settings { display: flex; gap: 16px; margin-bottom: 18px; align-items: flex-start; }
 .cat-list { flex: 0 0 220px; background: var(--surface); border-radius: 8px; padding: 10px;
   display: flex; flex-direction: column; gap: 4px; }
-.cat-list-title { font-weight: bold; color: var(--text-2); padding: 2px 6px 6px; }
+.cat-list-title { font-size: 13px; font-weight: bold; color: var(--text-3); padding: 2px 6px 6px; }
+.cat-list-title.cat-list-group { margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--hover); }
 .cat-item { display: flex; align-items: center; justify-content: space-between; gap: 6px;
   padding: 8px 10px; border-radius: 8px; cursor: pointer; user-select: none; }
 .cat-item:hover { background: var(--hover); }

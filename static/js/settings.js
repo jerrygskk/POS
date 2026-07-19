@@ -20,6 +20,7 @@ window.PosPages["page-settings"] = {
       newModel: { phone_brand_id: null, name: "", series: "" },
       newSeq: { brands: "", phoneBrands: "", models: "" },
       // 商品設定單頁
+      section: "category",
       selCatId: null, newCatName: "",
       tplFields: [], tplOptions: {}, catHasVariant: false, bigProducts: [],
       // 規格模板 popup(單層)
@@ -70,10 +71,18 @@ window.PosPages["page-settings"] = {
     },
 
     // ==== 商品設定:種類 ====
-    async selectCategory(c) {
-      if (this.selCatId === c.category_id) return;
-      this.selCatId = c.category_id;
+    selectSection(name) {
+      this.section = name;
       this.fieldPopup = null; this.prodPopup = null;
+      this.brandMenuOpen = false;
+    },
+    async selectCategory(c) {
+      const same = this.selCatId === c.category_id;
+      this.section = "category";
+      this.fieldPopup = null; this.prodPopup = null;
+      this.brandMenuOpen = false;
+      if (same) return;
+      this.selCatId = c.category_id;
       await this.guard(() => this.loadCategoryDetail());
     },
     async loadCategoryDetail() {

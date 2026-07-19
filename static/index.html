@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=55">
+<link rel="stylesheet" href="css/pos.css?v=56">
 </head>
 <body>
 <div id="app">
   <nav>
-    <img class="nav-logo" src="img/logo.png?v=55" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=56" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="page=key">{{ label }}</button>
   </nav>
@@ -413,7 +413,7 @@
     <aside class="cat-list">
       <div class="cat-list-title">商品種類</div>
       <div v-for="c in categories" :key="c.category_id" class="cat-item"
-           :class="{active: c.category_id===selCatId, inactive: !c.active}"
+           :class="{active: section==='category' && c.category_id===selCatId, inactive: !c.active}"
            @click="selectCategory(c)">
         <span class="cat-name">{{ c.name }}</span>
         <span v-if="!c.active" class="tag">停用</span>
@@ -422,9 +422,19 @@
         <input v-model="newCatName" placeholder="新種類名稱" @keyup.enter="addCategory">
         <button class="btn-sm" @click="addCategory">新增種類</button>
       </div>
+
+      <div class="cat-list-title cat-list-group">基礎資料</div>
+      <div class="cat-item" :class="{active: section==='brands'}"
+           @click="selectSection('brands')">
+        <span class="cat-name">廠牌</span>
+      </div>
+      <div class="cat-item" :class="{active: section==='models'}"
+           @click="selectSection('models')">
+        <span class="cat-name">手機品牌與型號</span>
+      </div>
     </aside>
 
-    <section class="cat-detail" v-if="selectedCat">
+    <section class="cat-detail" v-if="section==='category' && selectedCat">
       <div class="detail-head">
         <input class="name cat-title" v-model="selectedCat.name"
                @keyup.enter="saveCategoryName(selectedCat)">
@@ -477,8 +487,84 @@
       </table>
       <button class="btn-sm" @click="openProductPopup(null)">新增大產品</button>
     </section>
-    <section class="cat-detail" v-else>
+    <section class="cat-detail" v-else-if="section==='category'">
       <div class="hint">請於左側選擇或新增商品種類。</div>
+    </section>
+
+    <!-- 基礎資料:廠牌 -->
+    <section class="cat-detail" v-else-if="section==='brands'">
+      <div class="card-head"><h3>廠牌</h3>
+        <button class="primary" @click="saveAll('brands')">儲存名稱修改</button></div>
+      <div class="inline-add add-before-list">
+        <input v-model="newItem.brands" placeholder="新廠牌名稱" @keyup.enter="addItem('brands')">
+        <input class="w60" v-model="newSeq.brands" placeholder="序號">
+        <button class="primary" @click="addItem('brands')">新增</button>
+      </div>
+      <sortable-list :items="brands" item-key="brand_id"
+                     @save="saveSort('brands', $event)">
+        <template #row="{ item: b }">
+          <input class="name" v-model="b.name">
+          <button @click="deleteItem('brands', b)">刪除</button>
+          <button @click="openBrandEditor(b)">{{ openBrand===b.brand_id ? '收合' : '配件種類' }}</button>
+        </template>
+        <template #detail="{ item: b }">
+          <div v-if="openBrand === b.brand_id" class="detail-panel maint-detail">
+            <div class="step-title">「{{ openBrandName }}」經營的配件種類</div>
+            <small class="hint">勾選後,建檔時選到該種類才會出現此廠牌。</small>
+            <label v-for="c in categories" :key="c.category_id" class="chk">
+              <input type="checkbox" :checked="brandCatChecked[c.category_id]"
+                     @change="toggleBrandCat(c)"> {{ c.name }}
+            </label>
+          </div>
+        </template>
+      </sortable-list>
+    </section>
+
+    <!-- 基礎資料:手機品牌與型號 -->
+    <section class="cat-detail" v-else-if="section==='models'">
+      <div class="card-head"><h3>手機品牌</h3>
+        <button class="primary" @click="saveAll('phoneBrands')">儲存名稱修改</button></div>
+      <div class="inline-add add-before-list">
+        <input v-model="newItem.phoneBrands" placeholder="新手機品牌名稱(如 iPhone)"
+               @keyup.enter="addItem('phoneBrands')">
+        <input class="w60" v-model="newSeq.phoneBrands" placeholder="序號">
+        <button class="primary" @click="addItem('phoneBrands')">新增</button>
+      </div>
+      <sortable-list :items="phoneBrands" item-key="phone_brand_id"
+                     @save="saveSort('phoneBrands', $event)">
+        <template #row="{ item: pb }">
+          <input class="name" v-model="pb.name">
+          <button @click="toggleActive('phoneBrands', pb)">{{ pb.active ? '停用' : '啟用' }}</button>
+          <button @click="deleteItem('phoneBrands', pb)">刪除</button>
+        </template>
+      </sortable-list>
+
+      <div class="card-head" style="margin-top:16px"><h3>手機型號</h3>
+        <button class="primary" @click="saveAll('models')">儲存名稱修改</button></div>
+      <div class="inline-add add-before-list">
+        <select v-model.number="newModel.phone_brand_id">
+          <option :value="null">選擇手機品牌</option>
+          <option v-for="pb in phoneBrands" :key="pb.phone_brand_id"
+                  :value="pb.phone_brand_id">{{ pb.name }}</option>
+        </select>
+        <input v-model="newModel.name" placeholder="型號名稱" @keyup.enter="addModel">
+        <input class="w120" v-model="newModel.series" placeholder="系列(選填)" @keyup.enter="addModel">
+        <input class="w60" v-model="newSeq.models" placeholder="序號">
+        <button class="primary" @click="addModel">新增</button>
+      </div>
+      <div v-for="g in modelGroups" :key="g.brand" class="model-group">
+        <div class="grp-title">{{ g.brand }}</div>
+        <sortable-list :items="g.items" item-key="model_id"
+                       @save="saveSort('models', $event)">
+          <template #row="{ item: m }">
+            <input class="name" v-model="m.name">
+            <input class="w120" v-model="m.alias" placeholder="別名(選填)">
+            <input class="w120" v-model="m.series" placeholder="系列(選填)">
+            <button @click="toggleActive('models', m)">{{ m.active ? '停用' : '啟用' }}</button>
+            <button @click="deleteItem('models', m)">刪除</button>
+          </template>
+        </sortable-list>
+      </div>
     </section>
   </div>
 
@@ -571,97 +657,22 @@
     </div>
   </div>
 
-  <!-- 卡片二:廠牌 -->
-  <div class="card">
-    <div class="card-head"><h3>廠牌</h3>
-      <button class="primary" @click="saveAll('brands')">儲存名稱修改</button></div>
-    <div class="inline-add add-before-list">
-      <input v-model="newItem.brands" placeholder="新廠牌名稱" @keyup.enter="addItem('brands')">
-      <input class="w60" v-model="newSeq.brands" placeholder="序號">
-      <button class="primary" @click="addItem('brands')">新增</button>
-    </div>
-    <sortable-list :items="brands" item-key="brand_id"
-                   @save="saveSort('brands', $event)">
-      <template #row="{ item: b }">
-        <input class="name" v-model="b.name">
-        <button @click="deleteItem('brands', b)">刪除</button>
-        <button @click="openBrandEditor(b)">{{ openBrand===b.brand_id ? '收合' : '配件種類' }}</button>
-      </template>
-      <template #detail="{ item: b }">
-        <div v-if="openBrand === b.brand_id" class="detail-panel maint-detail">
-          <div class="step-title">「{{ openBrandName }}」經營的配件種類</div>
-          <small class="hint">勾選後,建檔時選到該種類才會出現此廠牌。</small>
-          <label v-for="c in categories" :key="c.category_id" class="chk">
-            <input type="checkbox" :checked="brandCatChecked[c.category_id]"
-                   @change="toggleBrandCat(c)"> {{ c.name }}
-          </label>
-        </div>
-      </template>
-    </sortable-list>
-  </div>
-
-  <!-- 卡片三:手機品牌與型號 -->
-  <div class="card">
-    <div class="card-head"><h3>手機品牌</h3>
-      <button class="primary" @click="saveAll('phoneBrands')">儲存名稱修改</button></div>
-    <div class="inline-add add-before-list">
-      <input v-model="newItem.phoneBrands" placeholder="新手機品牌名稱(如 iPhone)"
-             @keyup.enter="addItem('phoneBrands')">
-      <input class="w60" v-model="newSeq.phoneBrands" placeholder="序號">
-      <button class="primary" @click="addItem('phoneBrands')">新增</button>
-    </div>
-    <sortable-list :items="phoneBrands" item-key="phone_brand_id"
-                   @save="saveSort('phoneBrands', $event)">
-      <template #row="{ item: pb }">
-        <input class="name" v-model="pb.name">
-        <button @click="toggleActive('phoneBrands', pb)">{{ pb.active ? '停用' : '啟用' }}</button>
-        <button @click="deleteItem('phoneBrands', pb)">刪除</button>
-      </template>
-    </sortable-list>
-
-    <div class="card-head" style="margin-top:16px"><h3>手機型號</h3>
-      <button class="primary" @click="saveAll('models')">儲存名稱修改</button></div>
-    <div class="inline-add add-before-list">
-      <select v-model.number="newModel.phone_brand_id">
-        <option :value="null">選擇手機品牌</option>
-        <option v-for="pb in phoneBrands" :key="pb.phone_brand_id"
-                :value="pb.phone_brand_id">{{ pb.name }}</option>
-      </select>
-      <input v-model="newModel.name" placeholder="型號名稱" @keyup.enter="addModel">
-      <input class="w120" v-model="newModel.series" placeholder="系列(選填)" @keyup.enter="addModel">
-      <input class="w60" v-model="newSeq.models" placeholder="序號">
-      <button class="primary" @click="addModel">新增</button>
-    </div>
-    <div v-for="g in modelGroups" :key="g.brand" class="model-group">
-      <div class="grp-title">{{ g.brand }}</div>
-      <sortable-list :items="g.items" item-key="model_id"
-                     @save="saveSort('models', $event)">
-        <template #row="{ item: m }">
-          <input class="name" v-model="m.name">
-          <input class="w120" v-model="m.alias" placeholder="別名(選填)">
-          <input class="w120" v-model="m.series" placeholder="系列(選填)">
-          <button @click="toggleActive('models', m)">{{ m.active ? '停用' : '啟用' }}</button>
-          <button @click="deleteItem('models', m)">刪除</button>
-        </template>
-      </sortable-list>
-    </div>
-  </div>
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=55"></script>
-<script src="js/api.js?v=55"></script>
-<script src="js/catalogfields.js?v=55"></script>
-<script src="js/checkout.js?v=55"></script>
-<script src="js/receive.js?v=55"></script>
-<script src="js/stocktake.js?v=55"></script>
-<script src="js/records.js?v=55"></script>
-<script src="js/catalog.js?v=55"></script>
-<script src="js/variant_batch.js?v=55"></script>
-<script src="js/sortable.js?v=55"></script>
-<script src="js/modelpicker.js?v=55"></script>
-<script src="js/attrfields.js?v=55"></script>
-<script src="js/settings.js?v=55"></script>
-<script src="js/app.js?v=55"></script>
+<script src="js/vue.global.prod.js?v=56"></script>
+<script src="js/api.js?v=56"></script>
+<script src="js/catalogfields.js?v=56"></script>
+<script src="js/checkout.js?v=56"></script>
+<script src="js/receive.js?v=56"></script>
+<script src="js/stocktake.js?v=56"></script>
+<script src="js/records.js?v=56"></script>
+<script src="js/catalog.js?v=56"></script>
+<script src="js/variant_batch.js?v=56"></script>
+<script src="js/sortable.js?v=56"></script>
+<script src="js/modelpicker.js?v=56"></script>
+<script src="js/attrfields.js?v=56"></script>
+<script src="js/settings.js?v=56"></script>
+<script src="js/app.js?v=56"></script>
 </body>
 </html>
