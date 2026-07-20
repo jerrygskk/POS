@@ -2,10 +2,10 @@ import sqlite3
 import tempfile
 import unittest
 import json
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 
-from lib.application import ApplicationFacade, Repository, TransactionRunner
+from lib.application import BaseFacade, BaseRepository, TransactionRunner
 from lib.application_errors import (
     ApplicationError,
     ConflictError,
@@ -15,6 +15,11 @@ from lib.application_errors import (
     ValidationError,
 )
 from lib.desktop_bridge import DesktopBridge
+from lib.product_service import ProductFacade
+from lib.sales_service import SalesFacade
+from lib.settings_service import SettingsFacade
+from lib.stock_service import StockFacade
+from lib.stocktake_service import StocktakeFacade
 
 
 class RecordingLogger:
@@ -63,7 +68,14 @@ class TransactionLayerTests(unittest.TestCase):
             conn.execute("CREATE TABLE Item(value TEXT NOT NULL)")
             conn.commit()
         self.runner = TransactionRunner(self.db_path)
-        self.facade = ApplicationFacade(self.runner)
+
+        class ItemFacade(BaseFacade):
+            ACTIONS = {"items.run"}
+
+            def _dispatch(inner_self, action, payload, connection):
+                return payload["operation"](BaseRepository(connection))
+
+        self.facade = ItemFacade(self.db_path)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -71,9 +83,9 @@ class TransactionLayerTests(unittest.TestCase):
     def test_facade_commits_repository_changes_after_success(self):
         def operation(repository):
             repository.execute("INSERT INTO Item(value) VALUES(?)", ("完成",))
-            return repository.fetch_one("SELECT value FROM Item")["value"]
+            return repository.one("SELECT value FROM Item")["value"]
 
-        result = self.facade.execute(operation)
+        result = self.facade.invoke("items.run", {"operation": operation})
 
         with closing(sqlite3.connect(self.db_path)) as conn:
             saved = conn.execute("SELECT value FROM Item").fetchone()[0]
@@ -88,7 +100,7 @@ class TransactionLayerTests(unittest.TestCase):
             raise original
 
         with self.assertRaises(ConflictError) as caught:
-            self.facade.execute(operation)
+            self.facade.invoke("items.run", {"operation": operation})
 
         self.assertIs(original, caught.exception)
         with closing(sqlite3.connect(self.db_path)) as conn:
@@ -97,7 +109,7 @@ class TransactionLayerTests(unittest.TestCase):
 
     def test_repository_uses_injected_connection_without_committing(self):
         connection = sqlite3.connect(self.db_path)
-        repository = Repository(connection)
+        repository = BaseRepository(connection)
         try:
             repository.execute("INSERT INTO Item(value) VALUES(?)", ("待回滾",))
             connection.rollback()
@@ -114,34 +126,100 @@ class TransactionLayerTests(unittest.TestCase):
             raise ValueError("原始業務錯誤")
 
         with self.assertRaisesRegex(ValueError, "原始業務錯誤"):
-            self.facade.execute(operation)
+            self.facade.invoke("items.run", {"operation": operation})
 
     def test_rollback_logger_failure_does_not_replace_original_business_error(self):
         runner = TransactionRunner(self.db_path, logger=FailingLogger())
-        facade = ApplicationFacade(runner)
+        facade = self.facade
+        facade.runner = runner
 
         def operation(repository):
             repository.connection.close()
             raise ValueError("原始業務錯誤")
 
         with self.assertRaisesRegex(ValueError, "原始業務錯誤"):
-            facade.execute(operation)
+            facade.invoke("items.run", {"operation": operation})
 
     def test_sqlite_database_error_maps_to_safe_application_error_with_cause(self):
         def operation(repository):
             repository.execute("SELECT * FROM MissingTable")
 
         with self.assertRaises(DatabaseError) as caught:
-            self.facade.execute(operation)
+            self.facade.invoke("items.run", {"operation": operation})
 
         self.assertEqual("資料庫操作失敗", str(caught.exception))
         self.assertIsInstance(caught.exception.__cause__, sqlite3.DatabaseError)
 
     def test_business_value_error_is_not_mapped_to_database_error(self):
         with self.assertRaisesRegex(ValueError, "業務資料錯誤"):
-            self.facade.execute(
-                lambda repository: (_ for _ in ()).throw(ValueError("業務資料錯誤"))
-            )
+            self.facade.invoke("items.run", {
+                "operation": lambda repository: (_ for _ in ()).throw(ValueError("業務資料錯誤"))
+            })
+
+    def test_base_facade_rejects_unknown_action_and_non_mapping_payload(self):
+        with self.assertRaises(ValidationError):
+            self.facade.invoke("items.missing", {})
+        with self.assertRaises(ValidationError):
+            self.facade.invoke("items.run", [])
+
+    def test_domain_facades_reject_unhashable_actions_with_original_messages(self):
+        cases = (
+            (ProductFacade, "不支援的商品操作"),
+            (SalesFacade, "銷售操作不正確"),
+            (SettingsFacade, "不支援的設定操作"),
+            (StockFacade, "不支援的庫存操作"),
+            (StocktakeFacade, "不支援的盤點操作"),
+        )
+        for facade_type, message in cases:
+            with self.subTest(facade=facade_type.__name__):
+                with self.assertRaisesRegex(ValidationError, message):
+                    facade_type(self.db_path).invoke([], {})
+
+    def test_domain_payload_validation_happens_before_connection_open(self):
+        cases = (
+            (ProductFacade, "products.create"),
+            (SalesFacade, "sales.checkout"),
+            (SettingsFacade, "fields.create"),
+            (StockFacade, "stock.receive"),
+            (StocktakeFacade, "stocktake.scan"),
+        )
+        for facade_type, action in cases:
+            opened = []
+
+            @contextmanager
+            def recording_connection(_db_path):
+                opened.append(True)
+                yield None
+
+            facade = facade_type(self.db_path)
+            facade.runner.connection_context = recording_connection
+            with self.subTest(facade=facade_type.__name__):
+                with self.assertRaises(ValidationError):
+                    facade.invoke(action, {})
+                self.assertEqual(opened, [])
+
+    def test_domain_facades_preserve_non_mapping_payload_messages_before_connection(self):
+        cases = (
+            (ProductFacade, "products.list", "不支援的商品操作"),
+            (SalesFacade, "payments.list", "銷售操作不正確"),
+            (SettingsFacade, "fields.list", "設定操作資料格式不正確"),
+            (StockFacade, "stock.detail", "不支援的庫存操作"),
+            (StocktakeFacade, "stocktake.list", "不支援的盤點操作"),
+        )
+        for facade_type, action, message in cases:
+            opened = []
+
+            @contextmanager
+            def recording_connection(_db_path):
+                opened.append(True)
+                yield None
+
+            facade = facade_type(self.db_path)
+            facade.runner.connection_context = recording_connection
+            with self.subTest(facade=facade_type.__name__):
+                with self.assertRaisesRegex(ValidationError, message):
+                    facade.invoke(action, [])
+                self.assertEqual(opened, [])
 
 
 class DesktopBridgeTests(unittest.TestCase):

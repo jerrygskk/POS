@@ -1,15 +1,9 @@
 from collections.abc import Mapping
 
 from lib import product_data
-from lib.application import TransactionRunner
+from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, NotFoundError, ValidationError
-from lib.db import db_conn
-
-def _is_int(value): return isinstance(value, int) and not isinstance(value, bool)
-
-def _allow(payload, allowed):
-    unknown = set(payload) - set(allowed)
-    if unknown: raise ValidationError(f"不支援的欄位：{sorted(unknown)[0]}")
+from lib.product_rules import allow_keys as _allow, is_int as _is_int
 
 def _validate(action, payload):
     allowed = {"stocktake.create":{"operator","note"}, "stocktake.list":set(),
@@ -27,11 +21,7 @@ def _validate(action, payload):
         for key in ("operator", "note"):
             if payload.get(key) is not None and not isinstance(payload[key], str): raise ValidationError(f"{key} 必須是字串")
 
-class StocktakeRepository:
-    def __init__(self, connection): self.connection = connection
-    def execute(self, sql, args=()): return self.connection.execute(sql, args)
-    def one(self, sql, args=()): return self.execute(sql, args).fetchone()
-    def all(self, sql, args=()): return self.execute(sql, args).fetchall()
+class StocktakeRepository(BaseRepository):
     def session(self, sid): return self.one("SELECT * FROM StocktakeSession WHERE session_id=?", (sid,))
     def require_open(self, sid):
         row = self.session(sid)
@@ -79,19 +69,17 @@ class StocktakeService:
             if row["diff"]: self.repo.add_adjustment(row["variant_id"],row["diff"],sid)
         return {"ok":True}
 
-class StocktakeFacade:
+class StocktakeFacade(BaseFacade):
     ACTIONS={"stocktake.create","stocktake.list","stocktake.detail","stocktake.scan","stocktake.set_counted","stocktake.close"}
-    def __init__(self,db_path): self.runner=TransactionRunner(db_path,connection_context=db_conn)
-    def invoke(self,action,payload=None):
-        payload={} if payload is None else payload
-        if action not in self.ACTIONS or not isinstance(payload,Mapping): raise ValidationError("不支援的盤點操作")
+    ERROR_MESSAGE="不支援的盤點操作"
+    def _prepare_payload(self,action,payload):
         _validate(action,payload)
-        def work(conn):
-            s=StocktakeService(StocktakeRepository(conn))
-            if action=="stocktake.create": return s.create(payload.get("operator"),payload.get("note"))
-            if action=="stocktake.list": return s.list()
-            if action=="stocktake.detail": return s.detail(payload["session_id"])
-            if action=="stocktake.scan": return s.scan(payload["session_id"],payload["variant_id"],payload["qty"])
-            if action=="stocktake.set_counted": return s.set_counted(payload["session_id"],payload["variant_id"],payload["counted_qty"])
-            return s.close(payload["session_id"])
-        return self.runner.run(work)
+        return payload
+    def _dispatch(self,action,payload,conn):
+        s=StocktakeService(StocktakeRepository(conn))
+        if action=="stocktake.create": return s.create(payload.get("operator"),payload.get("note"))
+        if action=="stocktake.list": return s.list()
+        if action=="stocktake.detail": return s.detail(payload["session_id"])
+        if action=="stocktake.scan": return s.scan(payload["session_id"],payload["variant_id"],payload["qty"])
+        if action=="stocktake.set_counted": return s.set_counted(payload["session_id"],payload["variant_id"],payload["counted_qty"])
+        return s.close(payload["session_id"])

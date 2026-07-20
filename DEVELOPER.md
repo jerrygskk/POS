@@ -22,7 +22,6 @@ main.py → uvicorn(127.0.0.1:8737) → FastAPI app(api/create_app) → static/(
 | `lib/db.py` | `get_conn` / `db_conn`(context manager)/ `init_db`,純資料層(零框架依賴) |
 | `lib/db_schema.py` | 全部 DDL(唯一來源) |
 | `lib/db_seed.py` | 共用欄(商品描述/顏色)、付款方式種子 |
-| `lib/dbutil.py` | 會 raise HTTPException 的 DB helper(`require_exists`/`reject_if_referenced` 等) |
 | `lib/product_rules.py` | 共用商品規則(`FIELD_TYPES`、欄位型別驗證、自取碼取號) |
 | `lib/backup.py` | GFS 備份(日7/週4/月12) |
 | `api/__init__.py` | `create_app()`:掛 router、掛 static(含 `_static_dir()` 打包路徑) |

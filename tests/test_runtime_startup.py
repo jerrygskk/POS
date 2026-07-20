@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import main
 from lib.backup import run_auto_backup
-from lib.db import init_db
+from lib.db import get_conn, init_db
 from lib.runtime_paths import RuntimePaths
 
 
@@ -99,6 +99,14 @@ class StartupTest(unittest.TestCase):
 
 
 class DatabaseInitializationTest(unittest.TestCase):
+    def test_connections_wait_three_seconds_for_database_locks(self):
+        db_path = Path(tempfile.mkdtemp()) / "pos.db"
+        conn = get_conn(db_path)
+        try:
+            self.assertEqual(conn.execute("PRAGMA busy_timeout").fetchone()[0], 3000)
+        finally:
+            conn.close()
+
     def test_require_existing_does_not_create_database(self):
         db_path = Path(tempfile.mkdtemp()) / "pos.db"
         with self.assertRaises(FileNotFoundError):

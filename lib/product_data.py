@@ -12,6 +12,24 @@ VARIANT_NO_ISSUE = "NOT EXISTS (SELECT 1 FROM VariantIssue vi WHERE vi.variant_i
 EFFECTIVE_ACTIVE = "c.active=1 AND p.active=1 AND v.active=1 AND " + VARIANT_NO_ISSUE
 
 
+def variant_signature(conn, variant_id, feature_id):
+    """正式規格（排除特性詞條）與適用型號的持久化簽章。"""
+    signature = set()
+    for row in conn.execute(
+            "SELECT field_id, option_id, text_value FROM VariantAttribute "
+            "WHERE variant_id=?", (variant_id,)):
+        if feature_id is not None and row["field_id"] == feature_id:
+            continue
+        if row["option_id"] is not None:
+            signature.add((row["field_id"], "o", row["option_id"]))
+        elif (row["text_value"] or "").strip():
+            signature.add((row["field_id"], "t", row["text_value"]))
+    for row in conn.execute(
+            "SELECT model_id FROM VariantModel WHERE variant_id=?", (variant_id,)):
+        signature.add(("m", row["model_id"]))
+    return frozenset(signature)
+
+
 def set_variant_models(conn, variant_id, model_ids):
     try:
         conn.execute("DELETE FROM VariantModel WHERE variant_id=?", (variant_id,))

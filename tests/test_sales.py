@@ -1,8 +1,6 @@
 import unittest, datetime
-from unittest.mock import patch
 from base import ApiTestCase
 from lib.db import db_conn
-from api.sales import _build_sale_filters, _load_sale_rows
 
 class TestSales(ApiTestCase):
     def setUp(self):
@@ -72,22 +70,6 @@ class TestSales(ApiTestCase):
         self.assertEqual(s2["count"], 1)
         self.assertEqual(s2["total"], 1000)
 
-    def test_sale_filter_builder_uses_shared_boundaries_and_arguments(self):
-        sql, args = _build_sale_filters("2026-07-01", "2026-07-31", "?暸?")
-        self.assertEqual(
-            sql,
-            " AND date(s.ts)>=? AND date(s.ts)<=? AND s.payment=?",
-        )
-        self.assertEqual(args, ["2026-07-01", "2026-07-31", "?暸?"])
-
-    def test_sale_row_loader_returns_rows_and_display_data_together(self):
-        self._sale()
-        with db_conn(self.db) as conn:
-            rows, attrs, display = _load_sale_rows(conn, "", "", "")
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(attrs.get(rows[0]["variant_id"], {}), {})
-        self.assertEqual(display.get(rows[0]["variant_id"], ""), "")
-
     def test_summary_date_range_takes_precedence_over_legacy_date(self):
         self._sale()
         today = datetime.date.today().isoformat()
@@ -109,13 +91,6 @@ class TestSales(ApiTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("csv", r.headers["content-type"])
 
-    def test_export_csv_does_not_load_attributes(self):
-        self._sale()
-        with patch("api.sales.attrs_by_variant") as attrs:
-            r = self.c.get("/api/sales/export")
-        self.assertEqual(r.status_code, 200)
-        attrs.assert_not_called()
-
     def test_export_filters_by_payment(self):
         self._sale(payment="現金")
         self._sale(payment="刷卡")
@@ -124,3 +99,43 @@ class TestSales(ApiTestCase):
         content = r.content.decode("utf-8-sig")
         self.assertIn("現金", content)
         self.assertNotIn("刷卡", content)
+
+    def test_fixed_price_mismatch_is_rejected_without_writes(self):
+        with db_conn(self.db) as conn:
+            conn.execute("UPDATE Variant SET price=500 WHERE variant_id=?", (self.vid,))
+            conn.commit()
+        response = self._sale(items=[{
+            "variant_id": self.vid, "qty": 1, "unit_price": 499,
+        }])
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("售價與系統不符", response.text)
+        with db_conn(self.db) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM Sale").fetchone()[0], 0)
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM StockMovement WHERE kind='sale'").fetchone()[0], 0)
+
+    def test_null_price_accepts_manual_nonnegative_price(self):
+        response = self._sale(items=[{
+            "variant_id": self.vid, "qty": 1, "unit_price": 777,
+        }])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["total"], 777)
+
+    def test_insufficient_stock_counts_duplicate_variant_lines(self):
+        with db_conn(self.db) as conn:
+            conn.execute("DELETE FROM StockMovement WHERE variant_id=?", (self.vid,))
+            conn.execute(
+                "INSERT INTO StockMovement(variant_id,qty,kind) VALUES(?,2,'purchase')",
+                (self.vid,),
+            )
+            conn.commit()
+        for items in (
+            [{"variant_id": self.vid, "qty": 3, "unit_price": 500}],
+            [{"variant_id": self.vid, "qty": 2, "unit_price": 500},
+             {"variant_id": self.vid, "qty": 1, "unit_price": 500}],
+        ):
+            with self.subTest(items=items):
+                response = self._sale(items=items)
+                self.assertEqual(response.status_code, 422)
+                self.assertIn("庫存不足", response.text)
+        self.assertEqual(self.c.get(f"/api/stock/{self.vid}").json()["stock"], 2)

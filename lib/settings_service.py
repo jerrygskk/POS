@@ -1,9 +1,9 @@
 import sqlite3
 from collections.abc import Mapping
 
-from lib.application import TransactionRunner
+from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, NotFoundError, ValidationError
-from lib.db import db_conn, in_clause, next_sort
+from lib.db import in_clause, next_sort
 from lib.normalize import normalize_key
 from lib.product_rules import FIELD_TYPES
 
@@ -109,13 +109,7 @@ def _validate_action(action, payload):
                 raise ValidationError(f"欄位 fields.{key} 格式不正確")
 
 
-class SettingsRepository:
-    def __init__(self, connection):
-        self.connection = connection
-
-    def execute(self, sql, args=()):
-        return self.connection.execute(sql, args)
-
+class SettingsRepository(BaseRepository):
     def rows(self, sql, args=()):
         return [dict(row) for row in self.execute(sql, args)]
 
@@ -480,23 +474,26 @@ class SettingsService:
         return {"ok": True}
 
 
-class SettingsFacade:
-    def __init__(self, db_path): self.runner=TransactionRunner(db_path, connection_context=db_conn)
-    def invoke(self, action, payload=None):
-        payload = {} if payload is None else payload
+class SettingsFacade(BaseFacade):
+    ACTIONS = set(_ACTION_RULES)
+    ERROR_MESSAGE = "不支援的設定操作"
+    def _validate_payload_type(self, payload):
+        if not isinstance(payload, Mapping):
+            raise ValidationError("設定操作資料格式不正確")
+    def _prepare_payload(self, action, payload):
         _validate_action(action, payload)
-        def work(conn):
-            s=SettingsService(SettingsRepository(conn)); parts=action.split("."); kind=parts[0]; op=parts[1] if len(parts)==2 else ""
-            simple={"categories":"categories","brands":"brands","phone_brands":"phone_brands"}
-            if kind in simple and op in {"list","create","update","delete","sort"}:
-                if kind=="brands" and op=="list": return s.list_brands(bool(payload.get("all")),payload.get("category_id"))
-                if op=="list": return s.simple_list(simple[kind],bool(payload.get("all")))
-                if op=="create": return s.simple_create(simple[kind],payload)
-                if op=="update": return s.simple_update(simple[kind],payload["id"],payload.get("fields",{}))
-                if op=="delete": return s.simple_delete(simple[kind],payload["id"])
-                return s.resort(simple[kind],payload["ids"])
-            handlers={
+        return payload
+    def _dispatch(self, action, payload, conn):
+        s=SettingsService(SettingsRepository(conn)); parts=action.split("."); kind=parts[0]; op=parts[1] if len(parts)==2 else ""
+        simple={"categories":"categories","brands":"brands","phone_brands":"phone_brands"}
+        if kind in simple and op in {"list","create","update","delete","sort"}:
+            if kind=="brands" and op=="list": return s.list_brands(bool(payload.get("all")),payload.get("category_id"))
+            if op=="list": return s.simple_list(simple[kind],bool(payload.get("all")))
+            if op=="create": return s.simple_create(simple[kind],payload)
+            if op=="update": return s.simple_update(simple[kind],payload["id"],payload.get("fields",{}))
+            if op=="delete": return s.simple_delete(simple[kind],payload["id"])
+            return s.resort(simple[kind],payload["ids"])
+        handlers={
                 "brands.set_categories":lambda:s.set_brand_categories(payload["id"],payload.get("category_ids",[])),"models.list":lambda:s.list_models(bool(payload.get("all")),payload.get("phone_brand_id")),"models.create":lambda:s.create_model(payload),"models.update":lambda:s.update_model(payload["id"],payload.get("fields",{})),"models.delete":lambda:s.delete_model(payload["id"]),"models.sort":lambda:s.resort("models",payload["ids"]),"fields.list":lambda:s.list_fields(payload.get("category_id"),bool(payload.get("common"))),"fields.create":lambda:s.create_field(payload),"fields.update":lambda:s.update_field(payload["id"],payload.get("fields",{})),"options.list":lambda:s.list_options(payload["field_id"],bool(payload.get("all")),payload.get("model_ids",[])),"options.create":lambda:s.create_option(payload),"options.update":lambda:s.update_option(payload["id"],payload.get("fields",{})),"options.delete":lambda:s.delete_option(payload["id"]),"options.cleanup":lambda:s.cleanup_options(payload.get("field_id")),"options.models":lambda:s.option_models(payload["id"]),"options.set_models":lambda:s.set_option_models(payload["id"],payload.get("model_ids",[])),"categories.fields":lambda:s.category_fields(payload["id"]),"categories.set_common_fields":lambda:s.set_category_common_fields(payload["id"],payload.get("field_ids",[])),"categories.set_field":lambda:s.set_field(payload["category_id"],payload["field_id"],payload.get("fields",{})),}
-            if action not in handlers: raise ValidationError("不支援的設定操作")
-            return handlers[action]()
-        return self.runner.run(work)
+        if action not in handlers: raise ValidationError("不支援的設定操作")
+        return handlers[action]()

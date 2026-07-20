@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from lib.application_errors import ApplicationError, ConflictError, NotFoundError
+from api.error_mapping import application_error_response
+from lib.application_errors import ApplicationError
 from lib.settings_service import SettingsFacade
 
 router = APIRouter(prefix="/api")
@@ -28,8 +29,8 @@ class CategoryFieldPatch(BaseModel):
 def _call(request, action, payload=None):
     try: return SettingsFacade(request.app.state.db_path).invoke(action, payload or {})
     except ApplicationError as exc:
-        status = 404 if isinstance(exc, NotFoundError) else 409 if isinstance(exc, ConflictError) else 422
-        raise HTTPException(status, exc.message) from exc
+        status, message = application_error_response(exc)
+        raise HTTPException(status, message) from exc
 
 def _register_simple(path, action, new_model, patch_model):
     async def list_items(request: Request, all: int = 0): return _call(request, action+".list", {"all":all})

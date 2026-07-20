@@ -9,7 +9,7 @@ C 規則重複判定(批內互查＋對 DB)→ 建新選項／重新啟用停用
 from lib.application_errors import NotFoundError, ValidationError
 from lib.db import next_sort
 from lib.normalize import normalize_display, normalize_key
-from lib.product_data import FEATURE_FIELD_KEY
+from lib.product_data import FEATURE_FIELD_KEY, variant_signature
 from lib.product_rules import next_store_barcode
 
 
@@ -169,20 +169,7 @@ class VariantBatchService:
             "SELECT variant_id FROM Variant WHERE product_id=?", (product_id,))]
         out = {}
         for vid in vids:
-            sig = set()
-            for r in self.conn.execute(
-                    "SELECT field_id, option_id, text_value FROM VariantAttribute "
-                    "WHERE variant_id=?", (vid,)):
-                if feature_id is not None and r["field_id"] == feature_id:
-                    continue
-                if r["option_id"] is not None:
-                    sig.add((r["field_id"], "o", r["option_id"]))
-                else:
-                    sig.add((r["field_id"], "t", r["text_value"]))
-            for r in self.conn.execute(
-                    "SELECT model_id FROM VariantModel WHERE variant_id=?", (vid,)):
-                sig.add(("m", r["model_id"]))
-            out[frozenset(sig)] = vid
+            out[variant_signature(self.conn, vid, feature_id)] = vid
         return out
 
     # ---- 主流程 ----

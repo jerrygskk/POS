@@ -90,6 +90,7 @@ class TestProductLayers(ConnTestCase):
             "variants": [{"barcodes": [{}, {"barcode": "DUP"}]}],
         })
         self.assertFalse(failed["ok"])
+        self.assertEqual(failed["error"]["code"], "conflict")
         made = self.facade.invoke("products.create", {
             "name": "After", "category_id": self.category_id,
             "variants": [{"barcodes": [{}]}],
@@ -99,6 +100,17 @@ class TestProductLayers(ConnTestCase):
         self.assertEqual(code, "TL100000001")
         self.assertIsNone(conn.execute("SELECT 1 FROM Product WHERE name='Rollback'").fetchone())
         conn.close()
+
+    def test_duplicate_existing_barcode_is_conflict(self):
+        made = self.facade.invoke("products.create", {
+            "name": "Seed", "category_id": self.category_id,
+            "variants": [{"barcodes": [{"barcode": "DUP-EXISTING", "source": "factory"}]}],
+        })
+        result = self.bridge.invoke("barcodes.add", {
+            "variant_id": made["variant_ids"][0],
+            "barcode": "DUP-EXISTING", "source": "factory",
+        })
+        self.assertEqual(result["error"]["code"], "conflict")
 
     def test_delete_guards_and_missing_entities_have_stable_codes(self):
         made = self.facade.invoke("products.create", {

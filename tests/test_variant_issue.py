@@ -44,6 +44,32 @@ class VariantIssueTests(ConnTestCase):
         finally:
             conn.close()
 
+    def test_issue_and_batch_services_share_whitespace_signature_rules(self):
+        conn = self._fresh()
+        try:
+            text_fid = conn.execute(
+                "INSERT INTO AttributeField(name,field_type) VALUES('備註規格','text')"
+            ).lastrowid
+            blank_fid = conn.execute(
+                "INSERT INTO AttributeField(name,field_type) VALUES('空白規格','text')"
+            ).lastrowid
+            vid = conn.execute("INSERT INTO Variant(product_id) VALUES(?)", (self.pid,)).lastrowid
+            conn.execute(
+                "INSERT INTO VariantAttribute(variant_id,field_id,text_value) VALUES(?,?,?)",
+                (vid, text_fid, "  保留空白  "),
+            )
+            conn.execute(
+                "INSERT INTO VariantAttribute(variant_id,field_id,text_value) VALUES(?,?,?)",
+                (vid, blank_fid, "   "),
+            )
+            issue_signature = VariantIssueService(conn)._signature(vid, None)
+            batch_signatures = VariantBatchService(conn)._existing_signatures(self.pid, None)
+            self.assertEqual(batch_signatures, {issue_signature: vid})
+            self.assertIn((text_fid, "t", "  保留空白  "), issue_signature)
+            self.assertFalse(any(part[0] == blank_fid for part in issue_signature))
+        finally:
+            conn.close()
+
     def _issues(self, conn, vid):
         return conn.execute("SELECT issue_type,field_id,source_value,related_variant_id "
                             "FROM VariantIssue WHERE variant_id=? ORDER BY issue_id", (vid,)).fetchall()

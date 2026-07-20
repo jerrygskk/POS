@@ -9,6 +9,7 @@ def get_conn(db_path):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=3000")
     return conn
 
 
@@ -22,7 +23,7 @@ def db_conn(db_path):
         conn.close()
 
 
-# ---- 共用查詢 helper(純資料層,零框架依賴;會 raise HTTP 的移至 lib.dbutil)----
+# ---- 共用查詢 helper（純資料層、零框架依賴）----
 
 def in_clause(ids):
     """回傳 IN 子句佔位字串,如 [1,2,3] → "?,?,?"。"""
@@ -81,6 +82,10 @@ def init_db(db_path, require_existing=False):
         else:
             _run_migrations(conn)
         db_seed.seed(conn)
+        violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            tables = ", ".join(sorted({row[0] for row in violations}))
+            raise RuntimeError(f"資料庫外鍵檢查失敗：{tables}")
         conn.commit()
     except Exception:
         conn.rollback()

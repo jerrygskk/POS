@@ -1,10 +1,10 @@
 from collections.abc import Mapping
 
-from lib.application import TransactionRunner
+from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, NotFoundError, ValidationError
-from lib.db import db_conn, in_clause, next_sort
+from lib.db import in_clause, next_sort
 from lib.normalize import normalize_display, normalize_key
-from lib.product_rules import next_store_barcode
+from lib.product_rules import allow_keys as _allow, is_int as _is_int, next_store_barcode
 from lib import product_data
 
 
@@ -12,10 +12,6 @@ def _update_by_id(conn, table, id_col, item_id, fields):
     if fields:
         conn.execute(f"UPDATE {table} SET " + ",".join(f"{key}=?" for key in fields) +
                      f" WHERE {id_col}=?", (*fields.values(), item_id))
-
-
-def _is_int(value):
-    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _mapping(value, name):
@@ -27,12 +23,6 @@ def _mapping(value, name):
 def _int_list(value, name):
     if not isinstance(value, list) or any(not _is_int(item) for item in value):
         raise ValidationError(f"{name} 格式不正確")
-
-
-def _allow(payload, allowed):
-    unknown = set(payload) - set(allowed)
-    if unknown:
-        raise ValidationError(f"不支援的欄位：{sorted(unknown)[0]}")
 
 
 def _validate_barcode(value):
@@ -130,19 +120,7 @@ def _validate_action_payload(action, payload):
         if not isinstance(payload.get("code"),str):raise ValidationError("條碼格式不正確")
 
 
-class ProductRepository:
-    def __init__(self, connection):
-        self.connection = connection
-
-    def one(self, sql, args=()):
-        return self.connection.execute(sql, args).fetchone()
-
-    def all(self, sql, args=()):
-        return self.connection.execute(sql, args).fetchall()
-
-    def execute(self, sql, args=()):
-        return self.connection.execute(sql, args)
-
+class ProductRepository(BaseRepository):
     def require_active_category(self, category_id):
         row = self.one("SELECT active FROM Category WHERE category_id=?", (category_id,))
         if row is None or not row["active"]:
@@ -234,6 +212,8 @@ class ProductService:
         if code and code.strip().upper().startswith("TL"):
             raise ValidationError("TL 開頭條碼僅供系統自動產生")
         code = code or next_store_barcode(self.repo.connection)
+        if self.repo.one("SELECT 1 FROM Barcode WHERE barcode=?", (code,)):
+            raise ConflictError("此條碼已存在")
         self.repo.execute("INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",
                           (code, variant_id, payload.get("source", "store")))
         return {"barcode": code}
@@ -371,40 +351,37 @@ class ProductService:
         return {"ok": True}
 
 
-class ProductFacade:
+class ProductFacade(BaseFacade):
     ACTIONS = {"products.create", "products.list", "catalog.list", "products.update", "products.delete",
                "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.delete",
                "variants.batch_create", "variants.field_usage", "variants.activate", "variants.issues",
                "barcodes.scan", "barcodes.add", "barcodes.delete"}
 
-    def __init__(self, db_path):
-        self.runner = TransactionRunner(db_path, connection_context=db_conn)
+    ERROR_MESSAGE = "不支援的商品操作"
 
-    def invoke(self, action, payload=None):
-        payload = {} if payload is None else payload
-        if action not in self.ACTIONS or not isinstance(payload, Mapping): raise ValidationError("不支援的商品操作")
+    def _prepare_payload(self, action, payload):
         _validate_action_payload(action, payload)
+        return payload
 
-        def work(connection):
-            s = ProductService(ProductRepository(connection))
-            if action == "products.create": return s.create(payload)
-            if action == "products.list": return s.search(payload)
-            if action == "catalog.list": return s.catalog(payload)
-            if action == "products.update": return s.update_product(payload["id"], payload.get("fields", {}))
-            if action == "products.delete": return s.delete_product(payload["id"])
-            if action == "variants.create": return s.add_variant(payload["product_id"], payload.get("fields", payload))
-            if action == "variants.update": return s.update_variant(payload["id"], payload.get("fields", {}))
-            if action == "variants.set_models": return s.update_variant(payload["id"], {}, payload.get("model_ids", []))
-            if action == "variants.update_details": return s.update_variant(payload["id"], payload.get("fields", {}), payload.get("model_ids", []))
-            if action == "variants.delete": return s.delete_variant(payload["id"])
-            if action == "variants.activate": return s.activate_variant(payload["id"])
-            if action == "variants.issues": return s.list_issues()
-            if action == "variants.batch_create":
-                from lib.variant_batch_service import VariantBatchService
-                return VariantBatchService(connection).batch_create(payload)
-            if action == "variants.field_usage":
-                return product_data.option_usage_in_category(connection, payload["field_id"], payload["category_id"])
-            if action == "barcodes.scan": return s.scan(payload["code"])
-            if action == "barcodes.delete": return s.delete_barcode(payload["code"])
-            return s.add_barcode(payload)
-        return self.runner.run(work)
+    def _dispatch(self, action, payload, connection):
+        s = ProductService(ProductRepository(connection))
+        if action == "products.create": return s.create(payload)
+        if action == "products.list": return s.search(payload)
+        if action == "catalog.list": return s.catalog(payload)
+        if action == "products.update": return s.update_product(payload["id"], payload.get("fields", {}))
+        if action == "products.delete": return s.delete_product(payload["id"])
+        if action == "variants.create": return s.add_variant(payload["product_id"], payload.get("fields", payload))
+        if action == "variants.update": return s.update_variant(payload["id"], payload.get("fields", {}))
+        if action == "variants.set_models": return s.update_variant(payload["id"], {}, payload.get("model_ids", []))
+        if action == "variants.update_details": return s.update_variant(payload["id"], payload.get("fields", {}), payload.get("model_ids", []))
+        if action == "variants.delete": return s.delete_variant(payload["id"])
+        if action == "variants.activate": return s.activate_variant(payload["id"])
+        if action == "variants.issues": return s.list_issues()
+        if action == "variants.batch_create":
+            from lib.variant_batch_service import VariantBatchService
+            return VariantBatchService(connection).batch_create(payload)
+        if action == "variants.field_usage":
+            return product_data.option_usage_in_category(connection, payload["field_id"], payload["category_id"])
+        if action == "barcodes.scan": return s.scan(payload["code"])
+        if action == "barcodes.delete": return s.delete_barcode(payload["code"])
+        return s.add_barcode(payload)

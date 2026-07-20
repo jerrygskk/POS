@@ -1,6 +1,8 @@
 import unittest
 from base import ApiTestCase
-from lib.product_rules import FIELD_TYPES, check_field_type, next_store_barcode
+from lib.product_rules import (
+    FIELD_TYPES, allow_keys, check_field_type, is_int, next_store_barcode,
+)
 from lib.application_errors import ValidationError
 from base import ConnTestCase
 
@@ -26,6 +28,13 @@ class TestProductRules(ConnTestCase):
         with self.assertRaises(ValidationError) as ctx:
             check_field_type("number")
         self.assertEqual(ctx.exception.code, "validation_error")
+
+    def test_shared_payload_primitives_reject_boolean_and_unknown_keys(self):
+        self.assertTrue(is_int(1))
+        self.assertFalse(is_int(True))
+        allow_keys({"name": "商品"}, {"name"}, "不支援的欄位")
+        with self.assertRaisesRegex(ValidationError, "不支援的欄位"):
+            allow_keys({"extra": 1}, {"name"}, "不支援的欄位")
 
 class TestProducts(ApiTestCase):
     def setUp(self):

@@ -19,6 +19,10 @@ class SalesLayersTest(unittest.TestCase):
             pid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             conn.execute("INSERT INTO Variant(product_id,price,active) VALUES(?,500,1)", (pid,))
             self.vid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.execute(
+                "INSERT INTO StockMovement(variant_id,qty,kind) VALUES(?,20,'purchase')",
+                (self.vid,),
+            )
             conn.commit()
         self.facade = SalesFacade(self.db)
 
@@ -39,7 +43,7 @@ class SalesLayersTest(unittest.TestCase):
         self.assertEqual(self.facade.invoke("sales.summary", {})["total"], 900)
         with db_conn(self.db) as conn:
             stock = conn.execute("SELECT SUM(qty) FROM StockMovement WHERE variant_id=?", (self.vid,)).fetchone()[0]
-        self.assertEqual(stock, -2)
+        self.assertEqual(stock, 18)
 
     def test_malformed_nested_payload_has_no_write(self):
         bad_values = [True, "2", 1.5]

@@ -6,6 +6,16 @@ from lib.application_errors import ValidationError
 FIELD_TYPES = {"select", "text", "multi", "tags"}
 
 
+def is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def allow_keys(payload, allowed, message="不支援的欄位：{field}"):
+    unknown = set(payload) - set(allowed)
+    if unknown:
+        raise ValidationError(message.format(field=sorted(unknown)[0]))
+
+
 def check_field_type(field_type):
     if field_type not in FIELD_TYPES:
         raise ValidationError("欄位類型不合法")

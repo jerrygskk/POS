@@ -9,6 +9,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import base  # noqa: F401  確保 sys.path 有專案根
 from lib import db_schema
@@ -499,6 +500,45 @@ class TestUpgradedMatchesFresh(unittest.TestCase):
         finally:
             cu.close()
             cf.close()
+
+
+class TestMigrationFinalForeignKeyProtection(unittest.TestCase):
+    def test_reopening_upgraded_database_is_idempotent_and_keeps_foreign_keys_enabled(self):
+        db = _new_v6_db()
+        init_db(db)
+        conn = get_conn(db)
+        before = {
+            table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("Category", "AttributeField", "Setting")
+        }
+        conn.close()
+
+        init_db(db)
+
+        conn = get_conn(db)
+        try:
+            after = {
+                table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in before
+            }
+            self.assertEqual(before, after)
+            self.assertEqual(conn.execute(
+                "SELECT value FROM Setting WHERE key='schema_version'").fetchone()[0], "13")
+            self.assertEqual(conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)
+            self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+        finally:
+            conn.close()
+
+    def test_migration_rolls_back_when_seed_leaves_foreign_key_violation(self):
+        db = _new_v6_db()
+
+        def invalid_seed(conn):
+            conn.execute("INSERT INTO Barcode(barcode, variant_id, source) VALUES(?,?,?)",
+                         ("BROKEN", 999999, "factory"))
+
+        with patch("lib.db.db_seed.seed", side_effect=invalid_seed):
+            with self.assertRaisesRegex(RuntimeError, "Barcode"):
+                init_db(db)
 
 
 if __name__ == "__main__":

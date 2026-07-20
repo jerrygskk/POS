@@ -55,7 +55,10 @@ window.PosPages["page-settings"] = {
       return this.brands.some(b => (b.name || "").trim().toLowerCase() === q);
     },
   },
-  async mounted() { await this.reloadAll(); },
+  async mounted() {
+    this._loadSeq = 0;
+    await this.reloadAll();
+  },
   methods: {
     async reloadAll() {
       await this.guard(async () => {
@@ -86,14 +89,19 @@ window.PosPages["page-settings"] = {
       await this.guard(() => this.loadCategoryDetail());
     },
     async loadCategoryDetail() {
+      const seq = ++this._loadSeq;
       const cid = this.selCatId;
-      this.tplFields = await API.listFields({ category_id: cid });
-      this.tplOptions = {};
-      for (const f of this.tplFields)
+      const fields = await API.listFields({ category_id: cid });
+      const options = {};
+      for (const f of fields)
         if (["select", "multi", "tags"].includes(f.field_type))
-          this.tplOptions[f.field_id] = await API.listOptions({ field_id: f.field_id, all: 1 });
-      this.bigProducts = await API.listCatalog({ category_id: cid, include_inactive: true });
-      this.catHasVariant = this.bigProducts.some(p => (p.variants || []).length > 0);
+          options[f.field_id] = await API.listOptions({ field_id: f.field_id, all: 1 });
+      const products = await API.listCatalog({ category_id: cid, include_inactive: true });
+      if (seq !== this._loadSeq) return;
+      this.tplFields = fields;
+      this.tplOptions = options;
+      this.bigProducts = products;
+      this.catHasVariant = products.some(p => (p.variants || []).length > 0);
     },
     async addCategory() {
       const name = (this.newCatName || "").trim();
@@ -169,11 +177,11 @@ window.PosPages["page-settings"] = {
           const r = await API.createField({ name, category_id: this.selCatId, field_type: p.field_type });
           fid = r.field_id;
         } else {
-          if (name !== this.tplFields.find(f => f.field_id === fid).name)
-            await API.updateField(fid, { name });
           const cur = this.tplFields.find(f => f.field_id === fid);
-          if (p.field_type !== cur.field_type)
-            await API.updateField(fid, { field_type: p.field_type });
+          const patch = {};
+          if (name !== cur.name) patch.name = name;
+          if (p.field_type !== cur.field_type) patch.field_type = p.field_type;
+          if (Object.keys(patch).length) await API.updateField(fid, patch);
         }
         const setFields = { sort: parseInt(p.sort, 10) || 0, active: p.active ? 1 : 0 };
         if (!this.catHasVariant) setFields.required = p.required ? 1 : 0;

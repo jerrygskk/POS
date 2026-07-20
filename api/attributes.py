@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
-from lib.application_errors import ApplicationError, ConflictError, NotFoundError
+from api.error_mapping import application_error_response
+from lib.application_errors import ApplicationError
 from lib.settings_service import SettingsFacade
 
 router=APIRouter(prefix="/api")
@@ -12,8 +13,8 @@ class OptionModelList(BaseModel): model_ids:list[int]=[]
 def _call(request,action,payload=None):
     try:return SettingsFacade(request.app.state.db_path).invoke(action,payload or {})
     except ApplicationError as exc:
-        status=404 if isinstance(exc,NotFoundError) else 409 if isinstance(exc,ConflictError) else 422
-        raise HTTPException(status,exc.message) from exc
+        status,message=application_error_response(exc)
+        raise HTTPException(status,message) from exc
 @router.get("/fields")
 def fields(request:Request,category_id:int|None=None,common:int=0):return _call(request,"fields.list",{"category_id":category_id,"common":common})
 @router.post("/fields")

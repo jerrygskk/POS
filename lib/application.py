@@ -1,10 +1,11 @@
 import sqlite3
+from collections.abc import Mapping
 
 from lib.db import db_conn
-from lib.application_errors import DatabaseError
+from lib.application_errors import DatabaseError, ValidationError
 
 
-class Repository:
+class BaseRepository:
     """使用外部注入的連線執行 SQL；交易提交由 Service 邊界負責。"""
 
     def __init__(self, connection):
@@ -13,8 +14,11 @@ class Repository:
     def execute(self, sql, parameters=()):
         return self.connection.execute(sql, parameters)
 
-    def fetch_one(self, sql, parameters=()):
+    def one(self, sql, parameters=()):
         return self.execute(sql, parameters).fetchone()
+
+    def all(self, sql, parameters=()):
+        return self.execute(sql, parameters).fetchall()
 
 
 class TransactionRunner:
@@ -50,13 +54,28 @@ class TransactionRunner:
                 pass
 
 
-class ApplicationFacade:
-    """提供畫面層可共用的交易式應用操作入口。"""
+class BaseFacade:
+    """統一驗證應用操作邊界，並在單一交易內分派領域操作。"""
 
-    def __init__(self, transaction_runner):
-        self.transaction_runner = transaction_runner
+    ACTIONS = set()
+    ERROR_MESSAGE = "不支援的操作"
 
-    def execute(self, operation):
-        return self.transaction_runner.run(
-            lambda connection: operation(Repository(connection))
+    def __init__(self, db_path):
+        self.runner = TransactionRunner(db_path, connection_context=db_conn)
+
+    def invoke(self, action, payload=None):
+        payload = {} if payload is None else payload
+        if not isinstance(action, str) or action not in self.ACTIONS:
+            raise ValidationError(self.ERROR_MESSAGE)
+        self._validate_payload_type(payload)
+        payload = self._prepare_payload(action, payload)
+        return self.runner.run(
+            lambda connection: self._dispatch(action, payload, connection)
         )
+
+    def _prepare_payload(self, action, payload):
+        return payload
+
+    def _validate_payload_type(self, payload):
+        if not isinstance(payload, Mapping):
+            raise ValidationError(self.ERROR_MESSAGE)

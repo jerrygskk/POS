@@ -3,7 +3,10 @@ import json
 import subprocess
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from base import make_client
+from lib.application_errors import DatabaseError
 from lib.db import db_conn, init_db
 from lib.desktop_bridge import DesktopBridge
 from lib.settings_service import SettingsFacade
@@ -128,6 +131,37 @@ class SettingsLayersTests(unittest.TestCase):
                 result = self.bridge.invoke(action, {"id": 1, "fields": fields})
                 self.assertEqual("validation_error", result["error"]["code"])
 
+    def test_field_name_and_type_update_is_atomic(self):
+        field_id = self.facade.invoke(
+            "fields.create", {"name": "原欄位", "field_type": "select"}
+        )["field_id"]
+        self.facade.invoke("fields.update", {
+            "id": field_id,
+            "fields": {"name": "新欄位", "field_type": "text"},
+        })
+        with db_conn(self.db) as conn:
+            row = conn.execute(
+                "SELECT name,field_type FROM AttributeField WHERE field_id=?", (field_id,)
+            ).fetchone()
+        self.assertEqual(tuple(row), ("新欄位", "text"))
+
+        result = self.bridge.invoke("fields.update", {
+            "id": field_id,
+            "fields": {"name": "不應套用", "field_type": "invalid"},
+        })
+        self.assertEqual(result["error"]["code"], "validation_error")
+        with db_conn(self.db) as conn:
+            row = conn.execute(
+                "SELECT name,field_type FROM AttributeField WHERE field_id=?", (field_id,)
+            ).fetchone()
+        self.assertEqual(tuple(row), ("新欄位", "text"))
+
+    def test_settings_frontend_guards_category_load_and_combines_field_patch(self):
+        source = (Path(__file__).parents[1] / "static/js/settings.js").read_text(encoding="utf-8")
+        self.assertIn("const seq = ++this._loadSeq", source)
+        self.assertIn("if (seq !== this._loadSeq) return", source)
+        self.assertIn("await API.updateField(fid, patch)", source)
+
     def test_category_reference_guard_is_in_service(self):
         cid = self.facade.invoke("categories.create", {"name": "殼"})["category_id"]
         with db_conn(self.db) as conn:
@@ -197,6 +231,17 @@ Promise.all(codes.map(async code => {
         self.assertEqual(500, rows["database_error"]["status"])
         self.assertEqual(500, rows["internal_error"]["status"])
         self.assertEqual({"field": "x"}, rows["conflict"]["details"])
+
+    def test_settings_http_endpoints_mask_database_errors_as_500(self):
+        client = make_client(self.db)
+        for module, path in (("api.attributes.SettingsFacade", "/api/fields"),
+                             ("api.catalog.SettingsFacade", "/api/categories")):
+            with self.subTest(path=path), patch(module) as facade_type:
+                facade_type.return_value.invoke.side_effect = DatabaseError("SQL SECRET")
+                response = client.get(path)
+                self.assertEqual(response.status_code, 500)
+                self.assertEqual(response.json()["detail"], DatabaseError.default_message)
+                self.assertNotIn("SQL SECRET", response.text)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,8 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from lib.application_errors import (
-    ConflictError, DatabaseError, InternalError, NotFoundError, ValidationError,
-)
+from api.error_mapping import application_error_response
+from lib.application_errors import ApplicationError
 from lib.stock_service import StockFacade
 
 router = APIRouter(prefix="/api")
@@ -18,9 +17,8 @@ class ReceiveIn(BaseModel):
 def _call(request, action, payload):
     try:
         return StockFacade(request.app.state.db_path).invoke(action, payload)
-    except (ValidationError, NotFoundError, ConflictError, DatabaseError, InternalError) as exc:
-        status = {ValidationError: 422, NotFoundError: 404, ConflictError: 409}.get(type(exc), 500)
-        message = exc.message if status < 500 else type(exc).default_message
+    except ApplicationError as exc:
+        status, message = application_error_response(exc)
         raise HTTPException(status, message) from exc
 
 

@@ -1,10 +1,8 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from lib.application_errors import (
-    ApplicationError, ConflictError, DatabaseError, InternalError, NotFoundError,
-    ValidationError,
-)
+from api.error_mapping import application_error_response
+from lib.application_errors import ApplicationError
 from lib.product_service import ProductFacade
 
 router = APIRouter(prefix="/api")
@@ -62,18 +60,7 @@ def _call(request, action, payload=None):
     try:
         return _facade(request).invoke(action, payload or {})
     except ApplicationError as exc:
-        if isinstance(exc, ValidationError):
-            status, message = 422, exc.message
-        elif isinstance(exc, NotFoundError):
-            status, message = 404, exc.message
-        elif isinstance(exc, ConflictError):
-            status, message = 409, exc.message
-        elif isinstance(exc, DatabaseError):
-            status, message = 500, DatabaseError.default_message
-        elif isinstance(exc, InternalError):
-            status, message = 500, InternalError.default_message
-        else:
-            status, message = 500, InternalError.default_message
+        status, message = application_error_response(exc)
         raise HTTPException(status, message) from exc
 
 

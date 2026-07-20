@@ -5,13 +5,10 @@ from datetime import date as calendar_date
 from collections.abc import Mapping
 
 from lib import product_data
-from lib.application import TransactionRunner
+from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ValidationError
-from lib.db import db_conn
-
-
-def _is_int(value):
-    return isinstance(value, int) and not isinstance(value, bool)
+from lib.db import stock_map
+from lib.product_rules import is_int as _is_int
 
 
 def _strict_mapping(payload, allowed):
@@ -70,10 +67,7 @@ def _checkout_payload(payload):
             "paid": payload.get("paid", 0), "items": clean}
 
 
-class SalesRepository:
-    def __init__(self, connection):
-        self.connection = connection
-
+class SalesRepository(BaseRepository):
     def payments(self):
         row = self.connection.execute("SELECT value FROM Setting WHERE key='payments'").fetchone()
         return json.loads(row["value"]) if row else []
@@ -83,7 +77,8 @@ class SalesRepository:
         # AND 無未解決 VariantIssue
         return self.connection.execute(
             "SELECT (COALESCE(c.active,1) AND p.active AND v.active AND "
-            "NOT EXISTS(SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id)) ok "
+            "NOT EXISTS(SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id)) ok, "
+            "v.price, p.name "
             "FROM Variant v "
             "JOIN Product p ON v.product_id=p.product_id "
             "LEFT JOIN Category c ON p.category_id=c.category_id WHERE v.variant_id=?",
@@ -135,13 +130,26 @@ class SalesService:
     def checkout(self, body):
         if body["payment"] not in self.repo.payments():
             raise ValidationError("付款方式未在設定中")
-        total = sum(i["qty"] * i["unit_price"] - i["discount"] for i in body["items"]) - body["order_discount"]
-        if total < 0:
-            raise ValidationError("折扣後總額不可為負數")
+        required = {}
+        variant_rows = {}
         for item in body["items"]:
             row = self.repo.variant_is_active(item["variant_id"])
             if row is None or not row["ok"]:
                 raise ValidationError("商品已停用或不存在")
+            if row["price"] is not None and item["unit_price"] != row["price"]:
+                raise ValidationError("售價與系統不符，請重新掃描")
+            variant_rows[item["variant_id"]] = row
+            required[item["variant_id"]] = required.get(item["variant_id"], 0) + item["qty"]
+        available = stock_map(self.repo.connection, required)
+        for variant_id, qty in required.items():
+            if qty > available.get(variant_id, 0):
+                row = variant_rows[variant_id]
+                raise ValidationError(
+                    f"庫存不足：{row['name']}（剩 {available.get(variant_id, 0)} 件）"
+                )
+        total = sum(i["qty"] * i["unit_price"] - i["discount"] for i in body["items"]) - body["order_discount"]
+        if total < 0:
+            raise ValidationError("折扣後總額不可為負數")
         sale_id = self.repo.create_sale(body["payment"], body["order_discount"], total, body["paid"])
         for item in body["items"]:
             self.repo.add_item(sale_id, item)
@@ -180,28 +188,23 @@ class SalesService:
         return {"filename": "sales.csv", "content": "\ufeff" + buf.getvalue()}
 
 
-class SalesFacade:
+class SalesFacade(BaseFacade):
     ACTIONS = {"payments.list", "sales.checkout", "sales.list", "sales.summary", "sales.export"}
 
-    def __init__(self, db_path):
-        self.runner = TransactionRunner(db_path, connection_context=db_conn)
+    ERROR_MESSAGE = "銷售操作不正確"
 
-    def invoke(self, action, payload=None):
-        payload = {} if payload is None else payload
-        if action not in self.ACTIONS or not isinstance(payload, Mapping):
-            raise ValidationError("銷售操作不正確")
+    def _prepare_payload(self, action, payload):
         if action == "sales.checkout":
-            payload = _checkout_payload(payload)
-        elif action == "payments.list":
+            return _checkout_payload(payload)
+        if action == "payments.list":
             _strict_mapping(payload, set())
-        else:
-            payload = _filters(payload, legacy_date=action == "sales.summary")
+            return payload
+        return _filters(payload, legacy_date=action == "sales.summary")
 
-        def work(connection):
-            service = SalesService(SalesRepository(connection))
-            if action == "payments.list": return service.repo.payments()
-            if action == "sales.checkout": return service.checkout(payload)
-            if action == "sales.list": return service.list_sales(payload)
-            if action == "sales.summary": return service.summary(payload)
-            return service.export(payload)
-        return self.runner.run(work)
+    def _dispatch(self, action, payload, connection):
+        service = SalesService(SalesRepository(connection))
+        if action == "payments.list": return service.repo.payments()
+        if action == "sales.checkout": return service.checkout(payload)
+        if action == "sales.list": return service.list_sales(payload)
+        if action == "sales.summary": return service.summary(payload)
+        return service.export(payload)

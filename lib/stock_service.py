@@ -1,13 +1,9 @@
 from collections.abc import Mapping
 
 from lib import product_data
-from lib.application import TransactionRunner
+from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import NotFoundError, ValidationError
-from lib.db import db_conn
-
-
-def _is_int(value):
-    return isinstance(value, int) and not isinstance(value, bool)
+from lib.product_rules import is_int as _is_int
 
 
 def _validate_payload(action, payload):
@@ -24,10 +20,7 @@ def _validate_payload(action, payload):
             raise ValidationError("備註格式不正確")
 
 
-class StockRepository:
-    def __init__(self, connection):
-        self.connection = connection
-
+class StockRepository(BaseRepository):
     def require_variant(self, variant_id):
         row = self.connection.execute("SELECT 1 FROM Variant WHERE variant_id=?", (variant_id,)).fetchone()
         if row is None:
@@ -63,22 +56,17 @@ class StockService:
         }
 
 
-class StockFacade:
+class StockFacade(BaseFacade):
     ACTIONS = {"stock.receive", "stock.detail"}
 
-    def __init__(self, db_path):
-        self.runner = TransactionRunner(db_path, connection_context=db_conn)
+    ERROR_MESSAGE = "不支援的庫存操作"
 
-    def invoke(self, action, payload=None):
-        payload = {} if payload is None else payload
-        if action not in self.ACTIONS or not isinstance(payload, Mapping):
-            raise ValidationError("不支援的庫存操作")
+    def _prepare_payload(self, action, payload):
         _validate_payload(action, payload)
+        return payload
 
-        def work(connection):
-            service = StockService(StockRepository(connection))
-            if action == "stock.receive":
-                return service.receive(payload["variant_id"], payload["qty"], payload.get("note"))
-            return service.detail(payload["variant_id"])
-
-        return self.runner.run(work)
+    def _dispatch(self, action, payload, connection):
+        service = StockService(StockRepository(connection))
+        if action == "stock.receive":
+            return service.receive(payload["variant_id"], payload["qty"], payload.get("note"))
+        return service.detail(payload["variant_id"])
