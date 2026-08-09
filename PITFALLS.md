@@ -28,7 +28,3 @@
 - **PKG-2**: **打包版雙擊完全沒反應、連 log 都沒有** → onefile 開機先把整包解壓到 C 槽 `%TEMP%`（可達上百 MB），發生在任何程式碼執行之前（bootloader 階段），自家錯誤處理攔不到也留不下紀錄；排查時先確認 C 槽可用空間。
 - **PKG-3**: **清除指令靜默失敗** → 清除步驟用 PowerShell 語法；Git Bash 不識別 CMD 的 `del`/`rmdir`，指令可能靜默失敗。完整打包命令只以 DEVELOPER §4 為準。
 - **PKG-4**: **fresh clone build 失敗（缺 `version_info.txt`）** → 該檔不入庫，先跑一次 `python tools/bump_version.py {現版號}` 產出（DEVELOPER §5）。
-
-#### TEST：測試
-
-- **TEST-1**: **fresh clone 跑測試，`test_import_excel`／`test_import_rules` 失敗** → `tools/import_excel.py` 為一次性工具不入庫，兩支測試相依它，無此檔即失敗屬預期（DEVELOPER §3）；正式匯入驗收後一併移除。

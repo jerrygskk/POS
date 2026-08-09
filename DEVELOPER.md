@@ -37,7 +37,6 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `api/` | 暫留的 FastAPI 相容 adapter，供舊測試／相容用途；正式 runtime 不載入 |
 | `static/` | `index.html` + `css/pos.css` + `js/*.js`（Vue 3、DesktopBridge 包裝、各頁邏輯） |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
-| `tools/import_excel.py` | 一次性匯入舊 Excel 產品清單(**不入庫**,僅本地) |
 | `tests/` | 單元測試(`tests/base.py` 共用基底 `ApiTestCase`/`ConnTestCase` 與 fixture helper) |
 
 ## 2. 慣例
@@ -71,16 +70,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 python -m unittest discover -s tests
 ```
 
-目前 242 個測試,涵蓋 schema/migration、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、匯入規則(七類拆解/透明填補/括號補齊)等模組,檔名皆 `test_*.py`。
-
-### 匯入工具(`tools/import_excel.py`)規則補充
-
-> ⚠️ 此檔為一次性工具,**不入庫**(已 gitignore,僅存在本地);相依它的 `tests/test_import_excel.py`、`tests/test_import_rules.py` 於正式匯入驗收後一併移除。fresh clone 無此檔時該兩支測試會失敗,屬預期。
-
-- **鋼化玻璃複選欄名為「材質」**(常數 `GLASS_SPEC_FIELD`;非「規格」)。
-- **手機殼款式/顏色兩欄皆空**(空壓殼等透明殼)→ 款式自動填「透明」,避免無規格。
-- **規格類欄位補齊未閉合括號**(`close_unbalanced_parens`,套在 `select_attrs`):來源缺右括號(如「磁吸(附掛環扣」)自動補成「…環扣)」,全/半形皆處理。
-- 工具可重跑;現有 `data/pos.db` 上線前會依最新規則重匯。
+目前 368 個測試,涵蓋 schema/migration、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份等模組,檔名皆 `test_*.py`。
 
 ## 4. 打包
 

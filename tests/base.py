@@ -1,9 +1,8 @@
-"""tests 共用基底:client 型 / conn 型測試 setUp,及匯入測試共用 helper。
+"""tests 共用基底:client 型 / conn 型測試 setUp。
 
 - ApiTestCase:建 tmpdir + db + init_db + TestClient,供 self.c。
 - ConnTestCase:建 tmpdir + db + init_db + get_conn,供 self.conn(tearDown 關閉)。
 - make_client / create_product / make_category_with_field:建檔便捷方法。
-- raw_row:匯入測試組一列 Excel 原值 dict。
 """
 import os
 import sys
@@ -15,24 +14,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi.testclient import TestClient
 from lib.db import init_db, get_conn
 from api import create_app
-from tools.import_excel import (
-    COL_CODE, COL_CATEGORY, COL_BRAND, COL_SPEC, COL_DESC, COL_CAT1,
-    COL_CAT2, COL_PHONE_BRAND, COL_PHONE_MODEL, COL_NOTE,
-)
 
 
 def make_client(db):
     """建 TestClient(create_app(db))。"""
     return TestClient(create_app(db))
-
-
-def raw_row(**kw):
-    """組一列 Excel 原值 dict(未提供的欄為 None)。"""
-    base = {c: None for c in (
-        COL_CODE, COL_CATEGORY, COL_BRAND, COL_SPEC, COL_DESC, COL_CAT1,
-        COL_CAT2, COL_PHONE_BRAND, COL_PHONE_MODEL, COL_NOTE)}
-    base.update(kw)
-    return base
 
 
 class ApiTestCase(unittest.TestCase):
