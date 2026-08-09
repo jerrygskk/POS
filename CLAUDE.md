@@ -6,7 +6,7 @@
 
 ## 這是什麼
 
-- **技術棧**：Python + FastAPI + SQLite ＋ Vue 3 無建置前端（prod 版），pywebview 桌面殼；使用者為手機配件行店員
+- **技術棧**：Python + SQLite ＋ Vue 3 無建置前端（prod 版）＋ pywebview Desktop-only 桌面程式；FastAPI adapter 僅暫留供舊測試／相容用途，不是正式 runtime；使用者為手機配件行店員
 - **目標環境**：Windows；PyInstaller `--onefile` 打包
 - **文件分工**：`README.md`＝使用者門面；`DEVELOPER.md`＝技術文件（架構／慣例／測試／打包／版號／版本記錄）；`PITFALLS.md`＝踩雷速查表（症狀→解法）；`CLAUDE.md`＝協作規則（本檔）；`docs/handover.md`＝跨對話交接（不入庫）
 
@@ -45,7 +45,7 @@
 - ⚠️ **權限／存取控制是每個新功能必檢項**：「受限身分不可做」的操作，只靠停用按鈕不夠——雙擊、行內編輯、Enter、右鍵、拖拉等替代路徑會繞過。① **所有**進入點補 guard（用便捷判斷函式，勿字串比較）② 以受限身分逐路徑驗證 ③ 刪除、覆寫等破壞性操作若經確認視窗延後執行，實際執行前再次檢查權限與目標狀態。
 - **UI 文字正式**不口語（「儲存目前排序後繼續編輯？」而非「要存嗎？」）。
 - **UI 從簡是硬性要求**：不新增分頁、無巢狀對話框、逐層解鎖；「一排喔，不要搞成兩排（除非有操作）」。
-- **前端驗證用 preview 工具**（launch 名 `pos`，port 8737），不要用 Bash 起 server；css／js 有改就 bump `index.html` 的 `?v=`（css、全部 js 共用同一版號，一起 bump）。
+- **前端目視 preview 可用 HTTP 模擬工具**（launch 名 `pos`，port 8737），不要用 Bash 起 server；該模擬不是正式 runtime，最終行為驗證仍須跑真實 pywebview。css／js 有改就 bump `index.html` 的 `?v=`（css、全部 js 共用同一版號，一起 bump）。
 - ⚠️ PowerShell 5.1：多行 python 寫 scratchpad 檔再跑；中文輸出寫 UTF-8 檔再讀。
 
 ## C. 版本 / Git / 發布 / 打包
@@ -81,5 +81,5 @@
 ### 打包（PyInstaller）
 
 - 只用 onefile，不要問打包方式；每次砍掉舊 `build/`、`dist/`、spec 全新 build。
-- ⚠️ 勿跑 `tools/build.ps1`（Bypass 被權限分類器擋），直接跑等效 pyinstaller 指令（內容見 DEVELOPER §4）；清除步驟用 PowerShell 語法，勿在 Git Bash 用 CMD 的 `del`/`rmdir`。
+- ⚠️ 勿跑 `tools/build.ps1`（Bypass 被權限分類器擋）；`DEVELOPER.md` §4 是完整打包命令的唯一來源，直接依該節執行。清除步驟用 PowerShell 語法，勿在 Git Bash 用 CMD 的 `del`/`rmdir`。
 - 可直接本機執行 build，完成只回報成功/失敗（失敗才貼錯誤末段）。

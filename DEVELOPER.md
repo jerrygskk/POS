@@ -5,35 +5,38 @@
 ## 1. 架構
 
 ```
-main.py → uvicorn(127.0.0.1:8737) → FastAPI app(api/create_app) → static/(Vue 無建置前端)
-                                              │
-                                          lib/db.py(SQLite)
+main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) → 自動備份
+     → DesktopApplication → pywebview（本機 static/index.html）
+     → DesktopBridge → Facade → Service → Repository → SQLite
 ```
 
-啟動流程(`main.py`):確保 `data/` 目錄 → `lib.db.init_db` 建/補 schema →
-`lib.backup.run_auto_backup` 跑一次 GFS 備份 → 起 uvicorn → `webbrowser.open` 開瀏覽器。
+啟動流程（`main.py`）：以 `RuntimePaths.detect()` 決定路徑 →
+`lib.db.init_db(..., require_existing=True)` 驗證／升級既有 `pos.db` →
+`lib.backup.run_auto_backup` 跑一次 GFS 備份 → `DesktopApplication` 建立單一 pywebview 視窗，
+載入本機 `static/index.html` → 前端透過 `DesktopBridge` 呼叫 Facade／Service／Repository。正式 runtime 不啟動 HTTP server。
+
+開發環境的 `pos.db` 位於 `main.py` 同層；PyInstaller onefile 環境則位於 `POS.exe` 同層。
+正式啟動要求該資料庫已存在，不會自動建立全新空白 DB。開發環境的 `static/` 位於專案根目錄，
+打包後則由 `RuntimePaths` 指向 `sys._MEIPASS/static`。FastAPI adapter 暫留供舊測試與相容用途，不是正式 runtime。
 
 ### 檔案結構
 
 | 路徑 | 說明 |
 |---|---|
-| `main.py` | 進入點:備份→起 uvicorn→開瀏覽器 |
+| `main.py` | Desktop-only 進入點：偵測路徑→驗證／升級既有 DB→備份→啟動桌面視窗 |
+| `lib/runtime_paths.py` | 集中決定開發／onefile 的 DB、備份、錯誤記錄與 static 路徑 |
+| `lib/desktop_application.py` | 建立 pywebview 視窗，串接 `DesktopBridge` 與各 Facade |
+| `lib/desktop_bridge.py` | pywebview JS bridge：轉送 action、統一成功／錯誤 envelope、處理匯出存檔 |
 | `lib/version.py` | `VERSION` 字串 |
 | `lib/db.py` | `get_conn` / `db_conn`(context manager)/ `init_db`,純資料層(零框架依賴) |
 | `lib/db_schema.py` | 全部 DDL(唯一來源) |
 | `lib/db_seed.py` | 共用欄(商品描述/顏色)、付款方式種子 |
 | `lib/product_rules.py` | 共用商品規則(`FIELD_TYPES`、欄位型別驗證、自取碼取號) |
 | `lib/backup.py` | GFS 備份(日7/週4/月12) |
-| `api/__init__.py` | `create_app()`:掛 router、掛 static(含 `_static_dir()` 打包路徑) |
-| `api/attributes.py` | 屬性欄位/選單庫(含連動) |
-| `api/catalog.py` | 種類/廠牌/型號維護 |
-| `api/products.py` | 款/變體/條碼 CRUD、條碼查詢、店內條碼產生 |
-| `api/stock.py` | 進貨、庫存查詢 |
-| `api/sales.py` | 結帳、銷售紀錄、日結、CSV |
-| `api/stocktake.py` | 盤點單 |
-| `api/printing.py` | 條碼列印服務介面(stub) |
-| `static/` | `index.html` + `css/pos.css` + `js/*.js`(Vue 3、fetch 包裝、各頁邏輯) |
-| `tools/build.ps1` | PyInstaller 打包腳本 |
+| `lib/*_service.py` | 正式 Facade／Service／Repository 應用層與資料存取實作 |
+| `api/` | 暫留的 FastAPI 相容 adapter，供舊測試／相容用途；正式 runtime 不載入 |
+| `static/` | `index.html` + `css/pos.css` + `js/*.js`（Vue 3、DesktopBridge 包裝、各頁邏輯） |
+| `tools/build.ps1` | 暫留的舊 PyInstaller 打包腳本；不可執行，完整命令只以 §4 為準 |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
 | `tools/import_excel.py` | 一次性匯入舊 Excel 產品清單(**不入庫**,僅本地) |
 | `tests/` | 單元測試(`tests/base.py` 共用基底 `ApiTestCase`/`ConnTestCase` 與 fixture helper) |
@@ -85,14 +88,19 @@ python -m unittest discover -s tests
 ```powershell
 Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
 Remove-Item -Force POS.spec -ErrorAction SilentlyContinue
-pyinstaller --clean --onefile --name POS --icon "assets/POS.ico" --add-data "static;static" --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.lifespan.on --version-file version_info.txt main.py
+pyinstaller --clean --onefile --version-file version_info.txt --icon "assets/POS.ico" --name POS --add-data "static;static" main.py
 ```
 
-上列為標準打包指令:先清除舊 `build/`、`dist/`、`POS.spec`,再以 `--clean --onefile` 打包 static、版本資訊與 uvicorn hidden-import，並以 `assets/POS.ico` 作為執行檔圖示。`tools/build.ps1` 可供核對參數,實際打包不要執行該腳本。
+本節是完整打包命令的唯一真實來源。上列命令先清除舊 `build/`、`dist/`、`POS.spec`，
+再以 `--clean --onefile` 打包 static 與版本資訊，並以 `assets/POS.ico` 作為執行檔圖示；Desktop-only runtime 不需要 uvicorn hidden-import。
+`tools/build.ps1` 目前仍保留，但不是打包參數來源，也不要執行。
 
-產出 `dist/POS.exe`,雙擊即可執行,會在 exe 所在目錄自動建立 `data/`(含 `pos.db`、`backups/`)。
+產出 `dist/POS.exe`。執行前須將既有 `pos.db` 放在 exe 同層；備份寫入同層的 `backups/`。
 
-**`sys._MEIPASS` 雷**:PyInstaller onefile 模式執行時會把打包內容解壓至暫存目錄 `sys._MEIPASS`,原本用 `__file__` 推算的 `static/` 路徑在打包後會失效(該目錄不存在於暫存路徑下)。因此 `api/__init__.py` 新增 `_static_dir()`:`getattr(sys, "frozen", False)` 為真(即在 PyInstaller 環境執行)時改回傳 `os.path.join(sys._MEIPASS, "static")`,開發環境不受影響。
+**`sys._MEIPASS` 雷**：PyInstaller onefile 模式執行時會把打包資源解壓至暫存目錄 `sys._MEIPASS`；
+若仍以程式檔位置推算 `static/`，打包後會找不到前端。`RuntimePaths.detect()` 在 frozen 環境將
+`static_dir` 指向 `sys._MEIPASS/static`，`DesktopApplication` 再以該路徑載入本機 `index.html`；
+`pos.db`、`backups/` 與 `error.log` 則維持在 exe 同層，不放入暫存解壓目錄。
 
 ## 5. 版號控制
 
