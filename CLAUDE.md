@@ -81,5 +81,5 @@
 ### 打包（PyInstaller）
 
 - 只用 onefile，不要問打包方式；每次砍掉舊 `build/`、`dist/`、spec 全新 build。
-- ⚠️ 勿跑 `tools/build.ps1`（Bypass 被權限分類器擋）；`DEVELOPER.md` §4 是完整打包命令的唯一來源，直接依該節執行。清除步驟用 PowerShell 語法，勿在 Git Bash 用 CMD 的 `del`/`rmdir`。
+- ⚠️ `DEVELOPER.md` §4 是完整打包命令的唯一來源，直接依該節執行。
 - 可直接本機執行 build，完成只回報成功/失敗（失敗才貼錯誤末段）。

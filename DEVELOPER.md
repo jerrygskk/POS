@@ -36,7 +36,6 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `lib/*_service.py` | 正式 Facade／Service／Repository 應用層與資料存取實作 |
 | `api/` | 暫留的 FastAPI 相容 adapter，供舊測試／相容用途；正式 runtime 不載入 |
 | `static/` | `index.html` + `css/pos.css` + `js/*.js`（Vue 3、DesktopBridge 包裝、各頁邏輯） |
-| `tools/build.ps1` | 暫留的舊 PyInstaller 打包腳本；不可執行，完整命令只以 §4 為準 |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
 | `tools/import_excel.py` | 一次性匯入舊 Excel 產品清單(**不入庫**,僅本地) |
 | `tests/` | 單元測試(`tests/base.py` 共用基底 `ApiTestCase`/`ConnTestCase` 與 fixture helper) |
@@ -93,8 +92,6 @@ pyinstaller --clean --onefile --version-file version_info.txt --icon "assets/POS
 
 本節是完整打包命令的唯一真實來源。上列命令先清除舊 `build/`、`dist/`、`POS.spec`，
 再以 `--clean --onefile` 打包 static 與版本資訊，並以 `assets/POS.ico` 作為執行檔圖示；Desktop-only runtime 不需要 uvicorn hidden-import。
-`tools/build.ps1` 目前仍保留，但不是打包參數來源，也不要執行。
-
 產出 `dist/POS.exe`。執行前須將既有 `pos.db` 放在 exe 同層；備份寫入同層的 `backups/`。
 
 **`sys._MEIPASS` 雷**：PyInstaller onefile 模式執行時會把打包資源解壓至暫存目錄 `sys._MEIPASS`；

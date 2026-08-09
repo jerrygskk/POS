@@ -26,7 +26,7 @@
 
 - **PKG-1**: **打包後找不到 `static/index.html`／前端資源** → onefile 執行時將打包資源解壓至 `sys._MEIPASS`，不能用程式檔位置推算 static；正式 Desktop runtime 由 `RuntimePaths.detect()` 在 frozen 環境指向 `sys._MEIPASS/static`，`DesktopApplication` 再載入本機 `index.html`。新增打包資源比照處理（DEVELOPER §4）。
 - **PKG-2**: **打包版雙擊完全沒反應、連 log 都沒有** → onefile 開機先把整包解壓到 C 槽 `%TEMP%`（可達上百 MB），發生在任何程式碼執行之前（bootloader 階段），自家錯誤處理攔不到也留不下紀錄；排查時先確認 C 槽可用空間。
-- **PKG-3**: **`tools/build.ps1` 執行被擋／清除指令靜默失敗** → Bypass 被權限分類器擋；不要執行該腳本，完整打包命令只以 DEVELOPER §4 為準。清除步驟用 PowerShell 語法，Git Bash 不識別 CMD 的 `del`/`rmdir` 會靜默失敗。
+- **PKG-3**: **清除指令靜默失敗** → 清除步驟用 PowerShell 語法；Git Bash 不識別 CMD 的 `del`/`rmdir`，指令可能靜默失敗。完整打包命令只以 DEVELOPER §4 為準。
 - **PKG-4**: **fresh clone build 失敗（缺 `version_info.txt`）** → 該檔不入庫，先跑一次 `python tools/bump_version.py {現版號}` 產出（DEVELOPER §5）。
 
 #### TEST：測試
