@@ -1,321 +1,278 @@
-"""商品設定核心規格 A–F 新行為單元測試。
-
-涵蓋:種類 model_mode 與上層停用開關、種類模板 CategoryField CRUD、特性詞條固定欄、
-必填鎖定、欄型鎖定、§12.3 停用值差異驗證、effective_active 各入口、
-廠牌 inline 沿用/新建與刪除守門、刪空種類連鎖清理。
-"""
+"""Product-settings desktop action tests."""
 import unittest
 
-from base import ApiTestCase
+from base import FacadeTestCase
+from lib.application_errors import ConflictError, ValidationError
 from lib.db import get_conn
 
 
-class TestCategoryModelModeAndSwitch(ApiTestCase):
-    # A:model_mode 讀寫
+class TestCategoryModelModeAndSwitch(FacadeTestCase):
     def test_model_mode_read_write(self):
-        cid = self.c.post("/api/categories",
-                          json={"name": "手機殼", "model_mode": "required"}).json()["category_id"]
-        row = next(x for x in self.c.get("/api/categories").json() if x["category_id"] == cid)
+        category_id = self.invoke("categories.create", {
+            "name": "case", "model_mode": "required",
+        })["category_id"]
+        row = next(item for item in self.invoke("categories.list", {})
+                   if item["category_id"] == category_id)
         self.assertEqual(row["model_mode"], "required")
-        self.c.patch(f"/api/categories/{cid}", json={"model_mode": "hidden"})
-        row = next(x for x in self.c.get("/api/categories").json() if x["category_id"] == cid)
+        self.invoke("categories.update", {"id": category_id, "fields": {"model_mode": "hidden"}})
+        row = next(item for item in self.invoke("categories.list", {})
+                   if item["category_id"] == category_id)
         self.assertEqual(row["model_mode"], "hidden")
 
-    def test_model_mode_default_hidden_and_bad_value_422(self):
-        cid = self.c.post("/api/categories", json={"name": "充電線"}).json()["category_id"]
-        row = next(x for x in self.c.get("/api/categories").json() if x["category_id"] == cid)
+    def test_model_mode_defaults_hidden_and_rejects_bad_value(self):
+        category_id = self.create_category("cable")
+        row = next(item for item in self.invoke("categories.list", {})
+                   if item["category_id"] == category_id)
         self.assertEqual(row["model_mode"], "hidden")
-        self.assertEqual(self.c.post("/api/categories",
-                         json={"name": "X", "model_mode": "bogus"}).status_code, 422)
+        with self.assertRaises(ValidationError) as raised:
+            self.invoke("categories.create", {"name": "bad", "model_mode": "bogus"})
+        self.assertEqual(raised.exception.code, "validation_error")
 
-    # A:種類停用是上層開關,不改寫下層 active
     def test_category_disable_does_not_rewrite_lower_active(self):
-        self.make_category_with_field("規格", options=("亮面",))
-        r = self.create_product({"規格": "亮面"})
-        pid, vid = r["product_id"], r["variant_ids"][0]
-        self.c.patch(f"/api/categories/{self.cid}", json={"active": 0})
+        self.make_category_with_field("finish", options=("gloss",))
+        created = self.create_product({"finish": "gloss"})
+        product_id, variant_id = created["product_id"], created["variant_ids"][0]
+        self.invoke("categories.update", {"id": self.cid, "fields": {"active": 0}})
         with get_conn(self.db) as conn:
-            self.assertEqual(conn.execute("SELECT active FROM Product WHERE product_id=?", (pid,)).fetchone()[0], 1)
-            self.assertEqual(conn.execute("SELECT active FROM Variant WHERE variant_id=?", (vid,)).fetchone()[0], 1)
-        # 但有效啟用為 False
-        self.assertFalse(self.c.get("/api/barcode/B1").json()["active"])
-        # 重新啟用種類後恢復
-        self.c.patch(f"/api/categories/{self.cid}", json={"active": 1})
-        self.assertTrue(self.c.get("/api/barcode/B1").json()["active"])
+            self.assertEqual(conn.execute("SELECT active FROM Product WHERE product_id=?", (product_id,)).fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT active FROM Variant WHERE variant_id=?", (variant_id,)).fetchone()[0], 1)
+        self.assertFalse(self.invoke("barcodes.scan", {"code": "B1"})["active"])
+        self.invoke("categories.update", {"id": self.cid, "fields": {"active": 1}})
+        self.assertTrue(self.invoke("barcodes.scan", {"code": "B1"})["active"])
 
 
-class TestTemplateFields(ApiTestCase):
+class TestTemplateFields(FacadeTestCase):
     def setUp(self):
         super().setUp()
-        self.cid = self.create_category("鋼化玻璃")
-        self.fid = self.create_field("版型", self.cid)
-        self.create_options(self.fid, ("滿版", "9分滿"))
-        self.oid = next(o["option_id"] for o in
-                        self.c.get(f"/api/options?field_id={self.fid}").json() if o["value"] == "滿版")
+        self.cid = self.create_category("template")
+        self.fid = self.create_field("size", self.cid)
+        self.create_options(self.fid, ("full", "nine-tenths"))
+        self.oid = next(item["option_id"] for item in self.invoke("options.list", {"field_id": self.fid})
+                        if item["value"] == "full")
 
-    # B:模板 CRUD(sort/required/default/active)
-    def test_set_field_template_crud(self):
-        r = self.c.put(f"/api/categories/{self.cid}/fields/{self.fid}",
-                       json={"sort": 3, "required": 1, "default_option_id": self.oid})
-        self.assertEqual(r.status_code, 200)
+    def test_sets_field_template_crud_values(self):
+        self.assertEqual(self.invoke("categories.set_field", {
+            "category_id": self.cid, "field_id": self.fid,
+            "fields": {"sort": 3, "required": 1, "default_option_id": self.oid},
+        }), {"ok": True})
         with get_conn(self.db) as conn:
-            row = conn.execute("SELECT sort,required,default_option_id,active FROM CategoryField "
-                               "WHERE category_id=? AND field_id=?", (self.cid, self.fid)).fetchone()
-        self.assertEqual((row[0], row[1], row[2], row[3]), (3, 1, self.oid, 1))
-        # category_fields 反映 required 與 default
-        f = next(x for x in self.c.get(f"/api/categories/{self.cid}/fields").json()
-                 if x["field_id"] == self.fid)
-        self.assertEqual(f["required"], 1)
-        self.assertEqual(f["default_value"], "滿版")
+            row = conn.execute("SELECT sort,required,default_option_id,active FROM CategoryField WHERE category_id=? AND field_id=?", (self.cid, self.fid)).fetchone()
+        self.assertEqual(tuple(row), (3, 1, self.oid, 1))
+        field = next(item for item in self.invoke("categories.fields", {"id": self.cid})
+                     if item["field_id"] == self.fid)
+        self.assertEqual(field["required"], 1)
+        self.assertEqual(field["default_value"], "full")
 
     def test_set_field_default_must_belong_to_field(self):
-        other_fid = self.create_field("材質", self.cid)
-        self.create_options(other_fid, ("玻璃",))
-        other_oid = self.c.get(f"/api/options?field_id={other_fid}").json()[0]["option_id"]
-        r = self.c.put(f"/api/categories/{self.cid}/fields/{self.fid}",
-                       json={"default_option_id": other_oid})
-        self.assertEqual(r.status_code, 422)
+        other_field_id = self.create_field("material", self.cid)
+        self.create_options(other_field_id, ("glass",))
+        other_option_id = self.invoke("options.list", {"field_id": other_field_id})[0]["option_id"]
+        with self.assertRaises(ValidationError) as raised:
+            self.invoke("categories.set_field", {
+                "category_id": self.cid, "field_id": self.fid,
+                "fields": {"default_option_id": other_option_id},
+            })
+        self.assertEqual(raised.exception.code, "validation_error")
 
-    # B:特性詞條固定欄不可停用
     def test_feature_field_cannot_be_disabled(self):
-        feat = self.create_field("特性詞條", self.cid, field_type="tags")
-        r = self.c.put(f"/api/categories/{self.cid}/fields/{feat}", json={"active": 0})
-        self.assertEqual(r.status_code, 422)
-        # 全域欄位停用亦擋
-        self.assertEqual(self.c.put(f"/api/fields/{feat}", json={"active": 0}).status_code, 422)
+        feature_id = self.create_field("特性詞條", self.cid, field_type="tags")
+        for action, payload in (
+            ("categories.set_field", {"category_id": self.cid, "field_id": feature_id, "fields": {"active": 0}}),
+            ("fields.update", {"id": feature_id, "fields": {"active": 0}}),
+        ):
+            with self.subTest(action=action):
+                with self.assertRaises(ValidationError) as raised:
+                    self.invoke(action, payload)
+                self.assertEqual(raised.exception.code, "validation_error")
 
-    # B:已有 Variant 的種類鎖 required 切換
-    def test_required_locked_when_category_has_variant(self):
-        # 尚無子產品:可切換
-        self.assertEqual(self.c.put(f"/api/categories/{self.cid}/fields/{self.fid}",
-                         json={"required": 1}).status_code, 200)
-        self.c.post("/api/products", json={"name": "膜", "category_id": self.cid,
-            "variants": [{"attributes": {"版型": "滿版"}, "barcodes": []}]})
-        # 已有子產品:改變 required 回 422
-        self.assertEqual(self.c.put(f"/api/categories/{self.cid}/fields/{self.fid}",
-                         json={"required": 0}).status_code, 422)
-        # 同值(不變)仍允許
-        self.assertEqual(self.c.put(f"/api/categories/{self.cid}/fields/{self.fid}",
-                         json={"required": 1}).status_code, 200)
+    def test_required_is_locked_when_category_has_variant(self):
+        self.invoke("categories.set_field", {"category_id": self.cid, "field_id": self.fid, "fields": {"required": 1}})
+        self.invoke("products.create", {"name": "product", "category_id": self.cid,
+                                         "variants": [{"attributes": {"size": "full"}, "barcodes": []}]})
+        with self.assertRaises(ValidationError) as raised:
+            self.invoke("categories.set_field", {"category_id": self.cid, "field_id": self.fid, "fields": {"required": 0}})
+        self.assertEqual(raised.exception.code, "validation_error")
+        self.assertEqual(self.invoke("categories.set_field", {"category_id": self.cid, "field_id": self.fid, "fields": {"required": 1}}), {"ok": True})
 
-    # B:欄位已被使用鎖 field_type 變更
-    def test_field_type_locked_when_used(self):
-        self.c.post("/api/products", json={"name": "膜", "category_id": self.cid,
-            "variants": [{"attributes": {"版型": "滿版"}, "barcodes": []}]})
-        self.assertEqual(self.c.put(f"/api/fields/{self.fid}",
-                         json={"field_type": "multi"}).status_code, 422)
+    def test_field_type_is_locked_when_used(self):
+        self.invoke("products.create", {"name": "product", "category_id": self.cid,
+                                         "variants": [{"attributes": {"size": "full"}, "barcodes": []}]})
+        with self.assertRaises(ValidationError) as raised:
+            self.invoke("fields.update", {"id": self.fid, "fields": {"field_type": "multi"}})
+        self.assertEqual(raised.exception.code, "validation_error")
 
-    # B:停用選項若為模板預設值,同交易清空 default
-    def test_deactivate_default_option_clears_default(self):
-        self.c.put(f"/api/categories/{self.cid}/fields/{self.fid}",
-                   json={"default_option_id": self.oid})
-        self.c.patch(f"/api/options/{self.oid}", json={"active": 0})
+    def test_deactivating_default_option_clears_default(self):
+        self.invoke("categories.set_field", {"category_id": self.cid, "field_id": self.fid,
+                                              "fields": {"default_option_id": self.oid}})
+        self.invoke("options.update", {"id": self.oid, "fields": {"active": 0}})
         with get_conn(self.db) as conn:
-            self.assertIsNone(conn.execute(
-                "SELECT default_option_id FROM CategoryField WHERE category_id=? AND field_id=?",
-                (self.cid, self.fid)).fetchone()[0])
+            default_id = conn.execute("SELECT default_option_id FROM CategoryField WHERE category_id=? AND field_id=?", (self.cid, self.fid)).fetchone()[0]
+        self.assertIsNone(default_id)
 
 
-class TestProductAndBrand(ApiTestCase):
+class TestProductAndBrand(FacadeTestCase):
     def setUp(self):
         super().setUp()
-        self.cid = self.create_category("鋼化玻璃")
+        self.cid = self.create_category("template")
 
-    # C:同種類正規化名稱查重
-    def test_same_category_normalized_name_rejected(self):
-        self.c.post("/api/products", json={"name": "HODA 膜", "category_id": self.cid,
-            "variants": []})
-        # 正規化後同名(大小寫/空白)→ 409
-        r = self.c.post("/api/products", json={"name": "hoda 膜", "category_id": self.cid,
-            "variants": []})
-        self.assertEqual(r.status_code, 409)
-        # 不同種類同名可
-        cid2 = self.create_category("手機殼")
-        self.assertEqual(self.c.post("/api/products", json={"name": "HODA 膜",
-            "category_id": cid2, "variants": []}).status_code, 200)
+    def test_same_category_normalized_name_is_rejected(self):
+        self.invoke("products.create", {"name": "HODA case", "category_id": self.cid, "variants": []})
+        with self.assertRaises(ConflictError) as raised:
+            self.invoke("products.create", {"name": "hoda case", "category_id": self.cid, "variants": []})
+        self.assertEqual(raised.exception.code, "conflict")
+        other_category_id = self.create_category("other")
+        created = self.invoke("products.create", {
+            "name": "HODA case", "category_id": other_category_id, "variants": [],
+        })
+        self.assertIn("product_id", created)
+        self.assertEqual(created["variant_ids"], [])
 
-    # C:新增大產品補建 BrandCategory
-    def test_create_builds_brand_category(self):
-        bid = self.c.post("/api/brands", json={"name": "HODA"}).json()["brand_id"]
-        self.c.post("/api/products", json={"name": "膜", "category_id": self.cid,
-            "brand_id": bid, "variants": []})
+    def test_product_create_builds_brand_category(self):
+        brand_id = self.invoke("brands.create", {"name": "HODA"})["brand_id"]
+        self.invoke("products.create", {"name": "product", "category_id": self.cid, "brand_id": brand_id, "variants": []})
         with get_conn(self.db) as conn:
-            self.assertIsNotNone(conn.execute(
-                "SELECT 1 FROM BrandCategory WHERE brand_id=? AND category_id=?",
-                (bid, self.cid)).fetchone())
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM BrandCategory WHERE brand_id=? AND category_id=?", (brand_id, self.cid)).fetchone())
 
-    # C:廠牌 inline 新增——同名沿用、否則新建並建 BrandCategory
-    def test_brand_inline_reuse_and_create(self):
-        bid = self.c.post("/api/brands", json={"name": "HODA"}).json()["brand_id"]
-        # 正規化同名沿用既有廠牌
-        self.c.post("/api/products", json={"name": "膜1", "category_id": self.cid,
-            "brand_name": "hoda", "variants": []})
+    def test_product_brand_name_reuses_and_creates_brands(self):
+        brand_id = self.invoke("brands.create", {"name": "HODA"})["brand_id"]
+        self.invoke("products.create", {"name": "first", "category_id": self.cid, "brand_name": "hoda", "variants": []})
         with get_conn(self.db) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM Brand WHERE name='HODA'").fetchone()[0], 1)
-            pid = conn.execute("SELECT product_id FROM Product WHERE name='膜1'").fetchone()[0]
-            self.assertEqual(conn.execute("SELECT brand_id FROM Product WHERE product_id=?", (pid,)).fetchone()[0], bid)
-        # 新名稱→建新廠牌+BrandCategory
-        self.c.post("/api/products", json={"name": "膜2", "category_id": self.cid,
-            "brand_name": "犀牛盾", "variants": []})
+            product_id = conn.execute("SELECT product_id FROM Product WHERE name='first'").fetchone()[0]
+            self.assertEqual(conn.execute("SELECT brand_id FROM Product WHERE product_id=?", (product_id,)).fetchone()[0], brand_id)
+        self.invoke("products.create", {"name": "second", "category_id": self.cid, "brand_name": "new brand", "variants": []})
         with get_conn(self.db) as conn:
-            new_bid = conn.execute("SELECT brand_id FROM Brand WHERE name='犀牛盾'").fetchone()[0]
-            self.assertIsNotNone(conn.execute(
-                "SELECT 1 FROM BrandCategory WHERE brand_id=? AND category_id=?",
-                (new_bid, self.cid)).fetchone())
+            new_brand_id = conn.execute("SELECT brand_id FROM Brand WHERE name='new brand'").fetchone()[0]
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM BrandCategory WHERE brand_id=? AND category_id=?", (new_brand_id, self.cid)).fetchone())
 
-    # C:被引用廠牌擋刪
-    def test_brand_referenced_delete_conflict(self):
-        bid = self.c.post("/api/brands", json={"name": "HODA"}).json()["brand_id"]
-        self.c.post("/api/products", json={"name": "膜", "category_id": self.cid,
-            "brand_id": bid, "variants": []})
-        self.assertEqual(self.c.delete(f"/api/brands/{bid}").status_code, 409)
+    def test_referenced_brand_delete_conflicts(self):
+        brand_id = self.invoke("brands.create", {"name": "HODA"})["brand_id"]
+        self.invoke("products.create", {"name": "product", "category_id": self.cid, "brand_id": brand_id, "variants": []})
+        with self.assertRaises(ConflictError) as raised:
+            self.invoke("brands.delete", {"id": brand_id})
+        self.assertEqual(raised.exception.code, "conflict")
 
 
-class TestDisabledValueDiff(ApiTestCase):
-    """§12.3 停用值差異驗證。"""
+class TestDisabledValueDiff(FacadeTestCase):
     def setUp(self):
         super().setUp()
-        self.make_category_with_field("規格", options=("亮面", "霧面"))
-        r = self.create_product({"規格": "亮面"}, barcode="B1")
-        self.pid, self.v0 = r["product_id"], r["variant_ids"][0]
-        self.bright = next(o["option_id"] for o in
-                           self.c.get(f"/api/options?field_id={self.fid}").json() if o["value"] == "亮面")
-        # 亮面被 v0 引用→軟停用
-        self.c.delete(f"/api/options/{self.bright}")
+        self.make_category_with_field("finish", options=("gloss", "matte"))
+        created = self.create_product({"finish": "gloss"}, barcode="B1")
+        self.pid, self.v0 = created["product_id"], created["variant_ids"][0]
+        self.bright = next(item["option_id"] for item in self.invoke("options.list", {"field_id": self.fid}) if item["value"] == "gloss")
+        self.invoke("options.delete", {"id": self.bright})
 
-    def test_keep_existing_disabled_value_allowed(self):
-        r = self.c.put(f"/api/variants/{self.v0}", json={"attributes": {"規格": "亮面"}})
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(self.c.get("/api/barcode/B1").json()["attributes"]["規格"], "亮面")
+    def test_keeps_existing_disabled_value(self):
+        self.assertEqual(self.invoke("variants.update", {"id": self.v0, "fields": {"attributes": {"finish": "gloss"}}}), {"ok": True})
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["finish"], "gloss")
 
-    def test_change_disabled_to_enabled_allowed(self):
-        r = self.c.put(f"/api/variants/{self.v0}", json={"attributes": {"規格": "霧面"}})
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(self.c.get("/api/barcode/B1").json()["attributes"]["規格"], "霧面")
+    def test_changes_disabled_value_to_enabled_value(self):
+        self.assertEqual(self.invoke("variants.update", {"id": self.v0, "fields": {"attributes": {"finish": "matte"}}}), {"ok": True})
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["finish"], "matte")
 
-    def test_new_variant_with_disabled_value_rejected(self):
-        r = self.c.post(f"/api/products/{self.pid}/variants",
-                        json={"attributes": {"規格": "亮面"}, "barcodes": []})
-        self.assertEqual(r.status_code, 422)
+    def test_new_variant_with_disabled_value_is_rejected(self):
+        with self.assertRaises(ValidationError) as raised:
+            self.invoke("variants.create", {"product_id": self.pid, "fields": {"attributes": {"finish": "gloss"}, "barcodes": []}})
+        self.assertEqual(raised.exception.code, "validation_error")
 
-    def test_update_assigning_disabled_value_not_originally_present_rejected(self):
-        # v1 原為霧面,改指停用的亮面→拒絕
-        v1 = self.c.post(f"/api/products/{self.pid}/variants",
-                         json={"attributes": {"規格": "霧面"}, "barcodes": []}).json()["variant_id"]
-        r = self.c.put(f"/api/variants/{v1}", json={"attributes": {"規格": "亮面"}})
-        self.assertEqual(r.status_code, 422)
+    def test_update_to_disabled_value_not_originally_present_is_rejected(self):
+        variant_id = self.invoke("variants.create", {"product_id": self.pid, "fields": {"attributes": {"finish": "matte"}, "barcodes": []}})["variant_id"]
+        with self.assertRaises(ValidationError) as raised:
+            self.invoke("variants.update", {"id": variant_id, "fields": {"attributes": {"finish": "gloss"}}})
+        self.assertEqual(raised.exception.code, "validation_error")
 
-    def test_multi_cannot_add_another_disabled_value(self):
-        # 另建 multi 欄「材質」,選項 A/B/C;C 由他變體引用後軟停用
-        mfid = self.create_field("材質", self.cid, field_type="multi")
-        self.create_options(mfid, ("A", "B", "C"))
-        keep = self.c.post(f"/api/products/{self.pid}/variants",
-                           json={"attributes": {"材質": ["A", "B"]}, "barcodes": []}).json()["variant_id"]
-        holder = self.c.post(f"/api/products/{self.pid}/variants",
-                             json={"attributes": {"材質": ["C"]}, "barcodes": []}).json()["variant_id"]
-        cid_opt = next(o["option_id"] for o in
-                       self.c.get(f"/api/options?field_id={mfid}").json() if o["value"] == "C")
-        self.c.delete(f"/api/options/{cid_opt}")  # C 被 holder 引用→軟停用
-        # keep 想新增停用的 C → 拒絕
-        r = self.c.put(f"/api/variants/{keep}", json={"attributes": {"材質": ["A", "B", "C"]}})
-        self.assertEqual(r.status_code, 422)
-        # 但保留原值 [A,B] 可
-        self.assertEqual(self.c.put(f"/api/variants/{keep}",
-                         json={"attributes": {"材質": ["A", "B"]}}).status_code, 200)
+    def test_multi_value_cannot_add_disabled_value(self):
+        multi_field_id = self.create_field("material", self.cid, field_type="multi")
+        self.create_options(multi_field_id, ("A", "B", "C"))
+        keep = self.invoke("variants.create", {"product_id": self.pid, "fields": {"attributes": {"material": ["A", "B"]}, "barcodes": []}})["variant_id"]
+        self.invoke("variants.create", {"product_id": self.pid, "fields": {"attributes": {"material": ["C"]}, "barcodes": []}})
+        option_id = next(item["option_id"] for item in self.invoke("options.list", {"field_id": multi_field_id}) if item["value"] == "C")
+        self.invoke("options.delete", {"id": option_id})
+        with self.assertRaises(ValidationError) as raised:
+            self.invoke("variants.update", {"id": keep, "fields": {"attributes": {"material": ["A", "B", "C"]}}})
+        self.assertEqual(raised.exception.code, "validation_error")
+        self.assertEqual(self.invoke("variants.update", {"id": keep, "fields": {"attributes": {"material": ["A", "B"]}}}), {"ok": True})
 
 
-class TestEffectiveActiveEntrypoints(ApiTestCase):
+class TestEffectiveActiveEntrypoints(FacadeTestCase):
     def setUp(self):
         super().setUp()
-        self.make_category_with_field("規格", options=("亮面",))
-        r = self.create_product({"規格": "亮面"}, name="HODA膜", barcode="B1")
-        self.pid, self.v0 = r["product_id"], r["variant_ids"][0]
-        self.c.post("/api/stock/receive", json={"variant_id": self.v0, "qty": 10})
+        self.make_category_with_field("finish", options=("gloss",))
+        created = self.create_product({"finish": "gloss"}, name="HODA case", barcode="B1")
+        self.pid, self.v0 = created["product_id"], created["variant_ids"][0]
+        self.invoke("stock.receive", {"variant_id": self.v0, "qty": 10})
 
     def _disable_category(self):
-        self.c.patch(f"/api/categories/{self.cid}", json={"active": 0})
+        self.invoke("categories.update", {"id": self.cid, "fields": {"active": 0}})
 
     def test_scan_reflects_category_active(self):
         self._disable_category()
-        self.assertFalse(self.c.get("/api/barcode/B1").json()["active"])
+        self.assertFalse(self.invoke("barcodes.scan", {"code": "B1"})["active"])
 
     def test_search_excludes_inactive_category(self):
         self._disable_category()
-        self.assertEqual(self.c.get("/api/products?q=HODA").json(), [])
+        self.assertEqual(self.invoke("products.list", {"q": "HODA"}), [])
 
     def test_catalog_excludes_inactive_category(self):
         self._disable_category()
-        self.assertEqual(self.c.get("/api/catalog").json(), [])
-        self.assertEqual(len(self.c.get("/api/catalog?include_inactive=1").json()), 1)
+        self.assertEqual(self.invoke("catalog.list", {}), [])
+        self.assertEqual(len(self.invoke("catalog.list", {"include_inactive": True})), 1)
 
-    def test_sale_rejected_when_category_inactive(self):
+    def test_sale_is_rejected_when_category_inactive(self):
         self._disable_category()
-        r = self.c.post("/api/sales", json={"payment": "現金", "paid": 1000,
-            "items": [{"variant_id": self.v0, "qty": 1, "unit_price": 100}]})
-        self.assertEqual(r.status_code, 422)
-        self.assertEqual(self.c.get(f"/api/stock/{self.v0}").json()["stock"], 10)
+        with self.assertRaises(ValidationError) as raised:
+            self.invoke("sales.checkout", {"payment": "cash", "paid": 1000,
+                                             "items": [{"variant_id": self.v0, "qty": 1, "unit_price": 100}]})
+        self.assertEqual(raised.exception.code, "validation_error")
+        self.assertEqual(self.invoke("stock.detail", {"variant_id": self.v0})["stock"], 10)
 
     def test_child_creation_requires_active_category_and_product(self):
         self._disable_category()
-        r = self.c.post(f"/api/products/{self.pid}/variants",
-                        json={"attributes": {}, "barcodes": []})
-        self.assertEqual(r.status_code, 422)
-        # 種類啟用但大產品停用亦擋
-        self.c.patch(f"/api/categories/{self.cid}", json={"active": 1})
-        self.c.put(f"/api/products/{self.pid}", json={"active": 0})
-        r = self.c.post(f"/api/products/{self.pid}/variants",
-                        json={"attributes": {}, "barcodes": []})
-        self.assertEqual(r.status_code, 422)
+        payload = {"product_id": self.pid, "fields": {"attributes": {}, "barcodes": []}}
+        with self.assertRaises(ValidationError) as raised:
+            self.invoke("variants.create", payload)
+        self.assertEqual(raised.exception.code, "validation_error")
+        self.invoke("categories.update", {"id": self.cid, "fields": {"active": 1}})
+        self.invoke("products.update", {"id": self.pid, "fields": {"active": 0}})
+        with self.assertRaises(ValidationError) as raised:
+            self.invoke("variants.create", payload)
+        self.assertEqual(raised.exception.code, "validation_error")
 
 
-class TestDeleteEmptyCategoryCascade(ApiTestCase):
-    # F:刪空種類連鎖清理
-    def test_delete_empty_category_cascade(self):
-        cid = self.create_category("鋼化玻璃")
-        specific = self.create_field("版型", cid)          # 專屬欄
-        self.create_options(specific, ("滿版",))
-        # 共用欄「顏色」綁定本種類(另有一種類共用)
-        color = [f for f in self.c.get("/api/fields?common=1").json() if f["name"] == "顏色"][0]["field_id"]
-        other = self.create_category("手機殼")
-        self.c.put(f"/api/categories/{other}/fields-common", json={"field_ids": [color]})
-        self.c.put(f"/api/categories/{cid}/fields-common", json={"field_ids": [color]})
-        bid = self.c.post("/api/brands", json={"name": "HODA"}).json()["brand_id"]
-        self.c.put(f"/api/brands/{bid}/categories", json={"category_ids": [cid]})
+class TestDeleteEmptyCategoryCascade(FacadeTestCase):
+    def test_delete_empty_category_cascades_only_its_data(self):
+        category_id = self.create_category("template")
+        specific_field_id = self.create_field("size", category_id)
+        self.create_options(specific_field_id, ("full",))
+        common_field_id = next(item["field_id"] for item in self.invoke("fields.list", {"common": 1}) if item["name"] == "顏色")
+        other_category_id = self.create_category("other")
+        self.invoke("categories.set_common_fields", {"id": other_category_id, "field_ids": [common_field_id]})
+        self.invoke("categories.set_common_fields", {"id": category_id, "field_ids": [common_field_id]})
+        brand_id = self.invoke("brands.create", {"name": "HODA"})["brand_id"]
+        self.invoke("brands.set_categories", {"id": brand_id, "category_ids": [category_id]})
 
-        self.assertEqual(self.c.delete(f"/api/categories/{cid}").status_code, 200)
+        self.assertEqual(self.invoke("categories.delete", {"id": category_id}), {"ok": True})
         with get_conn(self.db) as conn:
-            # CategoryField、BrandCategory 該種類關聯清除
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM CategoryField WHERE category_id=?", (cid,)).fetchone()[0], 0)
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM BrandCategory WHERE category_id=?", (cid,)).fetchone()[0], 0)
-            # 專屬且未使用的欄位與選項硬刪
-            self.assertIsNone(conn.execute("SELECT 1 FROM AttributeField WHERE field_id=?", (specific,)).fetchone())
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM AttributeOption WHERE field_id=?", (specific,)).fetchone()[0], 0)
-            # 共用欄與其對他種類的綁定保留
-            self.assertIsNotNone(conn.execute("SELECT 1 FROM AttributeField WHERE field_id=?", (color,)).fetchone())
-            self.assertIsNotNone(conn.execute("SELECT 1 FROM CategoryField WHERE category_id=? AND field_id=?", (other, color)).fetchone())
-            # 廠牌本體保留
-            self.assertIsNotNone(conn.execute("SELECT 1 FROM Brand WHERE brand_id=?", (bid,)).fetchone())
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM CategoryField WHERE category_id=?", (category_id,)).fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM BrandCategory WHERE category_id=?", (category_id,)).fetchone()[0], 0)
+            self.assertIsNone(conn.execute("SELECT 1 FROM AttributeField WHERE field_id=?", (specific_field_id,)).fetchone())
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM AttributeOption WHERE field_id=?", (specific_field_id,)).fetchone()[0], 0)
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM AttributeField WHERE field_id=?", (common_field_id,)).fetchone())
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM CategoryField WHERE category_id=? AND field_id=?", (other_category_id, common_field_id)).fetchone())
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM Brand WHERE brand_id=?", (brand_id,)).fetchone())
 
 
-class TestFeatureFieldBindingPreserved(ApiTestCase):
-    # 規格 §11.2:特性詞條為固定欄位,共用勾選(含空清單)不得解除其綁定
+class TestFeatureFieldBindingPreserved(FacadeTestCase):
     def test_set_common_fields_keeps_feature_binding(self):
-        cid = self.create_category("鋼化玻璃")
-        # 特性詞條綁定本種類,並另掛一種類使其成為共用欄(binding≥2)
-        feat = self.create_field("特性詞條", cid, field_type="tags")
-        other = self.create_category("手機殼")
-        self.c.put(f"/api/categories/{other}/fields/{feat}", json={"active": 1})
-        # 以 set_field 於 other 建立綁定(共用)
-        self.c.put(f"/api/categories/{other}/fields/{feat}", json={"sort": 0})
-        # 以空清單呼叫共用勾選:特性詞條綁定仍在
-        self.assertEqual(self.c.put(f"/api/categories/{cid}/fields-common",
-                         json={"field_ids": []}).status_code, 200)
+        category_id = self.create_category("template")
+        feature_id = self.create_field("特性詞條", category_id, field_type="tags")
+        other_category_id = self.create_category("other")
+        self.invoke("categories.set_field", {"category_id": other_category_id, "field_id": feature_id, "fields": {"active": 1}})
+        self.invoke("categories.set_field", {"category_id": other_category_id, "field_id": feature_id, "fields": {"sort": 0}})
+        self.assertEqual(self.invoke("categories.set_common_fields", {"id": category_id, "field_ids": []}), {"ok": True})
         with get_conn(self.db) as conn:
-            self.assertIsNotNone(conn.execute(
-                "SELECT 1 FROM CategoryField WHERE category_id=? AND field_id=?",
-                (cid, feat)).fetchone())
-        # 模板顯示仍含特性詞條
-        names = [f["name"] for f in self.c.get(f"/api/categories/{cid}/fields").json()]
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM CategoryField WHERE category_id=? AND field_id=?", (category_id, feature_id)).fetchone())
+        names = [item["name"] for item in self.invoke("categories.fields", {"id": category_id})]
         self.assertIn("特性詞條", names)
 
 
