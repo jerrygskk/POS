@@ -342,7 +342,7 @@ class SettingsService:
         if not all: sql += " AND o.active=1"
         if model_ids:
             qs=in_clause(model_ids); sql += f" AND (NOT EXISTS(SELECT 1 FROM OptionModel om WHERE om.option_id=o.option_id) OR EXISTS(SELECT 1 FROM OptionModel om WHERE om.option_id=o.option_id AND om.model_id IN ({qs})))"; args += model_ids
-        opts=self.repo.rows(sql+" GROUP BY o.option_id ORDER BY o.sort,o.option_id",args)
+        opts=self.repo.rows(sql+" GROUP BY o.option_id ORDER BY usage_count DESC,o.sort,o.option_id",args)
         for o in opts: o["model_ids"]=[r[0] for r in self.repo.execute("SELECT model_id FROM OptionModel WHERE option_id=? ORDER BY model_id",(o["option_id"],))]
         return opts
 
@@ -404,7 +404,11 @@ class SettingsService:
             "SELECT field_id,COUNT(*) c FROM CategoryField GROUP BY field_id")}
         out=[]
         for f in rows:
-            opts=[] if f["field_type"]=="text" else self.repo.rows("SELECT option_id,value,sort FROM AttributeOption WHERE field_id=? AND active=1 ORDER BY sort,option_id",(f["field_id"],)); dv=self.repo.one("SELECT value FROM AttributeOption WHERE option_id=?",(f["default_option_id"],)) if f["default_option_id"] is not None else None
+            opts=[] if f["field_type"]=="text" else self.repo.rows(
+                "SELECT o.option_id,o.value,o.sort FROM AttributeOption o "
+                "LEFT JOIN VariantAttribute va ON va.option_id=o.option_id "
+                "WHERE o.field_id=? AND o.active=1 GROUP BY o.option_id "
+                "ORDER BY COUNT(DISTINCT va.variant_id) DESC,o.sort,o.option_id",(f["field_id"],)); dv=self.repo.one("SELECT value FROM AttributeOption WHERE option_id=?",(f["default_option_id"],)) if f["default_option_id"] is not None else None
             out.append({"field_id":f["field_id"],"name":f["name"],"field_type":f["field_type"],"required":f["required"],"default_option_id":f["default_option_id"],"default_value":dv[0] if dv else None,"shared":counts.get(f["field_id"],0)>=2,"options":opts})
         return out
 
