@@ -1,121 +1,109 @@
 import unittest
 from lib.db import get_conn
-from base import ApiTestCase
+from base import FacadeTestCase
 
-class TestAttributes(ApiTestCase):
+class TestAttributes(FacadeTestCase):
     def test_seed_common_fields(self):
         # 種子只留兩個共用欄:商品描述、顏色
-        names = [f["name"] for f in self.c.get("/api/fields").json()]
+        names = [f["name"] for f in self.invoke("fields.list")]
         self.assertIn("商品描述", names)
         self.assertIn("顏色", names)
 
     def test_rename_field(self):
-        fid = self.c.get("/api/fields").json()[0]["field_id"]
-        r = self.c.put(f"/api/fields/{fid}", json={"name": "描述"})
-        self.assertEqual(r.status_code, 200)
-        self.assertIn("描述", [f["name"] for f in self.c.get("/api/fields").json()])
+        fid = self.invoke("fields.list")[0]["field_id"]
+        self.invoke("fields.update", {"id": fid, "fields": {"name": "描述"}})
+        self.assertIn("描述", [f["name"] for f in self.invoke("fields.list")])
 
     def test_category_specific_field(self):
-        cid = self.c.post("/api/categories", json={"name": "鋼化玻璃"}).json()["category_id"]
-        r = self.c.post("/api/fields", json={"name": "版型", "category_id": cid})
-        self.assertEqual(r.status_code, 200)
+        cid = self.create_category("鋼化玻璃")
+        self.create_field("版型", cid)
         # ?category_id 只回該種類專屬欄
-        got = self.c.get(f"/api/fields?category_id={cid}").json()
+        got = self.invoke("fields.list", {"category_id": cid})
         self.assertEqual([f["name"] for f in got], ["版型"])
         # ?common=1 只回共用欄(category_id NULL)
-        common = self.c.get("/api/fields?common=1").json()
+        common = self.invoke("fields.list", {"common": 1})
         self.assertTrue(all(f["category_id"] is None for f in common))
         self.assertNotIn("版型", [f["name"] for f in common])
 
     def test_options_by_field(self):
-        fid = self.c.post("/api/fields", json={"name": "版型"}).json()["field_id"]
-        self.c.post("/api/options", json={"field_id": fid, "value": "亮面"})
-        self.c.post("/api/options", json={"field_id": fid, "value": "霧面"})
-        vals = [o["value"] for o in self.c.get(f"/api/options?field_id={fid}").json()]
+        fid = self.create_field("版型")
+        self.create_options(fid, ("亮面", "霧面"))
+        vals = [o["value"] for o in self.invoke("options.list", {"field_id": fid})]
         self.assertEqual(vals, ["亮面", "霧面"])
 
     def test_duplicate_option_idempotent(self):
-        fid = self.c.get("/api/fields").json()[0]["field_id"]
-        self.c.post("/api/options", json={"field_id": fid, "value": "黑"})
-        r = self.c.post("/api/options", json={"field_id": fid, "value": "黑"})
-        self.assertEqual(r.status_code, 200)   # 重複靜默成功,不炸
-        opts = self.c.get(f"/api/options?field_id={fid}").json()
+        fid = self.invoke("fields.list")[0]["field_id"]
+        self.invoke("options.create", {"field_id": fid, "value": "黑"})
+        self.invoke("options.create", {"field_id": fid, "value": "黑"})
+        opts = self.invoke("options.list", {"field_id": fid})
         self.assertEqual(len([o for o in opts if o["value"] == "黑"]), 1)
 
     def test_reactivate_inactive_option_restores_same_id_without_duplicate(self):
-        fid = self.c.post("/api/fields", json={"name": "版型"}).json()["field_id"]
+        fid = self.create_field("版型")
         oid = self._opt(fid, "亮面")
-        self.c.patch(f"/api/options/{oid}", json={"active": 0})
+        self.invoke("options.update", {"id": oid, "fields": {"active": 0}})
 
-        r = self.c.post("/api/options", json={
-            "field_id": fid, "value": "亮面", "reactivate": True})
-
-        self.assertEqual(r.status_code, 200)
-        opts = self.c.get(f"/api/options?field_id={fid}&all=1").json()
+        self.invoke("options.create", {"field_id": fid, "value": "亮面", "reactivate": True})
+        opts = self.invoke("options.list", {"field_id": fid, "all": 1})
         matches = [o for o in opts if o["value"] == "亮面"]
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["option_id"], oid)
         self.assertEqual(matches[0]["active"], 1)
 
     def test_duplicate_inactive_option_without_reactivate_stays_inactive(self):
-        fid = self.c.post("/api/fields", json={"name": "版型"}).json()["field_id"]
+        fid = self.create_field("版型")
         oid = self._opt(fid, "亮面")
-        self.c.patch(f"/api/options/{oid}", json={"active": 0})
+        self.invoke("options.update", {"id": oid, "fields": {"active": 0}})
 
-        r = self.c.post("/api/options", json={"field_id": fid, "value": "亮面"})
-
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(self.c.get(f"/api/options?field_id={fid}").json(), [])
-        all_opts = self.c.get(f"/api/options?field_id={fid}&all=1").json()
+        self.invoke("options.create", {"field_id": fid, "value": "亮面"})
+        self.assertEqual(self.invoke("options.list", {"field_id": fid}), [])
+        all_opts = self.invoke("options.list", {"field_id": fid, "all": 1})
         self.assertEqual(len(all_opts), 1)
         self.assertEqual(all_opts[0]["option_id"], oid)
         self.assertEqual(all_opts[0]["active"], 0)
 
     def _opt(self, fid, value):
-        self.c.post("/api/options", json={"field_id": fid, "value": value})
+        self.invoke("options.create", {"field_id": fid, "value": value})
         return next(o["option_id"] for o in
-                    self.c.get(f"/api/options?field_id={fid}").json()
+                    self.invoke("options.list", {"field_id": fid})
                     if o["value"] == value)
 
     def test_rename_option(self):
-        fid = self.c.post("/api/fields", json={"name": "版型"}).json()["field_id"]
+        fid = self.create_field("版型")
         oid = self._opt(fid, "亮面")
-        r = self.c.patch(f"/api/options/{oid}", json={"value": "高亮"})
-        self.assertEqual(r.status_code, 200)
-        vals = [o["value"] for o in self.c.get(f"/api/options?field_id={fid}").json()]
+        self.invoke("options.update", {"id": oid, "fields": {"value": "高亮"}})
+        vals = [o["value"] for o in self.invoke("options.list", {"field_id": fid})]
         self.assertIn("高亮", vals)
         self.assertNotIn("亮面", vals)
 
     def test_rename_option_conflict_409(self):
-        fid = self.c.post("/api/fields", json={"name": "版型"}).json()["field_id"]
+        fid = self.create_field("版型")
         self._opt(fid, "亮面")
         oid2 = self._opt(fid, "霧面")
-        r = self.c.patch(f"/api/options/{oid2}", json={"value": "亮面"})
-        self.assertEqual(r.status_code, 409)
+        self.assert_application_error("conflict", "options.update", {"id": oid2, "fields": {"value": "亮面"}})
 
     def test_deactivate_option_hidden_from_fields(self):
-        cid = self.c.post("/api/categories", json={"name": "保護貼"}).json()["category_id"]
-        fid = self.c.post("/api/fields", json={"name": "版型", "category_id": cid}).json()["field_id"]
+        cid = self.create_category("保護貼")
+        fid = self.create_field("版型", cid)
         oid = self._opt(fid, "亮面")
-        self.c.patch(f"/api/options/{oid}", json={"active": 0})
+        self.invoke("options.update", {"id": oid, "fields": {"active": 0}})
         # 維護頁 all=1 仍看得到停用者
-        allopts = self.c.get(f"/api/options?field_id={fid}&all=1").json()
+        allopts = self.invoke("options.list", {"field_id": fid, "all": 1})
         self.assertIn("亮面", [o["value"] for o in allopts])
         # 預設(建檔下拉)不回停用者
-        self.assertEqual(self.c.get(f"/api/options?field_id={fid}").json(), [])
+        self.assertEqual(self.invoke("options.list", {"field_id": fid}), [])
         # categories/{id}/fields 只回啟用選項
-        fields = self.c.get(f"/api/categories/{cid}/fields").json()
+        fields = self.invoke("categories.fields", {"id": cid})
         opts = next(f["options"] for f in fields if f["field_id"] == fid)
         self.assertEqual(opts, [])
 
     def test_delete_option_removed_from_fields(self):
-        cid = self.c.post("/api/categories", json={"name": "保護貼"}).json()["category_id"]
-        fid = self.c.post("/api/fields", json={"name": "版型", "category_id": cid}).json()["field_id"]
+        cid = self.create_category("保護貼")
+        fid = self.create_field("版型", cid)
         oid = self._opt(fid, "亮面")
-        r = self.c.delete(f"/api/options/{oid}")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(self.c.get(f"/api/options?field_id={fid}&all=1").json(), [])
-        fields = self.c.get(f"/api/categories/{cid}/fields").json()
+        self.invoke("options.delete", {"id": oid})
+        self.assertEqual(self.invoke("options.list", {"field_id": fid, "all": 1}), [])
+        fields = self.invoke("categories.fields", {"id": cid})
         opts = next(f["options"] for f in fields if f["field_id"] == fid)
         self.assertEqual(opts, [])
 
@@ -124,9 +112,9 @@ class TestAttributes(ApiTestCase):
         fid = self.create_field("版型", cid)
         oid = self._opt(fid, "亮面")
         mid = self.create_model(self.create_phone_brand("測試品牌"), "測試型號")
-        self.c.put(f"/api/fields/{fid}", json={"default_option_id": oid})
-        self.c.put(f"/api/options/{oid}/models", json={"model_ids": [mid]})
-        self.c.post("/api/products", json={
+        self.invoke("categories.set_field", {"category_id": cid, "field_id": fid, "fields": {"default_option_id": oid}})
+        self.invoke("options.set_models", {"id": oid, "model_ids": [mid]})
+        self.invoke("products.create", {
             "name": "膜", "category_id": cid,
             "variants": [
                 {"attributes": {"版型": "亮面"}, "barcodes": []},
@@ -134,14 +122,12 @@ class TestAttributes(ApiTestCase):
             ],
         })
 
-        listed = self.c.get(f"/api/options?field_id={fid}").json()
+        listed = self.invoke("options.list", {"field_id": fid})
         self.assertEqual(listed[0]["usage_count"], 2)
-        r = self.c.delete(f"/api/options/{oid}")
-
-        self.assertEqual(r.status_code, 200)
-        self.assertFalse(r.json()["deleted"])
-        self.assertEqual(self.c.get(f"/api/options?field_id={fid}").json(), [])
-        hidden = self.c.get(f"/api/options?field_id={fid}&all=1").json()[0]
+        result = self.invoke("options.delete", {"id": oid})
+        self.assertFalse(result["deleted"])
+        self.assertEqual(self.invoke("options.list", {"field_id": fid}), [])
+        hidden = self.invoke("options.list", {"field_id": fid, "all": 1})[0]
         self.assertEqual(hidden["active"], 0)
         self.assertEqual(hidden["usage_count"], 2)
         with get_conn(self.db) as conn:
@@ -159,13 +145,11 @@ class TestAttributes(ApiTestCase):
         cid = self.create_category("保護貼")
         fid = self.create_field("版型", cid)
         oid = self._opt(fid, "亮面")
-        self.c.put(f"/api/fields/{fid}", json={"default_option_id": oid})
+        self.invoke("categories.set_field", {"category_id": cid, "field_id": fid, "fields": {"default_option_id": oid}})
 
-        r = self.c.delete(f"/api/options/{oid}")
-
-        self.assertEqual(r.status_code, 200)
-        self.assertTrue(r.json()["deleted"])
-        self.assertEqual(self.c.get(f"/api/options?field_id={fid}&all=1").json(), [])
+        result = self.invoke("options.delete", {"id": oid})
+        self.assertTrue(result["deleted"])
+        self.assertEqual(self.invoke("options.list", {"field_id": fid, "all": 1}), [])
         with get_conn(self.db) as conn:
             self.assertIsNone(conn.execute(
                 "SELECT default_option_id FROM CategoryField WHERE field_id=?", (fid,)
@@ -175,33 +159,21 @@ class TestAttributes(ApiTestCase):
             ).fetchone())
 
     def test_add_option_unknown_field_returns_404(self):
-        r = self.c.post("/api/options",
-                        json={"field_id": 999999, "value": "不存在"})
-        self.assertEqual(r.status_code, 404)
+        self.assert_application_error("not_found", "options.create", {"field_id": 999999, "value": "不存在"})
 
     def test_invalid_field_type_rejected_on_add_and_patch(self):
-        r = self.c.post("/api/fields", json={"name": "壞欄", "field_type": "number"})
-        self.assertEqual(r.status_code, 422)
-
-        fid = self.c.get("/api/fields").json()[0]["field_id"]
-        r = self.c.put(f"/api/fields/{fid}", json={"field_type": "number"})
-        self.assertEqual(r.status_code, 422)
+        self.assert_application_error("validation_error", "fields.create", {"name": "壞欄", "field_type": "number"})
+        fid = self.invoke("fields.list")[0]["field_id"]
+        self.assert_application_error("validation_error", "fields.update", {"id": fid, "fields": {"field_type": "number"}})
 
     def test_default_option_must_be_created_with_field_and_belong_to_field(self):
-        fid = self.c.post("/api/fields", json={"name": "版型一"}).json()["field_id"]
-        other_fid = self.c.post("/api/fields", json={"name": "版型二"}).json()["field_id"]
+        fid = self.create_field("版型一")
+        other_fid = self.create_field("版型二")
         other_oid = self._opt(other_fid, "亮面")
 
-        r = self.c.post("/api/fields", json={
-            "name": "不應有預設", "default_option_id": other_oid})
-        self.assertEqual(r.status_code, 422)
-
-        r = self.c.put(f"/api/fields/{fid}",
-                       json={"default_option_id": 999999})
-        self.assertEqual(r.status_code, 422)
-        r = self.c.put(f"/api/fields/{fid}",
-                       json={"default_option_id": other_oid})
-        self.assertEqual(r.status_code, 422)
+        self.assert_application_error("validation_error", "fields.create", {"name": "不應有預設", "default_option_id": other_oid})
+        self.assert_application_error("validation_error", "categories.set_field", {"category_id": self.create_category("預設測試"), "field_id": fid, "fields": {"default_option_id": 999999}})
+        self.assert_application_error("validation_error", "categories.set_field", {"category_id": self.create_category("預設測試二"), "field_id": fid, "fields": {"default_option_id": other_oid}})
 
 
 if __name__ == "__main__":

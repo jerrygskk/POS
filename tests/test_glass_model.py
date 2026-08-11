@@ -3,76 +3,69 @@
 import unittest, tempfile, os, sqlite3
 from lib.db import get_conn, init_db
 from lib import db_schema
-from base import ApiTestCase
+from base import FacadeTestCase
 
 
-class TestMultiTagsApi(ApiTestCase):
+class TestMultiTagsApi(FacadeTestCase):
     def setUp(self):
         super().setUp()
-        self.cid = self.c.post("/api/categories",
-                               json={"name": "鋼化玻璃"}).json()["category_id"]
+        self.cid = self.create_category("鋼化玻璃")
         # 規格 multi + 四基礎選項
-        self.spec = self.c.post("/api/fields", json={
-            "name": "規格", "category_id": self.cid,
-            "field_type": "multi"}).json()["field_id"]
+        self.spec = self.create_field("規格", self.cid, "multi")
         for v in ["亮面", "霧面", "藍光", "防窺"]:
-            self.c.post("/api/options", json={"field_id": self.spec, "value": v})
+            self.invoke("options.create", {"field_id": self.spec, "value": v})
         # 特性詞條 tags(自動長)
-        self.tags = self.c.post("/api/fields", json={
-            "name": "特性詞條", "category_id": self.cid,
-            "field_type": "tags"}).json()["field_id"]
+        self.tags = self.create_field("特性詞條", self.cid, "tags")
         # 版型 select + 預設滿版
-        self.layout = self.c.post("/api/fields", json={
-            "name": "版型", "category_id": self.cid,
-            "field_type": "select"}).json()["field_id"]
+        self.layout = self.create_field("版型", self.cid)
         for v in ["滿版", "9分滿"]:
-            self.c.post("/api/options", json={"field_id": self.layout, "value": v})
-        oid = [o for o in self.c.get(f"/api/options?field_id={self.layout}").json()
+            self.invoke("options.create", {"field_id": self.layout, "value": v})
+        oid = [o for o in self.invoke("options.list", {"field_id": self.layout})
                if o["value"] == "滿版"][0]["option_id"]
-        self.c.put(f"/api/fields/{self.layout}", json={"default_option_id": oid})
+        self.invoke("categories.set_field", {"category_id": self.cid, "field_id": self.layout,
+                                               "fields": {"default_option_id": oid}})
 
     def _create(self, attrs):
         return self.create_product(attrs)
 
     def _tags_values(self):
         return {o["value"]
-                for o in self.c.get(f"/api/options?field_id={self.tags}").json()}
+                for o in self.invoke("options.list", {"field_id": self.tags})}
 
     def test_multi_roundtrip(self):
         self._create({"規格": ["霧面", "藍光"]})
-        got = self.c.get("/api/barcode/B1").json()
+        got = self.invoke("barcodes.scan", {"code": "B1"})
         self.assertEqual(got["attributes"]["規格"], ["霧面", "藍光"])
         self.assertEqual(got["attr_display"], "霧面+藍光")
 
     def test_multi_unknown_option_422(self):
-        r = self.c.post("/api/products", json={
+        self.assert_application_error("validation_error", "products.create", {
             "name": "膜", "category_id": self.cid,
             "variants": [{"attributes": {"規格": ["不存在"]}, "barcodes": []}]})
-        self.assertEqual(r.status_code, 422)
 
     def test_multi_dedup(self):
         self._create({"規格": ["亮面", "亮面"]})
-        self.assertEqual(self.c.get("/api/barcode/B1").json()["attributes"]["規格"],
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["規格"],
                          ["亮面"])
 
     def test_tags_autocreate_option(self):
         self._create({"規格": ["藍光"], "特性詞條": ["SGS認證", "無色偏"]})
         self.assertEqual(self._tags_values(), {"SGS認證", "無色偏"})
-        got = self.c.get("/api/barcode/B1").json()
+        got = self.invoke("barcodes.scan", {"code": "B1"})
         self.assertEqual(got["attributes"]["特性詞條"], ["SGS認證", "無色偏"])
         self.assertEqual(got["attr_display"], "藍光｜SGS認證, 無色偏")
 
     def test_tags_rename_takes_effect(self):
         self._create({"規格": ["藍光"], "特性詞條": ["SGS"]})
-        oid = [o for o in self.c.get(f"/api/options?field_id={self.tags}").json()
+        oid = [o for o in self.invoke("options.list", {"field_id": self.tags})
                if o["value"] == "SGS"][0]["option_id"]
-        self.c.patch(f"/api/options/{oid}", json={"value": "SGS認證"})
+        self.invoke("options.update", {"id": oid, "fields": {"value": "SGS認證"}})
         self.assertEqual(
-            self.c.get("/api/barcode/B1").json()["attributes"]["特性詞條"],
+            self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["特性詞條"],
             ["SGS認證"])
 
     def test_default_option_exposed(self):
-        fields = self.c.get(f"/api/categories/{self.cid}/fields").json()
+        fields = self.invoke("categories.fields", {"id": self.cid})
         lf = [f for f in fields if f["name"] == "版型"][0]
         self.assertEqual(lf["default_value"], "滿版")
         # multi 欄型與選項也帶出(供建檔勾選)
@@ -86,19 +79,19 @@ class TestMultiTagsApi(ApiTestCase):
         # 值=預設選項(版型=滿版)不顯示,非預設(9分滿)才顯示
         self._create({"版型": "滿版", "特性詞條": ["低藍光"],
                       "規格": ["藍光", "防窺"]})
-        self.assertEqual(self.c.get("/api/barcode/B1").json()["attr_display"],
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attr_display"],
                          "藍光+防窺｜低藍光")
 
     def test_display_non_default_layout_shown(self):
         self._create({"版型": "9分滿", "規格": ["亮面"]})
-        self.assertEqual(self.c.get("/api/barcode/B1").json()["attr_display"],
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attr_display"],
                          "亮面｜9分滿")
 
     def test_variant_patch_multi(self):
         r = self._create({"規格": ["亮面"]})
         vid = r["variant_ids"][0]
-        self.c.put(f"/api/variants/{vid}", json={"attributes": {"規格": ["霧面", "防窺"]}})
-        self.assertEqual(self.c.get("/api/barcode/B1").json()["attributes"]["規格"],
+        self.invoke("variants.update", {"id": vid, "fields": {"attributes": {"規格": ["霧面", "防窺"]}}})
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["規格"],
                          ["霧面", "防窺"])
 
 

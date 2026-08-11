@@ -2,26 +2,21 @@
 單材質依材質序、複合材質排全部單材質後;同材質組合內素身先、帶詞條依詞條序跟在後。
 樣本皆虛構,不含真實人名。"""
 import unittest
-from base import ApiTestCase
+from base import FacadeTestCase
 
 
-class TestVariantOrder(ApiTestCase):
+class TestVariantOrder(FacadeTestCase):
     def setUp(self):
         super().setUp()
-        self.cid = self.c.post("/api/categories",
-            json={"name": "鋼化玻璃"}).json()["category_id"]
+        self.cid = self.create_category("鋼化玻璃")
         # multi 欄「規格」:亮面/霧面/藍光/防窺(建立順序=sort)
-        self.f_spec = self.c.post("/api/fields",
-            json={"name": "規格", "category_id": self.cid,
-                  "field_type": "multi"}).json()["field_id"]
+        self.f_spec = self.create_field("規格", self.cid, "multi")
         for v in ("亮面", "霧面", "藍光", "防窺"):
-            self.c.post("/api/options", json={"field_id": self.f_spec, "value": v})
+            self.invoke("options.create", {"field_id": self.f_spec, "value": v})
         # tags 欄「特性詞條」:抗AR/藍寶石(建立順序=sort)
-        self.f_tag = self.c.post("/api/fields",
-            json={"name": "特性詞條", "category_id": self.cid,
-                  "field_type": "tags"}).json()["field_id"]
+        self.f_tag = self.create_field("特性詞條", self.cid, "tags")
         for v in ("抗AR", "藍寶石"):
-            self.c.post("/api/options", json={"field_id": self.f_tag, "value": v})
+            self.invoke("options.create", {"field_id": self.f_tag, "value": v})
 
     def _build(self, specs):
         """specs: [( [材質...], [詞條...] ), ...] 依給定順序亂序建檔"""
@@ -31,12 +26,11 @@ class TestVariantOrder(ApiTestCase):
             if tags:
                 attrs["特性詞條"] = tags
             variants.append({"attributes": attrs, "barcodes": []})
-        r = self.c.post("/api/products", json={"name": "玻璃貼",
-            "category_id": self.cid, "variants": variants})
-        assert r.status_code == 200, r.text
+        self.invoke("products.create", {"name": "玻璃貼", "category_id": self.cid,
+                                        "variants": variants})
 
     def _catalog_specs(self):
-        cat = self.c.get("/api/catalog").json()
+        cat = self.invoke("catalog.list")
         return [v["attr_display"] for v in cat[0]["variants"]]
 
     def test_tags_follow_same_material_ar_block_last(self):
