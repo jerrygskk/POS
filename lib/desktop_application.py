@@ -7,6 +7,7 @@ from lib.stock_service import StockFacade
 from lib.sales_service import SalesFacade
 from lib.stocktake_service import StocktakeFacade
 from lib.printing_service import PrintingFacade
+from lib.application_errors import ValidationError
 
 
 class DesktopFacade:
@@ -19,6 +20,8 @@ class DesktopFacade:
         self.printing = PrintingFacade()
 
     def invoke(self, action, payload=None):
+        if not isinstance(action, str):
+            raise ValidationError("不支援的操作")
         if action in ProductFacade.ACTIONS:
             return self.products.invoke(action, payload)
         if action in StockFacade.ACTIONS:

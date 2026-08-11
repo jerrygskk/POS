@@ -16,7 +16,7 @@
 
 | 要做的事 | 動手前先讀 |
 |----------|------------|
-| 改 schema／migration／種子 | DEVELOPER §2 慣例（DDL 唯一來源 `db_schema.py`）；PITFALLS SQL 組 |
+| 改 schema／migration／種子 | DEVELOPER §2 慣例（現行 schema DDL 唯一來源 `db_schema.py`；v1–v13 凍結 migration DDL 在 `legacy_migrations.py`；未來 schema 變更仍須新增 migration）；PITFALLS SQL 組 |
 | 商品／規格欄／選項邏輯 | DEVELOPER §2 慣例（規格值正規化、選項生命週期、限定型號） |
 | 條碼／自取碼 | DEVELOPER §2 慣例（條碼混合、TL 保留字頭、交易語意） |
 | 前端版面／樣式／JS | DEVELOPER §2 UI 風格規範；PITFALLS VUE 組 |

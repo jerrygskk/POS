@@ -24,6 +24,7 @@ def field(path, value_type, *, required=False, nullable=False, default="missing"
         "payload_path": path, "required": required, "type": value_type,
         "nullable": nullable, "default": default, "range_enum": constraint,
         "bool_policy": bool_policy, "normalization": normalization,
+        "retired_pydantic_source": "none",
         "target": target,
         "cases": {
             "missing": "reject" if required else "accept",
@@ -38,6 +39,37 @@ def schema(fields, *, valid_error=None, notes=()):
     return {"fields": {item["payload_path"]: item for item in fields},
             "extra_fields": "reject",
             "valid_error": valid_error, "notes": tuple(notes)}
+
+
+# Historical validation provenance from commit 8edddca, retained as data only.
+# Labels identify a retired Pydantic model or its historical route/query parameter;
+# ``none`` explicitly marks a Facade-only field.
+RETIRED_PYDANTIC_SOURCES = {
+    "categories.list": {"all":"api.catalog.list_items.all"},
+    "categories.create": {p:"api.catalog.CategoryNew" for p in ("name","sort","model_mode")},
+    "categories.update": {"id":"api.catalog.patch_item.item_id", **{p:"api.catalog.CategoryPatch" for p in ("fields","fields.name","fields.sort","fields.active","fields.model_mode")}},
+    "categories.delete": {"id":"api.catalog.delete_item.item_id"}, "categories.sort": {"ids":"api.catalog.SortIds"}, "categories.fields": {"id":"api.catalog.category_fields.cid"},
+    "categories.set_common_fields": {"id":"api.catalog.common_fields.cid", "field_ids":"api.catalog.FieldIdList"},
+    "categories.set_field": {"category_id":"api.catalog.set_category_field.cid", "field_id":"api.catalog.set_category_field.fid", **{p:"api.catalog.CategoryFieldPatch" for p in ("fields","fields.sort","fields.required","fields.default_option_id","fields.active")}},
+    "brands.list": {"all":"api.catalog.list_brands.all", "category_id":"api.catalog.list_brands.category_id"}, "brands.create": {p:"api.catalog.BrandNew" for p in ("name","sort")},
+    "brands.update": {"id":"api.catalog.patch_brand.item_id", **{p:"api.catalog.BrandPatch" for p in ("fields","fields.name","fields.sort","fields.active")}}, "brands.delete": {"id":"api.catalog.delete_brand.item_id"}, "brands.sort": {"ids":"api.catalog.SortIds"}, "brands.set_categories": {"id":"api.catalog.set_brand_categories.bid", "category_ids":"api.catalog.IdList"},
+    "phone_brands.list": {"all":"api.catalog.list_items.all"}, "phone_brands.create": {p:"api.catalog.PhoneBrandNew" for p in ("name","sort")},
+    "phone_brands.update": {"id":"api.catalog.patch_item.item_id", **{p:"api.catalog.PhoneBrandPatch" for p in ("fields","fields.name","fields.sort","fields.active")}}, "phone_brands.delete": {"id":"api.catalog.delete_item.item_id"}, "phone_brands.sort": {"ids":"api.catalog.SortIds"},
+    "models.list": {"all":"api.catalog.list_models.all", "phone_brand_id":"api.catalog.list_models.phone_brand_id"}, "models.create": {p:"api.catalog.ModelNew" for p in ("phone_brand_id","name","alias","series","sort")},
+    "models.update": {"id":"api.catalog.patch_model.mid", **{p:"api.catalog.ModelPatch" for p in ("fields","fields.phone_brand_id","fields.name","fields.alias","fields.series","fields.sort","fields.active")}}, "models.delete": {"id":"api.catalog.delete_model.mid"}, "models.sort": {"ids":"api.catalog.SortIds"},
+    "fields.list": {p:f"api.attributes.fields.{p}" for p in ("category_id","common")}, "fields.create": {p:"api.attributes.FieldNew" for p in ("name","category_id","field_type","default_option_id")},
+    "fields.update": {"id":"api.attributes.patch_field.fid", **{p:"api.attributes.FieldPatch" for p in ("fields","fields.name","fields.sort","fields.active","fields.field_type","fields.default_option_id")}},
+    "options.list": {p:f"api.attributes.options.{p}" for p in ("field_id","all","model_ids")}, "options.create": {p:"api.attributes.OptionNew" for p in ("field_id","value","reactivate")},
+    "options.update": {"id":"api.attributes.patch_option.oid", **{p:"api.attributes.OptionPatch" for p in ("fields","fields.value","fields.sort","fields.active")}}, "options.delete": {"id":"api.attributes.delete_option.oid"}, "options.models": {"id":"api.attributes.option_models.oid"}, "options.set_models": {"id":"api.attributes.set_option_models.oid", "model_ids":"api.attributes.OptionModelList"},
+    "products.create": {**{p:"api.products.ProductIn" for p in ("name","category_id","brand_id","brand_name","note","variants")}, **{p:"api.products.VariantIn" for p in ("variants[].attributes","variants[].price","variants[].model_ids","variants[].barcodes")}, **{p:"api.products.BarcodeIn" for p in ("variants[].barcodes[].barcode","variants[].barcodes[].source")}},
+    "products.list": {p:f"api.products.search.{p}" for p in ("q","category_id","brand_id","model_id")}, "products.update": {"id":"api.products.update_product.pid", **{p:"api.products.ProductPatch" for p in ("fields","fields.name","fields.category_id","fields.brand_id","fields.brand_name","fields.note","fields.active")}}, "products.delete": {"id":"api.products.delete_product.pid"},
+    "catalog.list": {p:f"api.products.catalog.{p}" for p in ("q","include_inactive","category_id","brand_id","model_id")},
+    "variants.create": {"product_id":"api.products.add_variant.pid", **{p:"api.products.NewVariantIn" for p in ("fields","fields.attributes","fields.price","fields.model_ids","fields.barcodes")}, **{p:"api.products.BarcodeIn" for p in ("fields.barcodes[].barcode","fields.barcodes[].source")}},
+    "variants.update": {"id":"api.products.update_variant.vid", **{p:"api.products.VariantPatch" for p in ("fields","fields.attributes","fields.price","fields.active")}}, "variants.set_models": {"id":"api.products.set_variant_models.vid", "model_ids":"api.products.ModelIdList"}, "variants.delete": {"id":"api.products.delete_variant.vid"},
+    "barcodes.scan": {"code":"api.products.scan.code"}, "barcodes.add": {"variant_id":"api.products.add_barcode.variant_id", **{p:"api.products.BarcodeIn" for p in ("barcode","source")}}, "barcodes.delete": {"code":"api.products.delete_barcode.code"},
+    "stock.receive": {p:"api.stock.ReceiveIn" for p in ("variant_id","qty","note")}, "stock.detail": {"variant_id":"api.stock.detail.variant_id"}, "stocktake.create": {p:"api.stocktake.SessionIn" for p in ("operator","note")}, "stocktake.scan": {"session_id":"api.stocktake.scan.sid", **{p:"api.stocktake.ScanIn" for p in ("variant_id","qty")}}, "stocktake.set_counted": {"session_id":"api.stocktake.set_counted.sid", "variant_id":"api.stocktake.set_counted.variant_id", "counted_qty":"api.stocktake.SetIn"}, "stocktake.detail": {"session_id":"api.stocktake.detail.sid"}, "stocktake.close": {"session_id":"api.stocktake.close.sid"},
+    "sales.checkout": {**{p:"api.sales.SaleIn" for p in ("payment","order_discount","paid","items")}, **{p:"api.sales.ItemIn" for p in ("items[].variant_id","items[].qty","items[].unit_price","items[].discount")}}, "sales.list": {p:f"api.sales.list_sales.{p}" for p in ("date_from","date_to","payment")}, "sales.summary": {p:f"api.sales.summary.{p}" for p in ("date_from","date_to","payment","date")}, "sales.export": {p:f"api.sales.export_csv.{p}" for p in ("date_from","date_to","payment")},
+}
 
 
 I = lambda path, **kw: field(path, "int", bool_policy="reject_as_int", wrong="x", **kw)
@@ -159,8 +191,34 @@ TARGET_BY_ACTION = {
     "sales.export":"lib.sales_service.SalesFacade._prepare_payload -> _filters",
 }
 for _action, _contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items():
-    for _spec in _contract["fields"].values():
+    for _path, _spec in _contract["fields"].items():
         _spec["target"] = TARGET_BY_ACTION[_action]
+        _spec["retired_pydantic_source"] = RETIRED_PYDANTIC_SOURCES.get(
+            _action, {}).get(_path, "none")
+
+
+def validate_retired_source_metadata(contracts):
+    """Keep the retired model/path/query provenance complete and exact."""
+    expected = {(action, path): source
+                for action, fields in RETIRED_PYDANTIC_SOURCES.items()
+                for path, source in fields.items()}
+    actual_pairs = {(action, path) for action, contract in contracts.items()
+                    for path in contract["fields"]}
+    unknown_pairs = set(expected) - actual_pairs
+    if unknown_pairs:
+        raise AssertionError(f"retired source refers to unknown fields: {sorted(unknown_pairs)}")
+    allowed_sources = set(expected.values()) | {"none"}
+    for action, contract in contracts.items():
+        for path, spec in contract["fields"].items():
+            if "retired_pydantic_source" not in spec:
+                raise AssertionError(f"missing retired source for {action}.{path}")
+            source = spec["retired_pydantic_source"]
+            if source not in allowed_sources:
+                raise AssertionError(f"unknown retired source {source!r} for {action}.{path}")
+            wanted = expected.get((action, path), "none")
+            if source != wanted:
+                raise AssertionError(
+                    f"wrong retired source for {action}.{path}: expected {wanted!r}, got {source!r}")
 
 FRONTEND_ACTIONS = set(ACTION_CONTRACTS)
 
@@ -331,6 +389,15 @@ def _constraint_invalid(spec):
 
 
 class ActionContractTests(FacadeTestCase):
+    def test_non_string_actions_are_validation_errors_at_desktop_boundary(self):
+        for action in ([], {}, {"unhashable"}, 1):
+            with self.subTest(action=repr(action)):
+                with self.assertRaises(ValidationError):
+                    self.facade.invoke(action, {})
+                response = self.bridge.invoke(action, {})
+                self.assertFalse(response["ok"])
+                self.assertEqual(response["error"]["code"], "validation_error")
+
     def setUp(self):
         super().setUp()
         self.category_id = self.create_category("契約種類")
@@ -392,12 +459,22 @@ class ActionContractTests(FacadeTestCase):
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
         self.assertEqual(set(TARGET_BY_ACTION), FRONTEND_ACTIONS | {"sales.export"})
-        for action, contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items():
+        contracts = {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}
+        validate_retired_source_metadata(contracts)
+        missing = copy.deepcopy(contracts)
+        del missing["stock.detail"]["fields"]["variant_id"]["retired_pydantic_source"]
+        with self.assertRaisesRegex(AssertionError, "missing retired source"):
+            validate_retired_source_metadata(missing)
+        bogus = copy.deepcopy(contracts)
+        bogus["stock.detail"]["fields"]["variant_id"]["retired_pydantic_source"] = "api.stock.Bogus"
+        with self.assertRaisesRegex(AssertionError, "unknown retired source"):
+            validate_retired_source_metadata(bogus)
+        for action, contract in contracts.items():
             with self.subTest(action=action):
                 self.assertEqual(contract["extra_fields"], "reject")
                 for path, spec in contract["fields"].items():
                     self.assertEqual(path, spec["payload_path"])
-                    self.assertEqual(set(spec), {"payload_path","required","type","nullable","default","range_enum","bool_policy","normalization","target","cases"})
+                    self.assertEqual(set(spec), {"payload_path","required","type","nullable","default","range_enum","bool_policy","normalization","retired_pydantic_source","target","cases"})
                     self.assertNotEqual(spec["type"], "any")
                     self.assertIn("lib.", spec["target"])
                     self.assertNotEqual(spec["target"], "Facade._prepare_payload")
