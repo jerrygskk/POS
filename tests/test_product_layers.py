@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from base import ConnTestCase
 from lib.db import get_conn
+from lib.product_rules import format_store_barcode
 from lib.desktop_bridge import DesktopBridge
 from lib.product_service import ProductFacade
 
@@ -96,7 +97,7 @@ class TestProductLayers(ConnTestCase):
         })
         conn = get_conn(self.db)
         code = conn.execute("SELECT barcode FROM Barcode WHERE variant_id=?", (made["variant_ids"][0],)).fetchone()[0]
-        self.assertEqual(code, "TL100000001")
+        self.assertEqual(code, format_store_barcode(1))
         self.assertIsNone(conn.execute("SELECT 1 FROM Product WHERE name='Rollback'").fetchone())
         conn.close()
 

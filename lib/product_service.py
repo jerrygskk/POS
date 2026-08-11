@@ -4,7 +4,9 @@ from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, NotFoundError, ValidationError
 from lib.db import in_clause, next_sort
 from lib.normalize import normalize_display, normalize_key
-from lib.product_rules import allow_keys as _allow, is_int as _is_int, next_store_barcode
+from lib.product_rules import (allow_keys as _allow, is_int as _is_int,
+                               has_store_barcode_prefix, next_store_barcode,
+                               parse_store_barcode)
 from lib import product_data
 
 
@@ -209,7 +211,7 @@ class ProductService:
     def _add_barcode(self, variant_id, payload):
         self.repo.require_variant(variant_id)
         code = payload.get("barcode")
-        if code and code.strip().upper().startswith("TL"):
+        if has_store_barcode_prefix(code):
             raise ValidationError("TL 開頭條碼僅供系統自動產生")
         code = code or next_store_barcode(self.repo.connection)
         if self.repo.one("SELECT 1 FROM Barcode WHERE barcode=?", (code,)):
@@ -222,6 +224,10 @@ class ProductService:
         return self._add_barcode(payload["variant_id"], payload)
 
     def scan(self, code):
+        # 自取碼先驗檢查碼：掃錯或打錯一位時明確回報格式錯誤，
+        # 不要拿錯碼去查資料庫而回報成「查無此條碼」，避免誤判為商品未建檔。
+        if has_store_barcode_prefix(code) and parse_store_barcode(code) is None:
+            raise ValidationError("自取碼格式不正確")
         row = self.repo.one(
             "SELECT v.variant_id,v.product_id,v.price price,p.name,"
             "(COALESCE(c.active,1) AND p.active AND v.active AND "

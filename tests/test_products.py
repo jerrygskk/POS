@@ -2,16 +2,17 @@ import unittest
 
 from base import ConnTestCase, FacadeTestCase
 from lib.application_errors import ValidationError
-from lib.product_rules import FIELD_TYPES, allow_keys, check_field_type, is_int, next_store_barcode
+from lib.product_rules import (FIELD_TYPES, allow_keys, check_field_type, format_store_barcode,
+                               is_int, next_store_barcode, parse_store_barcode)
 
 
 class TestProductRules(ConnTestCase):
     def test_next_store_barcode_uses_default_and_increments(self):
-        self.assertEqual(next_store_barcode(self.conn), "TL100000001"); self.assertEqual(next_store_barcode(self.conn), "TL100000002")
-        self.assertEqual(self.conn.execute("SELECT value FROM Setting WHERE key='next_store_barcode'").fetchone()["value"], "100000003")
+        self.assertEqual(next_store_barcode(self.conn), format_store_barcode(1)); self.assertEqual(next_store_barcode(self.conn), format_store_barcode(2))
+        self.assertEqual(self.conn.execute("SELECT value FROM Setting WHERE key='next_store_barcode'").fetchone()["value"], "3")
 
     def test_next_store_barcode_rolls_back_with_same_connection(self):
-        self.assertEqual(next_store_barcode(self.conn), "TL100000001"); self.conn.rollback(); self.assertEqual(next_store_barcode(self.conn), "TL100000001")
+        self.assertEqual(next_store_barcode(self.conn), format_store_barcode(1)); self.conn.rollback(); self.assertEqual(next_store_barcode(self.conn), format_store_barcode(1))
 
     def test_runtime_field_types_are_shared(self):
         self.assertEqual(FIELD_TYPES, {"select", "text", "multi", "tags"})
@@ -51,7 +52,7 @@ class TestProducts(FacadeTestCase):
 
     def test_store_barcode_sequence(self):
         result = self._create(); vid = result["variant_ids"][0]; first = self.invoke("barcodes.add", {"variant_id": vid, "source": "store"})["barcode"]; second = self.invoke("barcodes.add", {"variant_id": vid, "source": "store"})["barcode"]
-        self.assertTrue(first.startswith("TL") and second.startswith("TL")); self.assertEqual(int(second[2:]) - int(first[2:]), 1)
+        self.assertTrue(first.startswith("TL") and second.startswith("TL")); self.assertEqual(parse_store_barcode(second) - parse_store_barcode(first), 1)
 
     def test_manual_tl_barcode_rejected(self):
         result = self._create(); vid = result["variant_ids"][0]
@@ -61,7 +62,7 @@ class TestProducts(FacadeTestCase):
     def test_store_barcode_not_reused_after_delete(self):
         result = self._create(); vid = result["variant_ids"][0]; first = self.invoke("barcodes.add", {"variant_id": vid, "source": "store"})["barcode"]
         self.assertTrue(self.invoke("barcodes.delete", {"code": first})["ok"]); second = self.invoke("barcodes.add", {"variant_id": vid, "source": "store"})["barcode"]
-        self.assertEqual(int(second[2:]), int(first[2:]) + 1)
+        self.assertEqual(parse_store_barcode(second), parse_store_barcode(first) + 1)
 
     def test_add_barcode_unknown_variant_raises_not_found(self):
         self.assert_application_error("not_found", "barcodes.add", {"variant_id": 999999, "source": "store"})

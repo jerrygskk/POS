@@ -10,7 +10,7 @@ from lib.application_errors import NotFoundError, ValidationError
 from lib.db import next_sort
 from lib.normalize import normalize_display, normalize_key
 from lib.product_data import FEATURE_FIELD_KEY, variant_signature
-from lib.product_rules import next_store_barcode
+from lib.product_rules import has_store_barcode_prefix, next_store_barcode
 
 
 class VariantBatchService:
@@ -145,7 +145,7 @@ class VariantBatchService:
             code = bc.get("barcode")
             code = code.strip() if isinstance(code, str) else code
             source = bc.get("source") or ("factory" if code else "store")
-            if code and code.upper().startswith("TL"):
+            if has_store_barcode_prefix(code):
                 fail_hard("TL 開頭條碼僅供系統自動產生")
                 continue
             barcodes.append({"barcode": code or None, "source": source})
