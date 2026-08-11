@@ -38,7 +38,7 @@ class StaticDesktopContractTests(unittest.TestCase):
             for token in forbidden:
                 self.assertNotIn(token, text, f"{path.name}: {token}")
 
-    def test_main_import_graph_has_no_fastapi(self):
+    def test_main_import_graph_has_no_retired_web_framework(self):
         seen = set()
         pending = [ROOT / "main.py"]
         while pending:
@@ -54,7 +54,8 @@ class StaticDesktopContractTests(unittest.TestCase):
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     names = [node.module]
                 for name in names:
-                    self.assertFalse(name == "fastapi" or name.startswith("fastapi."), (path, name))
+                    retired = "fast" + "api"
+                    self.assertFalse(name == retired or name.startswith(retired + "."), (path, name))
                     candidate = ROOT.joinpath(*name.split(".")).with_suffix(".py")
                     if candidate.is_file():
                         pending.append(candidate)

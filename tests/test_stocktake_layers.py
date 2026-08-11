@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess
 from unittest.mock import Mock, patch
 
-from base import ConnTestCase, make_client
+from base import ConnTestCase
 from lib.desktop_bridge import DesktopBridge
 
 
@@ -76,17 +76,6 @@ class TestStocktakeLayers(ConnTestCase):
             "session_id": sid, "variant_id": 1, "counted_qty": 0})["error"]["code"])
         self.assertEqual("not_found", self.bridge.invoke("stocktake.scan", {
             "session_id": sid, "variant_id": 999, "qty": 1})["error"]["code"])
-
-    def test_http_routes_are_thin_facade_adapters_and_contract(self):
-        client = make_client(self.db)
-        with patch("api.stocktake.StocktakeFacade") as facade_type:
-            facade_type.return_value.invoke.return_value = {"session_id": 8}
-            response = client.post("/api/stocktake", json={"operator": "A", "note": None})
-            self.assertEqual({"session_id": 8}, response.json())
-            facade_type.return_value.invoke.assert_called_once_with(
-                "stocktake.create", {"operator": "A", "note": None})
-        self.assertEqual(422, client.post("/api/stocktake/1/scan", json={
-            "variant_id": 1, "qty": True}).status_code)
 
     def test_frontend_routes_every_stocktake_url_to_bridge(self):
         source = (Path(__file__).parents[1] / "static/js/api.js").read_text(encoding="utf-8")

@@ -1,7 +1,7 @@
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from base import ConnTestCase, make_client
+from base import ConnTestCase
 from lib.db import get_conn
 from lib.desktop_bridge import DesktopBridge
 
@@ -90,36 +90,7 @@ class TestStockLayers(ConnTestCase):
         result = self.bridge.invoke("stock.delete_all", {})
         self.assertEqual("validation_error", result["error"]["code"])
 
-    def test_http_routes_use_facade_contract(self):
-        client = make_client(self.db)
-        with patch("api.stock.StockFacade") as facade_type:
-            facade_type.return_value.invoke.return_value = {"stock": 7}
-            response = client.post(
-                "/api/stock/receive", json={"variant_id": 1, "qty": 2}
-            )
-            self.assertEqual({"stock": 7}, response.json())
-            facade_type.return_value.invoke.assert_called_once_with(
-                "stock.receive", {"variant_id": 1, "qty": 2, "note": None}
-            )
-
-        with patch("api.stock.StockFacade") as facade_type:
-            facade_type.return_value.invoke.return_value = {
-                "stock": 7, "movements": []
-            }
-            response = client.get("/api/stock/1")
-            self.assertEqual(200, response.status_code)
-            facade_type.return_value.invoke.assert_called_once_with(
-                "stock.detail", {"variant_id": 1}
-            )
-
-    def test_http_and_frontend_contract_rejects_bool_and_routes_stock_to_bridge(self):
-        client = make_client(self.db)
-        self.assertEqual(
-            422,
-            client.post(
-                "/api/stock/receive", json={"variant_id": 1, "qty": True}
-            ).status_code,
-        )
+    def test_frontend_and_desktop_bridge_reject_bool_and_route_stock(self):
         source = (Path(__file__).parents[1] / "static" / "js" / "api.js").read_text(
             encoding="utf-8"
         )

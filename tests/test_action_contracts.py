@@ -1,28 +1,19 @@
-"""Desktop action payload contracts and the temporary HTTP parity harness.
-
-The table below is deliberately executable.  A field is present only when the
-corresponding Facade validator accepts it; actions without a Pydantic body model
-say ``source='none'`` explicitly.  Phase 5 removes only the HTTP comparison
-class, not the Facade contract table/tests.
-"""
+"""Executable Desktop Facade action payload contracts."""
 import copy
-import importlib
-import inspect
 import re
 
 from lib.application_errors import ConflictError, NotFoundError, ValidationError
 from lib.desktop_application import DesktopFacade
 from lib.desktop_bridge import DesktopBridge
 from lib.db import get_conn
-from tests.base import ApiTestCase, FacadeTestCase
+from tests.base import FacadeTestCase
 
 
 NA = "not_applicable"
 
 
 def field(path, value_type, *, required=False, nullable=False, default="missing",
-          constraint="none", bool_policy="n/a", normalization="none",
-          source="none", target=None, blank=NA,
+          constraint="none", bool_policy="n/a", normalization="none", target=None, blank=NA,
           wrong=None, null=None, list_element=NA):
     """Materialise every §8.5 column and every applicable mutation expectation."""
     if wrong is None:
@@ -33,7 +24,7 @@ def field(path, value_type, *, required=False, nullable=False, default="missing"
         "payload_path": path, "required": required, "type": value_type,
         "nullable": nullable, "default": default, "range_enum": constraint,
         "bool_policy": bool_policy, "normalization": normalization,
-        "source": source, "target": target,
+        "target": target,
         "cases": {
             "missing": "reject" if required else "accept",
             "wrong_type": {"expect": "reject", "value": wrong},
@@ -43,9 +34,9 @@ def field(path, value_type, *, required=False, nullable=False, default="missing"
     }
 
 
-def schema(fields, *, http="none", valid_error=None, notes=()):
+def schema(fields, *, valid_error=None, notes=()):
     return {"fields": {item["payload_path"]: item for item in fields},
-            "extra_fields": "reject", "http": http,
+            "extra_fields": "reject",
             "valid_error": valid_error, "notes": tuple(notes)}
 
 
@@ -59,219 +50,82 @@ M = lambda path, **kw: field(path, "mapping", wrong=[], **kw)
 
 # Every key is written explicitly.  There is intentionally no action-name fallback.
 ACTION_CONTRACTS = {
-    "categories.list": schema([BI("all", default=0, source="none"), I("category_id", nullable=True, default=None, source="none")], http="GET /api/categories", notes=("Facade accepts but ignores category_id; HTTP has no such query parameter.",)),
-    "categories.create": schema([S("name", required=True, source="api.catalog.CategoryNew", blank="accept"), I("sort", nullable=True, default=None, source="api.catalog.CategoryNew"), S("model_mode", nullable=True, default=None, constraint="required|hidden", source="api.catalog.CategoryNew")], http="POST /api/categories"),
-    "categories.update": schema([I("id", required=True), M("fields", required=True, source="api.catalog.CategoryPatch"), S("fields.name", source="api.catalog.CategoryPatch", blank="accept"), I("fields.sort", source="api.catalog.CategoryPatch"), BI("fields.active", source="api.catalog.CategoryPatch"), S("fields.model_mode", constraint="required|hidden", source="api.catalog.CategoryPatch")], http="PATCH /api/categories/{id}"),
-    "categories.delete": schema([I("id", required=True)], http="DELETE /api/categories/{id}"),
-    "categories.sort": schema([LI("ids", required=True, source="api.catalog.SortIds")], http="PUT /api/categories/sort"),
-    "categories.fields": schema([I("id", required=True)], http="GET /api/categories/{id}/fields"),
-    "categories.set_common_fields": schema([I("id", required=True), LI("field_ids", required=True, source="api.catalog.FieldIdList")], http="PUT /api/categories/{id}/fields-common"),
-    "categories.set_field": schema([I("category_id", required=True), I("field_id", required=True), M("fields", required=True, source="api.catalog.CategoryFieldPatch"), I("fields.sort", source="api.catalog.CategoryFieldPatch"), BI("fields.required", source="api.catalog.CategoryFieldPatch"), I("fields.default_option_id", nullable=True, default=None, source="api.catalog.CategoryFieldPatch"), BI("fields.active", source="api.catalog.CategoryFieldPatch")], http="PUT /api/categories/{id}/fields/{field_id}"),
+    "categories.list": schema([BI("all", default=0), I("category_id", nullable=True, default=None)], notes=("Facade accepts but ignores category_id.",)),
+    "categories.create": schema([S("name", required=True, blank="accept"), I("sort", nullable=True, default=None), S("model_mode", nullable=True, default=None, constraint="required|hidden")]),
+    "categories.update": schema([I("id", required=True), M("fields", required=True), S("fields.name", blank="accept"), I("fields.sort"), BI("fields.active"), S("fields.model_mode", constraint="required|hidden")]),
+    "categories.delete": schema([I("id", required=True)]),
+    "categories.sort": schema([LI("ids", required=True)]),
+    "categories.fields": schema([I("id", required=True)]),
+    "categories.set_common_fields": schema([I("id", required=True), LI("field_ids", required=True)]),
+    "categories.set_field": schema([I("category_id", required=True), I("field_id", required=True), M("fields", required=True), I("fields.sort"), BI("fields.required"), I("fields.default_option_id", nullable=True, default=None), BI("fields.active")]),
 
-    "brands.list": schema([BI("all", default=0), I("category_id", nullable=True, default=None)], http="GET /api/brands"),
-    "brands.create": schema([S("name", required=True, source="api.catalog.BrandNew", blank="accept"), I("sort", nullable=True, default=None, source="api.catalog.BrandNew")], http="POST /api/brands"),
-    "brands.update": schema([I("id", required=True), M("fields", required=True, source="api.catalog.BrandPatch"), S("fields.name", source="api.catalog.BrandPatch", blank="accept"), I("fields.sort", source="api.catalog.BrandPatch"), BI("fields.active", source="api.catalog.BrandPatch")], http="PATCH /api/brands/{id}"),
-    "brands.delete": schema([I("id", required=True)], http="DELETE /api/brands/{id}"),
-    "brands.sort": schema([LI("ids", required=True, source="api.catalog.SortIds")], http="PUT /api/brands/sort"),
-    "brands.set_categories": schema([I("id", required=True), LI("category_ids", required=True, source="api.catalog.IdList")], http="PUT /api/brands/{id}/categories"),
+    "brands.list": schema([BI("all", default=0), I("category_id", nullable=True, default=None)]),
+    "brands.create": schema([S("name", required=True, blank="accept"), I("sort", nullable=True, default=None)]),
+    "brands.update": schema([I("id", required=True), M("fields", required=True), S("fields.name", blank="accept"), I("fields.sort"), BI("fields.active")]),
+    "brands.delete": schema([I("id", required=True)]),
+    "brands.sort": schema([LI("ids", required=True)]),
+    "brands.set_categories": schema([I("id", required=True), LI("category_ids", required=True)]),
 
-    "phone_brands.list": schema([BI("all", default=0), I("category_id", nullable=True, default=None)], http="GET /api/phone-brands"),
-    "phone_brands.create": schema([S("name", required=True, source="api.catalog.PhoneBrandNew", blank="accept"), I("sort", nullable=True, default=None, source="api.catalog.PhoneBrandNew")], http="POST /api/phone-brands"),
-    "phone_brands.update": schema([I("id", required=True), M("fields", required=True, source="api.catalog.PhoneBrandPatch"), S("fields.name", source="api.catalog.PhoneBrandPatch", blank="accept"), I("fields.sort", source="api.catalog.PhoneBrandPatch"), BI("fields.active", source="api.catalog.PhoneBrandPatch")], http="PATCH /api/phone-brands/{id}"),
-    "phone_brands.delete": schema([I("id", required=True)], http="DELETE /api/phone-brands/{id}"),
-    "phone_brands.sort": schema([LI("ids", required=True, source="api.catalog.SortIds")], http="PUT /api/phone-brands/sort"),
+    "phone_brands.list": schema([BI("all", default=0), I("category_id", nullable=True, default=None)]),
+    "phone_brands.create": schema([S("name", required=True, blank="accept"), I("sort", nullable=True, default=None)]),
+    "phone_brands.update": schema([I("id", required=True), M("fields", required=True), S("fields.name", blank="accept"), I("fields.sort"), BI("fields.active")]),
+    "phone_brands.delete": schema([I("id", required=True)]),
+    "phone_brands.sort": schema([LI("ids", required=True)]),
 
-    "models.list": schema([BI("all", default=0), I("phone_brand_id", nullable=True, default=None)], http="GET /api/models"),
-    "models.create": schema([I("phone_brand_id", required=True, source="api.catalog.ModelNew"), S("name", required=True, source="api.catalog.ModelNew", blank="accept"), S("alias", nullable=True, default=None, source="api.catalog.ModelNew"), S("series", nullable=True, default=None, source="api.catalog.ModelNew", normalization="trim; blank becomes None"), I("sort", nullable=True, default=None, source="api.catalog.ModelNew")], http="POST /api/models"),
-    "models.update": schema([I("id", required=True), M("fields", required=True, source="api.catalog.ModelPatch"), I("fields.phone_brand_id", source="api.catalog.ModelPatch"), S("fields.name", source="api.catalog.ModelPatch", blank="accept"), S("fields.alias", nullable=True, default=None, source="api.catalog.ModelPatch"), S("fields.series", nullable=True, default=None, source="api.catalog.ModelPatch", normalization="trim; blank becomes None"), I("fields.sort", source="api.catalog.ModelPatch"), BI("fields.active", source="api.catalog.ModelPatch")], http="PATCH /api/models/{id}"),
-    "models.delete": schema([I("id", required=True)], http="DELETE /api/models/{id}"),
-    "models.sort": schema([LI("ids", required=True, source="api.catalog.SortIds")], http="PUT /api/models/sort"),
+    "models.list": schema([BI("all", default=0), I("phone_brand_id", nullable=True, default=None)]),
+    "models.create": schema([I("phone_brand_id", required=True), S("name", required=True, blank="accept"), S("alias", nullable=True, default=None), S("series", nullable=True, default=None, normalization="trim; blank becomes None"), I("sort", nullable=True, default=None)]),
+    "models.update": schema([I("id", required=True), M("fields", required=True), I("fields.phone_brand_id"), S("fields.name", blank="accept"), S("fields.alias", nullable=True, default=None), S("fields.series", nullable=True, default=None, normalization="trim; blank becomes None"), I("fields.sort"), BI("fields.active")]),
+    "models.delete": schema([I("id", required=True)]),
+    "models.sort": schema([LI("ids", required=True)]),
 
-    "fields.list": schema([I("category_id", nullable=True, default=None), BI("common", default=0)], http="GET /api/fields"),
-    "fields.create": schema([S("name", required=True, source="api.attributes.FieldNew", blank="accept"), I("category_id", nullable=True, default=None, source="api.attributes.FieldNew"), S("field_type", default="select", constraint="select|text|multi|tags", source="api.attributes.FieldNew"), I("default_option_id", nullable=True, default=None, constraint="must be None on create", source="api.attributes.FieldNew")], http="POST /api/fields"),
-    "fields.update": schema([I("id", required=True), M("fields", required=True, source="api.attributes.FieldPatch"), S("fields.name", source="api.attributes.FieldPatch", blank="accept"), I("fields.sort", source="api.attributes.FieldPatch"), BI("fields.active", source="api.attributes.FieldPatch"), S("fields.field_type", constraint="select|text|multi|tags", source="api.attributes.FieldPatch"), I("fields.default_option_id", nullable=True, default=None, source="api.attributes.FieldPatch")], http="PUT /api/fields/{id}"),
-    "options.list": schema([I("field_id", required=True), BI("all", default=0), LI("model_ids", default=[])], http="GET /api/options"),
-    "options.create": schema([I("field_id", required=True, source="api.attributes.OptionNew"), S("value", required=True, source="api.attributes.OptionNew", blank="accept"), B("reactivate", default=False, source="api.attributes.OptionNew")], http="POST /api/options"),
-    "options.update": schema([I("id", required=True), M("fields", required=True, source="api.attributes.OptionPatch"), S("fields.value", source="api.attributes.OptionPatch", blank="accept"), I("fields.sort", source="api.attributes.OptionPatch"), BI("fields.active", source="api.attributes.OptionPatch")], http="PATCH /api/options/{id}"),
-    "options.delete": schema([I("id", required=True)], http="DELETE /api/options/{id}"),
-    "options.models": schema([I("id", required=True)], http="GET /api/options/{id}/models"),
-    "options.set_models": schema([I("id", required=True), LI("model_ids", required=True, source="api.attributes.OptionModelList")], http="PUT /api/options/{id}/models"),
-    "options.cleanup": schema([I("field_id", nullable=True, default=None)], notes=("No HTTP route/Pydantic model.",)),
+    "fields.list": schema([I("category_id", nullable=True, default=None), BI("common", default=0)]),
+    "fields.create": schema([S("name", required=True, blank="accept"), I("category_id", nullable=True, default=None), S("field_type", default="select", constraint="select|text|multi|tags"), I("default_option_id", nullable=True, default=None, constraint="must be None on create")]),
+    "fields.update": schema([I("id", required=True), M("fields", required=True), S("fields.name", blank="accept"), I("fields.sort"), BI("fields.active"), S("fields.field_type", constraint="select|text|multi|tags"), I("fields.default_option_id", nullable=True, default=None)]),
+    "options.list": schema([I("field_id", required=True), BI("all", default=0), LI("model_ids", default=[])]),
+    "options.create": schema([I("field_id", required=True), S("value", required=True, blank="accept"), B("reactivate", default=False)]),
+    "options.update": schema([I("id", required=True), M("fields", required=True), S("fields.value", blank="accept"), I("fields.sort"), BI("fields.active")]),
+    "options.delete": schema([I("id", required=True)]),
+    "options.models": schema([I("id", required=True)]),
+    "options.set_models": schema([I("id", required=True), LI("model_ids", required=True)]),
+    "options.cleanup": schema([I("field_id", nullable=True, default=None)], notes=("Desktop-only action.",)),
 
-    "products.create": schema([S("name", required=True, source="api.products.ProductIn", blank="accept", normalization="normalize_key only for duplicate comparison; stored unchanged"), I("category_id", required=True, source="api.products.ProductIn"), I("brand_id", nullable=True, default=None, source="api.products.ProductIn"), S("brand_name", nullable=True, default=None, source="api.products.ProductIn", blank="accept", normalization="normalize_key for reuse; normalize_display when creating"), S("note", nullable=True, default=None, source="api.products.ProductIn", blank="accept"), field("variants", "list[VariantIn]", default=[], source="api.products.ProductIn", wrong="x", list_element={"expect":"reject","value":"x"}), M("variants[].attributes", source="api.products.VariantIn", normalization="field names exact-match (feature key excepted); select/multi/tags values str.strip and deduplicate preserving order; text values stored unchanged"), I("variants[].price", nullable=True, default=None, source="api.products.VariantIn"), I("variants[].active", nullable=True, default=None, source="none"), LI("variants[].model_ids", default=[], source="api.products.VariantIn"), field("variants[].barcodes", "list[BarcodeIn]", default=[], source="api.products.VariantIn", wrong="x", list_element={"expect":"reject","value":"x"}), S("variants[].barcodes[].barcode", nullable=True, default=None, source="api.products.BarcodeIn", normalization="falsy generates next store barcode; stored nonempty string unchanged"), S("variants[].barcodes[].source", default="store", source="api.products.BarcodeIn")], http="POST /api/products", notes=("variants[].active is Desktop-only; ProductIn drops it.",)),
-    "products.list": schema([S("q", default="", blank="accept"), I("category_id", nullable=True, default=None), I("brand_id", nullable=True, default=None), I("model_id", nullable=True, default=None)], http="GET /api/products"),
-    "products.update": schema([I("id", required=True), M("fields", default={}, normalization="missing becomes empty mapping", source="api.products.ProductPatch"), S("fields.name", nullable=True, source="api.products.ProductPatch", blank="accept"), I("fields.category_id", nullable=True, source="api.products.ProductPatch"), I("fields.brand_id", nullable=True, source="api.products.ProductPatch"), S("fields.brand_name", nullable=True, source="api.products.ProductPatch", blank="accept"), S("fields.note", nullable=True, source="api.products.ProductPatch", blank="accept"), I("fields.active", nullable=True, source="api.products.ProductPatch")], http="PUT /api/products/{id}"),
-    "products.delete": schema([I("id", required=True)], http="DELETE /api/products/{id}"),
-    "catalog.list": schema([S("q", default="", blank="accept"), B("include_inactive", default=False), I("category_id", nullable=True, default=None), I("brand_id", nullable=True, default=None), I("model_id", nullable=True, default=None), B("pending", default=False)], http="GET /api/catalog", notes=("pending has no HTTP query parameter.",)),
-    "variants.create": schema([I("product_id", required=True), M("fields", required=True, source="api.products.NewVariantIn"), M("fields.attributes", default={}, source="api.products.NewVariantIn"), I("fields.price", nullable=True, default=None, source="api.products.NewVariantIn"), I("fields.active", nullable=True, default=None, source="none"), LI("fields.model_ids", default=[], source="api.products.NewVariantIn"), field("fields.barcodes", "list[BarcodeIn]", default=[], source="api.products.NewVariantIn", wrong="x", list_element={"expect":"reject","value":"x"}), S("fields.barcodes[].barcode", nullable=True, default=None, source="api.products.BarcodeIn"), S("fields.barcodes[].source", default="store", source="api.products.BarcodeIn")], http="POST /api/products/{id}/variants", notes=("fields.active is Desktop-only; NewVariantIn drops it.",)),
-    "variants.update": schema([I("id", required=True), M("fields", default={}), M("fields.attributes", source="api.products.VariantPatch"), I("fields.price", nullable=True, source="api.products.VariantPatch"), I("fields.active", nullable=True, source="api.products.VariantPatch")], http="PUT /api/variants/{id}", notes=("Facade rejects attributes=null although Pydantic accepts it.",)),
-    "variants.set_models": schema([I("id", required=True), LI("model_ids", default=[], source="api.products.ModelIdList")], http="PUT /api/variants/{id}/models"),
-    "variants.update_details": schema([I("id", required=True), M("fields", default={}), M("fields.attributes"), I("fields.price", nullable=True), I("fields.active", nullable=True), LI("model_ids", default=[])], notes=("No HTTP route/Pydantic model.",)),
-    "variants.delete": schema([I("id", required=True)], http="DELETE /api/variants/{id}"),
-    "variants.batch_create": schema([I("product_id", required=True), field("drafts", "list[Draft]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), S("drafts[].draft_id", nullable=True), M("drafts[].attributes", normalization="field names normalize_key; display values normalize_display; duplicate values removed"), I("drafts[].price", nullable=True), I("drafts[].active", nullable=True, default=1, normalization="truthy becomes 1, falsy becomes 0"), LI("drafts[].model_ids", default=[], normalization="deduplicate preserving order"), field("drafts[].barcodes", "list[Barcode]", default=[], wrong="x", list_element={"expect":"reject","value":"x"}), S("drafts[].barcodes[].barcode", nullable=True, default=None, normalization="trim; blank becomes None"), S("drafts[].barcodes[].source", default="store", normalization="falsy becomes factory for supplied code, store for generated code")], notes=("No HTTP route/Pydantic model.",)),
-    "variants.field_usage": schema([I("category_id", required=True), I("field_id", required=True)], notes=("No HTTP route/Pydantic model.",)),
-    "variants.activate": schema([I("id", required=True)], notes=("No HTTP route/Pydantic model.",)),
-    "variants.issues": schema([], notes=("No HTTP route/Pydantic model.",)),
-    "barcodes.scan": schema([S("code", required=True, blank="accept")], http="GET /api/barcode/{code}"),
-    "barcodes.add": schema([I("variant_id", required=True), S("barcode", nullable=True, default=None, source="api.products.BarcodeIn", blank="accept"), S("source", default="store", source="api.products.BarcodeIn", blank="accept")], http="POST /api/variants/{id}/barcodes"),
-    "barcodes.delete": schema([S("code", required=True, blank="accept")], http="DELETE /api/barcodes/{code}"),
+    "products.create": schema([S("name", required=True, blank="accept", normalization="normalize_key only for duplicate comparison; stored unchanged"), I("category_id", required=True), I("brand_id", nullable=True, default=None), S("brand_name", nullable=True, default=None, blank="accept", normalization="normalize_key for reuse; normalize_display when creating"), S("note", nullable=True, default=None, blank="accept"), field("variants", "list[VariantIn]", default=[], wrong="x", list_element={"expect":"reject","value":"x"}), M("variants[].attributes", normalization="field names exact-match (feature key excepted); select/multi/tags values str.strip and deduplicate preserving order; text values stored unchanged"), I("variants[].price", nullable=True, default=None), I("variants[].active", nullable=True, default=None), LI("variants[].model_ids", default=[]), field("variants[].barcodes", "list[BarcodeIn]", default=[], wrong="x", list_element={"expect":"reject","value":"x"}), S("variants[].barcodes[].barcode", nullable=True, default=None, normalization="falsy generates next store barcode; stored nonempty string unchanged"), S("variants[].barcodes[].source", default="store")], notes=("variants[].active is Desktop-only; ProductIn drops it.",)),
+    "products.list": schema([S("q", default="", blank="accept"), I("category_id", nullable=True, default=None), I("brand_id", nullable=True, default=None), I("model_id", nullable=True, default=None)]),
+    "products.update": schema([I("id", required=True), M("fields", default={}, normalization="missing becomes empty mapping"), S("fields.name", nullable=True, blank="accept"), I("fields.category_id", nullable=True), I("fields.brand_id", nullable=True), S("fields.brand_name", nullable=True, blank="accept"), S("fields.note", nullable=True, blank="accept"), I("fields.active", nullable=True)]),
+    "products.delete": schema([I("id", required=True)]),
+    "catalog.list": schema([S("q", default="", blank="accept"), B("include_inactive", default=False), I("category_id", nullable=True, default=None), I("brand_id", nullable=True, default=None), I("model_id", nullable=True, default=None), B("pending", default=False)], notes=("Facade supports pending directly.",)),
+    "variants.create": schema([I("product_id", required=True), M("fields", required=True), M("fields.attributes", default={}), I("fields.price", nullable=True, default=None), I("fields.active", nullable=True, default=None), LI("fields.model_ids", default=[]), field("fields.barcodes", "list[BarcodeIn]", default=[], wrong="x", list_element={"expect":"reject","value":"x"}), S("fields.barcodes[].barcode", nullable=True, default=None), S("fields.barcodes[].source", default="store")], notes=("fields.active is Desktop-only; NewVariantIn drops it.",)),
+    "variants.update": schema([I("id", required=True), M("fields", default={}), M("fields.attributes"), I("fields.price", nullable=True), I("fields.active", nullable=True)], notes=("Facade rejects attributes=null.",)),
+    "variants.set_models": schema([I("id", required=True), LI("model_ids", default=[])]),
+    "variants.update_details": schema([I("id", required=True), M("fields", default={}), M("fields.attributes"), I("fields.price", nullable=True), I("fields.active", nullable=True), LI("model_ids", default=[])], notes=("Desktop-only action.",)),
+    "variants.delete": schema([I("id", required=True)]),
+    "variants.batch_create": schema([I("product_id", required=True), field("drafts", "list[Draft]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), S("drafts[].draft_id", nullable=True), M("drafts[].attributes", normalization="field names normalize_key; display values normalize_display; duplicate values removed"), I("drafts[].price", nullable=True), I("drafts[].active", nullable=True, default=1, normalization="truthy becomes 1, falsy becomes 0"), LI("drafts[].model_ids", default=[], normalization="deduplicate preserving order"), field("drafts[].barcodes", "list[Barcode]", default=[], wrong="x", list_element={"expect":"reject","value":"x"}), S("drafts[].barcodes[].barcode", nullable=True, default=None, normalization="trim; blank becomes None"), S("drafts[].barcodes[].source", default="store", normalization="falsy becomes factory for supplied code, store for generated code")], notes=("Desktop-only action.",)),
+    "variants.field_usage": schema([I("category_id", required=True), I("field_id", required=True)], notes=("Desktop-only action.",)),
+    "variants.activate": schema([I("id", required=True)], notes=("Desktop-only action.",)),
+    "variants.issues": schema([], notes=("Desktop-only action.",)),
+    "barcodes.scan": schema([S("code", required=True, blank="accept")]),
+    "barcodes.add": schema([I("variant_id", required=True), S("barcode", nullable=True, default=None, blank="accept"), S("source", default="store", blank="accept")]),
+    "barcodes.delete": schema([S("code", required=True, blank="accept")]),
 
-    "stock.receive": schema([I("variant_id", required=True, source="api.stock.ReceiveIn"), I("qty", required=True, constraint=">0", source="api.stock.ReceiveIn"), S("note", nullable=True, default=None, source="api.stock.ReceiveIn", blank="accept")], http="POST /api/stock/receive"),
-    "stock.detail": schema([I("variant_id", required=True)], http="GET /api/stock/{variant_id}"),
-    "stocktake.create": schema([S("operator", nullable=True, default=None, source="api.stocktake.SessionIn", blank="accept"), S("note", nullable=True, default=None, source="api.stocktake.SessionIn", blank="accept")], http="POST /api/stocktake"),
-    "stocktake.list": schema([], http="GET /api/stocktake"),
-    "stocktake.detail": schema([I("session_id", required=True)], http="GET /api/stocktake/{sid}"),
-    "stocktake.scan": schema([I("session_id", required=True), I("variant_id", required=True, source="api.stocktake.ScanIn"), I("qty", required=True, constraint=">0", source="api.stocktake.ScanIn")], http="POST /api/stocktake/{sid}/scan", notes=("Pydantic defaults qty=1; strict Desktop contract requires it.",)),
-    "stocktake.set_counted": schema([I("session_id", required=True), I("variant_id", required=True), I("counted_qty", required=True, constraint=">=0", source="api.stocktake.SetIn")], http="PUT /api/stocktake/{sid}/items/{variant_id}"),
-    "stocktake.close": schema([I("session_id", required=True)], http="POST /api/stocktake/{sid}/close"),
-    "payments.list": schema([], http="GET /api/payments"),
-    "sales.checkout": schema([S("payment", required=True, constraint="must be present in Setting.payments", source="api.sales.SaleIn", blank="reject"), I("order_discount", default=0, constraint=">=0", source="api.sales.SaleIn"), I("paid", required=True, constraint=">=0", source="api.sales.SaleIn"), field("items", "list[ItemIn]", required=True, constraint="min_length=1", source="api.sales.SaleIn", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True, source="api.sales.ItemIn"), I("items[].qty", required=True, constraint=">0", source="api.sales.ItemIn"), I("items[].unit_price", required=True, constraint=">=0", source="api.sales.ItemIn"), I("items[].discount", default=0, constraint="0..qty*unit_price", source="api.sales.ItemIn")], http="POST /api/sales"),
-    "sales.list": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")], http="GET /api/sales"),
-    "sales.summary": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept"), S("date", default="", constraint="empty|YYYY-MM-DD", blank="reject", normalization="copied to date_from/date_to when both absent")], http="GET /api/sales/summary"),
+    "stock.receive": schema([I("variant_id", required=True), I("qty", required=True, constraint=">0"), S("note", nullable=True, default=None, blank="accept")]),
+    "stock.detail": schema([I("variant_id", required=True)]),
+    "stocktake.create": schema([S("operator", nullable=True, default=None, blank="accept"), S("note", nullable=True, default=None, blank="accept")]),
+    "stocktake.list": schema([]),
+    "stocktake.detail": schema([I("session_id", required=True)]),
+    "stocktake.scan": schema([I("session_id", required=True), I("variant_id", required=True), I("qty", required=True, constraint=">0")], notes=("Desktop contract requires qty.",)),
+    "stocktake.set_counted": schema([I("session_id", required=True), I("variant_id", required=True), I("counted_qty", required=True, constraint=">=0")]),
+    "stocktake.close": schema([I("session_id", required=True)]),
+    "payments.list": schema([]),
+    "sales.checkout": schema([S("payment", required=True, constraint="must be present in Setting.payments", blank="reject"), I("order_discount", default=0, constraint=">=0"), I("paid", required=True, constraint=">=0"), field("items", "list[ItemIn]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), I("items[].qty", required=True, constraint=">0"), I("items[].unit_price", required=True, constraint=">=0"), I("items[].discount", default=0, constraint="0..qty*unit_price")]),
+    "sales.list": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")]),
+    "sales.summary": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept"), S("date", default="", constraint="empty|YYYY-MM-DD", blank="reject", normalization="copied to date_from/date_to when both absent")]),
     "sales.export_save": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")], notes=("Transport-only; forwards unchanged to sales.export.",)),
-    "printing.barcode": schema([I("variant_id", required=True, source="none")], http="different legacy POST /api/print/barcode contract", valid_error="validation_error", notes=("Desktop requires variant_id; legacy HTTP accepts barcode/name and always returns 501.",)),
+    "printing.barcode": schema([I("variant_id", required=True)], valid_error="validation_error", notes=("Desktop requires variant_id and reports the feature as unsupported.",)),
 }
 
 INTERNAL_ACTION_CONTRACTS = {
-    "sales.export": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")], http="GET /api/sales/export", notes=("Internal target of sales.export_save.",))
+    "sales.export": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")], notes=("Internal target of sales.export_save.",))
 }
-
-# Exact FastAPI parameter/Pydantic ownership for every HTTP-backed Facade field.
-# A contract field absent from this registry is deliberately Facade-only and must
-# say ``source="none"``.  Values name real endpoint parameters or body models.
-HTTP_FIELD_SOURCES = {
-    "categories.list": {"all":"api.catalog.list_items.all"},
-    "categories.create": {p:"api.catalog.CategoryNew" for p in ("name","sort","model_mode")},
-    "categories.update": {"id":"api.catalog.patch_item.item_id", **{p:"api.catalog.CategoryPatch" for p in ("fields","fields.name","fields.sort","fields.active","fields.model_mode")}},
-    "categories.delete": {"id":"api.catalog.delete_item.item_id"},
-    "categories.sort": {"ids":"api.catalog.SortIds"},
-    "categories.fields": {"id":"api.catalog.category_fields.cid"},
-    "categories.set_common_fields": {"id":"api.catalog.common_fields.cid", "field_ids":"api.catalog.FieldIdList"},
-    "categories.set_field": {"category_id":"api.catalog.set_category_field.cid", "field_id":"api.catalog.set_category_field.fid", **{p:"api.catalog.CategoryFieldPatch" for p in ("fields","fields.sort","fields.required","fields.default_option_id","fields.active")}},
-    "brands.list": {"all":"api.catalog.list_brands.all", "category_id":"api.catalog.list_brands.category_id"},
-    "brands.create": {p:"api.catalog.BrandNew" for p in ("name","sort")},
-    "brands.update": {"id":"api.catalog.patch_brand.item_id", **{p:"api.catalog.BrandPatch" for p in ("fields","fields.name","fields.sort","fields.active")}},
-    "brands.delete": {"id":"api.catalog.delete_brand.item_id"},
-    "brands.sort": {"ids":"api.catalog.SortIds"},
-    "brands.set_categories": {"id":"api.catalog.set_brand_categories.bid", "category_ids":"api.catalog.IdList"},
-    "phone_brands.list": {"all":"api.catalog.list_items.all"},
-    "phone_brands.create": {p:"api.catalog.PhoneBrandNew" for p in ("name","sort")},
-    "phone_brands.update": {"id":"api.catalog.patch_item.item_id", **{p:"api.catalog.PhoneBrandPatch" for p in ("fields","fields.name","fields.sort","fields.active")}},
-    "phone_brands.delete": {"id":"api.catalog.delete_item.item_id"},
-    "phone_brands.sort": {"ids":"api.catalog.SortIds"},
-    "models.list": {"all":"api.catalog.list_models.all", "phone_brand_id":"api.catalog.list_models.phone_brand_id"},
-    "models.create": {p:"api.catalog.ModelNew" for p in ("phone_brand_id","name","alias","series","sort")},
-    "models.update": {"id":"api.catalog.patch_model.mid", **{p:"api.catalog.ModelPatch" for p in ("fields","fields.phone_brand_id","fields.name","fields.alias","fields.series","fields.sort","fields.active")}},
-    "models.delete": {"id":"api.catalog.delete_model.mid"},
-    "models.sort": {"ids":"api.catalog.SortIds"},
-    "fields.list": {p:f"api.attributes.fields.{p}" for p in ("category_id","common")},
-    "fields.create": {p:"api.attributes.FieldNew" for p in ("name","category_id","field_type","default_option_id")},
-    "fields.update": {"id":"api.attributes.patch_field.fid", **{p:"api.attributes.FieldPatch" for p in ("fields","fields.name","fields.sort","fields.active","fields.field_type","fields.default_option_id")}},
-    "options.list": {p:f"api.attributes.options.{p}" for p in ("field_id","all","model_ids")},
-    "options.create": {p:"api.attributes.OptionNew" for p in ("field_id","value","reactivate")},
-    "options.update": {"id":"api.attributes.patch_option.oid", **{p:"api.attributes.OptionPatch" for p in ("fields","fields.value","fields.sort","fields.active")}},
-    "options.delete": {"id":"api.attributes.delete_option.oid"},
-    "options.models": {"id":"api.attributes.option_models.oid"},
-    "options.set_models": {"id":"api.attributes.set_option_models.oid", "model_ids":"api.attributes.OptionModelList"},
-    "products.create": {**{p:"api.products.ProductIn" for p in ("name","category_id","brand_id","brand_name","note","variants")}, **{p:"api.products.VariantIn" for p in ("variants[].attributes","variants[].price","variants[].model_ids","variants[].barcodes")}, **{p:"api.products.BarcodeIn" for p in ("variants[].barcodes[].barcode","variants[].barcodes[].source")}},
-    "products.list": {p:f"api.products.search.{p}" for p in ("q","category_id","brand_id","model_id")},
-    "products.update": {"id":"api.products.update_product.pid", **{p:"api.products.ProductPatch" for p in ("fields","fields.name","fields.category_id","fields.brand_id","fields.brand_name","fields.note","fields.active")}},
-    "products.delete": {"id":"api.products.delete_product.pid"},
-    "catalog.list": {p:f"api.products.catalog.{p}" for p in ("q","include_inactive","category_id","brand_id","model_id")},
-    "variants.create": {"product_id":"api.products.add_variant.pid", **{p:"api.products.NewVariantIn" for p in ("fields","fields.attributes","fields.price","fields.model_ids","fields.barcodes")}, **{p:"api.products.BarcodeIn" for p in ("fields.barcodes[].barcode","fields.barcodes[].source")}},
-    "variants.update": {"id":"api.products.update_variant.vid", **{p:"api.products.VariantPatch" for p in ("fields","fields.attributes","fields.price","fields.active")}},
-    "variants.set_models": {"id":"api.products.set_variant_models.vid", "model_ids":"api.products.ModelIdList"},
-    "variants.delete": {"id":"api.products.delete_variant.vid"},
-    "barcodes.scan": {"code":"api.products.scan.code"},
-    "barcodes.add": {"variant_id":"api.products.add_barcode.variant_id", **{p:"api.products.BarcodeIn" for p in ("barcode","source")}},
-    "barcodes.delete": {"code":"api.products.delete_barcode.code"},
-    "stock.receive": {p:"api.stock.ReceiveIn" for p in ("variant_id","qty","note")},
-    "stock.detail": {"variant_id":"api.stock.detail.variant_id"},
-    "stocktake.create": {p:"api.stocktake.SessionIn" for p in ("operator","note")},
-    "stocktake.list": {},
-    "stocktake.scan": {"session_id":"api.stocktake.scan.sid", **{p:"api.stocktake.ScanIn" for p in ("variant_id","qty")}},
-    "stocktake.set_counted": {"session_id":"api.stocktake.set_counted.sid", "variant_id":"api.stocktake.set_counted.variant_id", "counted_qty":"api.stocktake.SetIn"},
-    "stocktake.detail": {"session_id":"api.stocktake.detail.sid"},
-    "stocktake.close": {"session_id":"api.stocktake.close.sid"},
-    "payments.list": {},
-    "sales.checkout": {**{p:"api.sales.SaleIn" for p in ("payment","order_discount","paid","items")}, **{p:"api.sales.ItemIn" for p in ("items[].variant_id","items[].qty","items[].unit_price","items[].discount")}},
-    "sales.list": {p:f"api.sales.list_sales.{p}" for p in ("date_from","date_to","payment")},
-    "sales.summary": {p:f"api.sales.summary.{p}" for p in ("date_from","date_to","payment","date")},
-    "sales.export": {p:f"api.sales.export_csv.{p}" for p in ("date_from","date_to","payment")},
-}
-
-PYDANTIC_BODY_WRAPPER_FIELDS = {
-    ("categories.update","fields"), ("categories.set_field","fields"),
-    ("brands.update","fields"), ("phone_brands.update","fields"),
-    ("models.update","fields"), ("fields.update","fields"),
-    ("options.update","fields"), ("products.update","fields"),
-    ("variants.create","fields"), ("variants.update","fields"),
-}
-
-# Source is contract data, not an optional annotation: materialise every field
-# from the audited registry so Facade-only fields are explicitly ``none``.
-for _action, _contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items():
-    for _path, _spec in _contract["fields"].items():
-        _spec["source"] = HTTP_FIELD_SOURCES.get(_action, {}).get(_path, "none")
-
-
-def validate_source_registry_symbols():
-    """Reject registry labels that do not resolve to a real model or parameter."""
-    for source in {value for fields in HTTP_FIELD_SOURCES.values()
-                   for value in fields.values()}:
-        parts = source.split(".")
-        module_name, owner_name, parameter = ".".join(parts[:2]), parts[2], parts[3:]
-        module = importlib.import_module(module_name)
-        owner = getattr(module, owner_name, None)
-        if owner is None:
-            owner = next((route.endpoint for route in module.router.routes
-                          if route.endpoint.__name__ == owner_name), None)
-        if owner is None:
-            raise AssertionError(f"unknown source owner {module_name}.{owner_name}")
-        if parameter:
-            if parameter[0] not in inspect.signature(owner).parameters:
-                raise AssertionError(f"unknown source parameter {source}")
-        elif not hasattr(owner, "model_fields"):
-            raise AssertionError(f"source is not a Pydantic model: {source}")
-    for action, fields in HTTP_FIELD_SOURCES.items():
-        for path, source in fields.items():
-            parts = source.split(".")
-            if len(parts) != 3:
-                continue
-            model = getattr(importlib.import_module(".".join(parts[:2])), parts[2])
-            leaf = path.rsplit(".", 1)[-1].removesuffix("[]")
-            if (action, path) not in PYDANTIC_BODY_WRAPPER_FIELDS and \
-                    leaf not in model.model_fields:
-                raise AssertionError(f"{source} has no field for {action}.{path}")
-
-
-def validate_source_metadata(contracts):
-    validate_source_registry_symbols()
-    declared_http_actions = {
-        action for action, contract in contracts.items()
-        if re.match(r"^(GET|POST|PUT|PATCH|DELETE) /api/", contract["http"])
-    }
-    if set(HTTP_FIELD_SOURCES) != declared_http_actions:
-        raise AssertionError(
-            "HTTP source action registry mismatch: "
-            f"expected {sorted(declared_http_actions)}, got {sorted(HTTP_FIELD_SOURCES)}")
-    expected = {(action, path): source for action, fields in HTTP_FIELD_SOURCES.items()
-                for path, source in fields.items()}
-    known_sources = set(expected.values())
-    actual_pairs = {(action, path) for action, contract in contracts.items()
-                    for path in contract["fields"]}
-    unknown_registry_pairs = set(expected) - actual_pairs
-    if unknown_registry_pairs:
-        raise AssertionError(f"source registry refers to unknown fields: {sorted(unknown_registry_pairs)}")
-    for action, contract in contracts.items():
-        for path, spec in contract["fields"].items():
-            wanted = expected.get((action, path), "none")
-            source = spec["source"]
-            if source != "none" and source not in known_sources:
-                raise AssertionError(f"unknown source {source!r} for {action}.{path}")
-            if source != wanted:
-                raise AssertionError(
-                    f"wrong source for {action}.{path}: expected {wanted!r}, got {source!r}")
 
 SETTINGS_CONTRACT_ACTIONS = {
     "categories.list","categories.create","categories.update","categories.delete","categories.sort","categories.fields","categories.set_common_fields","categories.set_field",
@@ -310,13 +164,6 @@ for _action, _contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.item
 
 FRONTEND_ACTIONS = set(ACTION_CONTRACTS)
 
-PYDANTIC_DIFFERENCES = (
-    {"kind":"coercion", "scope":"non-strict catalogue/product bodies and FastAPI path/query annotations", "desktop":"reject wrong primitive type", "http":"may coerce before Facade"},
-    {"kind":"extras", "scope":"Pydantic body models with default extra policy", "desktop":"reject", "http":"ignore before Facade"},
-    {"kind":"nullable", "scope":"api.products.VariantPatch.attributes", "desktop":"reject None", "http":"Pydantic accepts, then Facade rejects"},
-    {"kind":"default", "scope":"api.stocktake.ScanIn.qty", "desktop":"required", "http":"defaults to 1"},
-    {"kind":"separate_contract", "scope":"printing.barcode", "desktop":"variant_id then explicit unsupported error", "http":"barcode/name then HTTP 501"},
-)
 
 NORMALIZATION_PROBE_PATHS = {
     ("models.create","series"), ("models.update","fields.series"),
@@ -550,30 +397,10 @@ class ActionContractTests(FacadeTestCase):
                 self.assertEqual(contract["extra_fields"], "reject")
                 for path, spec in contract["fields"].items():
                     self.assertEqual(path, spec["payload_path"])
-                    self.assertEqual(set(spec), {"payload_path","required","type","nullable","default","range_enum","bool_policy","normalization","source","target","cases"})
+                    self.assertEqual(set(spec), {"payload_path","required","type","nullable","default","range_enum","bool_policy","normalization","target","cases"})
                     self.assertNotEqual(spec["type"], "any")
                     self.assertIn("lib.", spec["target"])
                     self.assertNotEqual(spec["target"], "Facade._prepare_payload")
-
-    def test_source_metadata_matches_exact_fastapi_registry_and_rejects_bogus_labels(self):
-        contracts = {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}
-        validate_source_metadata(contracts)
-
-        bogus = copy.deepcopy(contracts)
-        bogus["stock.detail"]["fields"]["variant_id"]["source"] = "api.stock.Bogus"
-        with self.assertRaisesRegex(AssertionError, "unknown source"):
-            validate_source_metadata(bogus)
-
-        hidden_http_source = copy.deepcopy(contracts)
-        hidden_http_source["stock.detail"]["fields"]["variant_id"]["source"] = "none"
-        with self.assertRaisesRegex(AssertionError, "wrong source"):
-            validate_source_metadata(hidden_http_source)
-
-        invented_facade_source = copy.deepcopy(contracts)
-        invented_facade_source["catalog.list"]["fields"]["pending"]["source"] = \
-            "api.products.catalog.q"
-        with self.assertRaisesRegex(AssertionError, "wrong source"):
-            validate_source_metadata(invented_facade_source)
 
     def test_metadata_cases_execute_against_real_facade_validators(self):
         for action, contract in ACTION_CONTRACTS.items():
@@ -893,80 +720,3 @@ def _install_isolated_valid_action_tests():
 
 
 _install_isolated_valid_action_tests()
-
-
-class HttpFacadeComparisonTests(ApiTestCase):
-    """Temporary phase-3/4 parity checks; delete with api/ in phase 5."""
-    def setUp(self):
-        super().setUp(); self.facade = DesktopFacade(self.db)
-
-    def test_success_validation_not_found_and_conflict_semantics_match(self):
-        cid = self.c.post("/api/categories", json={"name":"HTTP parity"}).json()["category_id"]
-        self.assertEqual(self.c.get("/api/categories").json(), self.facade.invoke("categories.list", {"all":0}))
-
-        # Same strict-body mutation: HTTP 422 and Facade validation_error.
-        response = self.c.post("/api/stock/receive", json={"variant_id":True,"qty":1})
-        self.assertEqual(response.status_code, 422)
-        with self.assertRaises(ValidationError): self.facade.invoke("stock.receive", {"variant_id":True,"qty":1})
-
-        response = self.c.get("/api/stock/999999")
-        self.assertEqual(response.status_code, 404)
-        with self.assertRaises(NotFoundError): self.facade.invoke("stock.detail", {"variant_id":999999})
-
-        self.c.post("/api/products", json={"name":"占用","category_id":cid,"variants":[]})
-        response = self.c.delete(f"/api/categories/{cid}")
-        self.assertEqual(response.status_code, 409)
-        with self.assertRaises(ConflictError): self.facade.invoke("categories.delete", {"id":cid})
-
-    def test_printing_http_contract_remains_legacy_while_desktop_is_strict(self):
-        response = self.c.post("/api/print/barcode", json={"barcode":"4711", "name":"商品"})
-        self.assertEqual(response.status_code, 501)
-        self.assertEqual(response.json()["detail"], "條碼列印尚未接上實體印表機")
-        with self.assertRaisesRegex(ValidationError, "列印功能尚未支援"):
-            self.facade.invoke("printing.barcode", {"variant_id":1})
-
-    def test_representative_pydantic_coercion_differences_are_catalogued(self):
-        # Legacy Pydantic bodies coerce numeric strings for non-strict catalogue
-        # models; Desktop is intentionally strict. Strict stock/sales models align.
-        response = self.c.post("/api/categories", json={"name":"coerced","sort":"1"})
-        self.assertEqual(response.status_code, 200)
-        with self.assertRaises(ValidationError):
-            self.facade.invoke("categories.create", {"name":"coerced","sort":"1"})
-        strict = self.c.post("/api/sales", json={"payment":"現金","paid":"0","items":[]})
-        self.assertEqual(strict.status_code, 422)
-        with self.assertRaises(ValidationError):
-            self.facade.invoke("sales.checkout", {"payment":"現金","paid":"0","items":[]})
-
-        extra = self.c.post("/api/categories", json={"name":"extra ignored","unexpected":True})
-        self.assertEqual(extra.status_code, 200)
-        with self.assertRaises(ValidationError):
-            self.facade.invoke("categories.create", {"name":"extra rejected","unexpected":True})
-        self.assertEqual({item["kind"] for item in PYDANTIC_DIFFERENCES},
-                         {"coercion", "extras", "nullable", "default", "separate_contract"})
-
-    def test_nullable_and_default_pydantic_differences_execute_both_validators(self):
-        cid = self.c.post("/api/categories", json={"name":"Pydantic 差異"}).json()["category_id"]
-        created = self.c.post("/api/products", json={
-            "name":"差異商品", "category_id":cid, "variants":[{"price":10}],
-        }).json()
-        vid = created["variant_ids"][0]
-
-        nullable_payload = {"attributes":None}
-        response = self.c.put(f"/api/variants/{vid}", json=nullable_payload)
-        self.assertEqual(response.status_code, 422)
-        self.assertIn("規格 格式不正確", response.json()["detail"])
-        with self.assertRaises(ValidationError):
-            self.facade.invoke("variants.update", {"id":vid, "fields":nullable_payload})
-
-        sid = self.c.post("/api/stocktake", json={}).json()["session_id"]
-        default_payload = {"variant_id":vid}
-        response = self.c.post(f"/api/stocktake/{sid}/scan", json=default_payload)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["counted_qty"], 1)
-        with self.assertRaises(ValidationError):
-            self.facade.invoke("stocktake.scan", {"session_id":sid, **default_payload})
-
-    def test_export_route_body_matches_internal_facade_export(self):
-        response = self.c.get("/api/sales/export")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.text, self.facade.invoke("sales.export", {})["content"])

@@ -5,8 +5,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from base import make_client
-from lib.application_errors import DatabaseError
 from lib.db import db_conn, init_db
 from lib.desktop_bridge import DesktopBridge
 from lib.settings_service import SettingsFacade
@@ -208,7 +206,7 @@ class SettingsLayersTests(unittest.TestCase):
         settings = (Path(__file__).parents[1] / "static/js/settings.js").read_text(encoding="utf-8")
         self.assertNotIn("fetch(", settings)
 
-    def test_bridge_runtime_maps_error_codes_to_http_compatible_status(self):
+    def test_bridge_runtime_maps_error_codes_to_desktop_status(self):
         api_path = Path(__file__).parents[1] / "static/js/api.js"
         script = api_path.read_text(encoding="utf-8") + """
 const codes = ['validation_error','not_found','conflict','database_error','internal_error'];
@@ -231,17 +229,6 @@ Promise.all(codes.map(async code => {
         self.assertEqual(500, rows["database_error"]["status"])
         self.assertEqual(500, rows["internal_error"]["status"])
         self.assertEqual({"field": "x"}, rows["conflict"]["details"])
-
-    def test_settings_http_endpoints_mask_database_errors_as_500(self):
-        client = make_client(self.db)
-        for module, path in (("api.attributes.SettingsFacade", "/api/fields"),
-                             ("api.catalog.SettingsFacade", "/api/categories")):
-            with self.subTest(path=path), patch(module) as facade_type:
-                facade_type.return_value.invoke.side_effect = DatabaseError("SQL SECRET")
-                response = client.get(path)
-                self.assertEqual(response.status_code, 500)
-                self.assertEqual(response.json()["detail"], DatabaseError.default_message)
-                self.assertNotIn("SQL SECRET", response.text)
 
 
 if __name__ == "__main__":

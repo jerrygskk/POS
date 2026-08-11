@@ -5,7 +5,7 @@
 #### VUE：前端（Vue 3 prod 版＋pywebview）
 
 - **VUE-1**: **設定頁（或任一頁）切入即整頁卡死、之後所有畫面更新拋 TypeError** → v-if/v-else(-if) 元素上掛了動態 `:key`，與 prod 版 Vue（`vue.global.prod.js`）`stringifyStatic` 靜態節點快取衝突：key 變動重建區塊後，快取 vnode 的 DOM 參照被清空。**勿在 v-if/v-else 元素掛動態 `:key`**，內容全走資料綁定即可（詳 DEVELOPER §2；v0.1.0 後設定頁曾因此崩潰）。⚠️ dev 版 Vue 測不出來。
-- **VUE-2**: **bug 在 harness 瀏覽器／HTTP 模擬下重現不了（或反之）** → 部分崩潰只在「真實 pywebview＋prod 版 Vue」穩定重現。前端改動最終驗證一律用真實 pywebview（以 `RuntimePaths` 指向 pos.db 副本＋repo static 開視窗走查）；HTTP 模擬（shim 注入 `window.pywebview.api.invoke`→fetch）只供目視版面，**不是正式 runtime**。
+- **VUE-2**: **bug 在 harness 瀏覽器／Bridge shim 下重現不了（或反之）** → 部分崩潰只在「真實 pywebview＋prod 版 Vue」穩定重現。前端改動最終驗證一律用真實 pywebview（以 `RuntimePaths` 指向 pos.db 副本＋repo static 開視窗走查）；Bridge shim 只供目視版面，**不是正式 runtime**。
 - **VUE-3**: **自動走查收不到 JS 錯誤，畫面明明壞了** → prod 版 Vue 的錯誤只進 `console.error`，光掛 `window.onerror` 收不到；收集器要 hook `console.error`＋`window.onerror` 兩邊。
 - **VUE-4**: **css／js 改了畫面沒變** → 忘記 bump `index.html` 的 `?v=`；css 與全部 js 共用同一版號，一起 bump。
 - **VUE-5**: **快速連點清單／分頁後，畫面停在「前一個」選擇的資料** → 載入函式內多個 `await`，慢回應後到蓋掉新資料。多段 await 的載入函式要加載入序號戳記，寫入 state 前比對仍是最新請求才寫（參考 `settings.js` `loadCategoryDetail`）。

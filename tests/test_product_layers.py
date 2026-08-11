@@ -1,11 +1,10 @@
 import logging
 from unittest.mock import patch
 
-from base import ConnTestCase, make_client
+from base import ConnTestCase
 from lib.db import get_conn
 from lib.desktop_bridge import DesktopBridge
 from lib.product_service import ProductFacade
-from lib.application_errors import DatabaseError, InternalError
 
 
 class TestProductLayers(ConnTestCase):
@@ -144,12 +143,3 @@ class TestProductLayers(ConnTestCase):
             "variant_id": made["variant_ids"][0], "barcode": "TL123", "source": "store",
         })
         self.assertEqual(result["error"]["code"], "validation_error")
-
-    def test_http_500_masks_internal_and_database_messages(self):
-        for error in (InternalError("SQL SECRET internal"), DatabaseError("SQL SECRET database")):
-            with self.subTest(error=type(error).__name__):
-                with patch("api.products.ProductFacade") as facade_type:
-                    facade_type.return_value.invoke.side_effect = error
-                    response = make_client(self.db).get("/api/products")
-                self.assertEqual(response.status_code, 500)
-                self.assertNotIn("SQL SECRET", response.text)
