@@ -43,8 +43,6 @@ def _checkout_payload(payload):
     _strict_mapping(payload, {"payment", "order_discount", "paid", "items"})
     if not isinstance(payload.get("payment"), str) or not payload["payment"]:
         raise ValidationError("付款方式不正確")
-    if "paid" not in payload:
-        raise ValidationError("金額格式不正確")
     for key in ("order_discount", "paid"):
         if not _is_int(payload.get(key, 0)) or payload.get(key, 0) < 0:
             raise ValidationError("金額格式不正確")
