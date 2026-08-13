@@ -68,11 +68,11 @@ class FrameworkNeutralRulesTests(unittest.TestCase):
 
 
 class PrintingContractTests(unittest.TestCase):
-    def test_printing_action_returns_stable_unsupported_error(self):
-        result = DesktopBridge(facade=PrintingFacade()).invoke(
-            "printing.barcode", {"variant_id": 7})
+    def test_printing_action_rejects_invalid_payload_at_the_bridge(self):
+        result = DesktopBridge(facade=PrintingFacade("unused.db")).invoke(
+            "printing.barcode", {"variant_id": 7, "copies": 0})
         self.assertEqual(result, {"ok": False, "error": {
-            "code": "validation_error", "message": "列印功能尚未支援。"}})
+            "code": "validation_error", "message": "張數必須是正整數"}})
 
 
 class JavascriptRuntimeContractTests(unittest.TestCase):
@@ -144,6 +144,43 @@ const state = {
             cwd=ROOT, text=True, capture_output=True, check=True, encoding="utf-8")
         self.assertEqual(json.loads(result.stdout), {
             "session_id": 3, "variant_id": 8, "qty": 1})
+
+    def test_labels_page_uses_guard_and_only_displays_store_barcode(self):
+        script = r'''
+const fs = require("fs"), vm = require("vm");
+let guarded = false;
+// catalog.list 才帶 barcodes；products.list 沒有,用它會讓店內條碼全顯示成「尚無」。
+const catalog = [{name: "鋼化玻璃", variants: [
+  {variant_id: 7, price: null, models: ["iPhone 16"],
+   barcodes: [{source: "factory", barcode: "F"}, {source: "store", barcode: "S"}]}]}];
+const context = { window: {PosPages: {}}, API: { listCatalog: async () => catalog } };
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
+const page = context.window.PosPages["page-labels"];
+const state = { query: "玻璃", results: [], guard: async op => { guarded = true; return op(); },
+                attrText: () => "亮面" };
+state.storeBarcodes = page.methods.storeBarcodes;
+state.priceText = page.methods.priceText;
+(async () => {
+  await page.methods.search.call(state);
+  process.stdout.write(JSON.stringify({
+    guarded,
+    name: state.results[0].name,
+    variant_id: state.results[0].variant_id,
+    barcode: page.methods.storeBarcodes({barcodes:[{source:"factory",barcode:"F"},{source:"store",barcode:"S"}]}),
+    nullPrice: page.methods.priceText({price:null}),
+    price: page.methods.priceText({price:590}),
+    row: page.methods.rowText.call(state, state.results[0])
+  }));
+})().catch(e => { console.error(e); process.exit(1); });
+'''
+        result = subprocess.run(
+            ["node", "-e", script, str(STATIC / "js" / "labels.js")],
+            cwd=ROOT, text=True, capture_output=True, check=True, encoding="utf-8")
+        self.assertEqual(json.loads(result.stdout), {
+            "guarded": True, "name": "鋼化玻璃", "variant_id": 7, "barcode": "S",
+            "nullPrice": "", "price": "$590",
+            "row": "鋼化玻璃｜亮面｜iPhone 16｜S"})
 
 
 if __name__ == "__main__":

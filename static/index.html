@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=58">
+<link rel="stylesheet" href="css/pos.css?v=61">
 </head>
 <body>
 <div id="app">
   <nav>
-    <img class="nav-logo" src="img/logo.png?v=58" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=61" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="page=key">{{ label }}</button>
   </nav>
@@ -57,6 +57,25 @@
     <div class="total">找零 {{ Math.max(0, (paid || 0) - total) }} 元</div>
     <button class="primary" :disabled="!cart.length || paid < total"
             @click="checkout">結帳</button>
+  </div>
+  <div v-if="doneMsg" class="done-msg">{{ doneMsg }}</div>
+</div>
+</template>
+<template id="tpl-labels">
+<div class="page">
+  <div class="scan-row">
+    <input v-model="query" @keyup.enter="search" placeholder="關鍵字搜尋子產品">
+    <button @click="search">搜尋</button>
+  </div>
+  <div v-if="results.length" class="search-pop">
+    <div v-for="r in results" :key="r.variant_id" class="search-item" @click="select(r)">
+      {{ rowText(r) }}
+    </div>
+  </div>
+  <div v-if="selected" class="label-panel">
+    <div>{{ rowText(selected) }}</div>
+    <label>列印張數 <input type="number" v-model.number="copies" min="1" class="w80"></label>
+    <button class="primary" @click="print">列印標籤</button>
   </div>
   <div v-if="doneMsg" class="done-msg">{{ doneMsg }}</div>
 </div>
@@ -660,19 +679,20 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=58"></script>
-<script src="js/api.js?v=58"></script>
-<script src="js/catalogfields.js?v=58"></script>
-<script src="js/checkout.js?v=58"></script>
-<script src="js/receive.js?v=58"></script>
-<script src="js/stocktake.js?v=58"></script>
-<script src="js/records.js?v=58"></script>
-<script src="js/catalog.js?v=58"></script>
-<script src="js/variant_batch.js?v=58"></script>
-<script src="js/sortable.js?v=58"></script>
-<script src="js/modelpicker.js?v=58"></script>
-<script src="js/attrfields.js?v=58"></script>
-<script src="js/settings.js?v=58"></script>
-<script src="js/app.js?v=58"></script>
+<script src="js/vue.global.prod.js?v=61"></script>
+<script src="js/api.js?v=61"></script>
+<script src="js/catalogfields.js?v=61"></script>
+<script src="js/checkout.js?v=61"></script>
+<script src="js/receive.js?v=61"></script>
+<script src="js/stocktake.js?v=61"></script>
+<script src="js/records.js?v=61"></script>
+<script src="js/catalog.js?v=61"></script>
+<script src="js/variant_batch.js?v=61"></script>
+<script src="js/sortable.js?v=61"></script>
+<script src="js/modelpicker.js?v=61"></script>
+<script src="js/attrfields.js?v=61"></script>
+<script src="js/settings.js?v=61"></script>
+<script src="js/labels.js?v=61"></script>
+<script src="js/app.js?v=61"></script>
 </body>
 </html>

@@ -71,7 +71,7 @@ const API = {
     });
   },
   exportSales(payload) { return this.invoke("sales.export_save", payload); },
-  printBarcode(variant_id) { return this.invoke("printing.barcode", {variant_id}); },
+  printBarcode(variant_id, copies = 1) { return this.invoke("printing.barcode", {variant_id, copies}); },
 };
 
 window.parseTagList = function (v) {

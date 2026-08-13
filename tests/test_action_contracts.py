@@ -2,6 +2,7 @@
 import copy
 import re
 from pathlib import Path
+from unittest.mock import patch
 
 from lib.application_errors import ConflictError, NotFoundError, ValidationError
 from lib.desktop_application import DesktopFacade
@@ -153,7 +154,7 @@ ACTION_CONTRACTS = {
     "sales.list": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")]),
     "sales.summary": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept"), S("date", default="", constraint="empty|YYYY-MM-DD", blank="reject", normalization="copied to date_from/date_to when both absent")]),
     "sales.export_save": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")], notes=("Transport-only; forwards unchanged to sales.export.",)),
-    "printing.barcode": schema([], valid_error="validation_error", notes=("Every Mapping payload reports the feature as unsupported.",)),
+    "printing.barcode": schema([I("variant_id", required=True), I("copies", default=1, constraint=">=1")]),
 }
 
 INTERNAL_ACTION_CONTRACTS = {
@@ -188,7 +189,7 @@ TARGET_BY_ACTION = {
     "sales.list":"lib.sales_service.SalesFacade._prepare_payload -> _filters",
     "sales.summary":"lib.sales_service.SalesFacade._prepare_payload -> _filters",
     "sales.export_save":"lib.desktop_bridge.DesktopBridge._export_sales -> lib.sales_service.SalesFacade._prepare_payload",
-    "printing.barcode":"lib.printing_service.PrintingFacade.invoke",
+    "printing.barcode":"lib.printing_service.PrintingFacade._prepare_payload -> _validate",
     "sales.export":"lib.sales_service.SalesFacade._prepare_payload -> _filters",
 }
 for _action, _contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items():
@@ -249,6 +250,7 @@ EXPECTED_DEFAULTS = {
         ("sales.checkout","paid"),
         ("sales.checkout","items[].discount"),
     }, 0),
+    ("printing.barcode", "copies"): 1,
     **dict.fromkeys({
         ("categories.list","category_id"), ("categories.create","sort"),
         ("categories.create","model_mode"),
@@ -434,7 +436,7 @@ class ActionContractTests(FacadeTestCase):
             "variants.create":{"product_id":self.product_id,"fields":{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"variant-new","source":"store"}]}}, "variants.update":{"id":self.variant_id,"fields":{}}, "variants.set_models":{"id":self.variant_id,"model_ids":[]}, "variants.update_details":{"id":self.variant_id,"fields":{},"model_ids":[]}, "variants.delete":{"id":self.delete_variant_id}, "variants.batch_create":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"batch-new","source":"store"}]}]}, "variants.field_usage":{"category_id":self.category_id,"field_id":self.field_id}, "variants.activate":{"id":self.variant_id}, "variants.issues":{},
             "barcodes.scan":{"code":"contract-1"}, "barcodes.add":{"variant_id":self.variant_id,"barcode":"contract-2"}, "barcodes.delete":{"code":"contract-1"}, "stock.receive":{"variant_id":self.variant_id,"qty":1}, "stock.detail":{"variant_id":self.variant_id},
             "stocktake.create":{}, "stocktake.list":{}, "stocktake.detail":{"session_id":self.session_id}, "stocktake.scan":{"session_id":self.session_id,"variant_id":self.variant_id,"qty":1}, "stocktake.set_counted":{"session_id":self.session_id,"variant_id":self.variant_id,"counted_qty":1}, "stocktake.close":{"session_id":self.session_id},
-            "payments.list":{}, "sales.checkout":{"payment":"現金","paid":100,"items":[{"variant_id":self.variant_id,"qty":1,"unit_price":100}]}, "sales.list":{}, "sales.summary":{}, "sales.export_save":{}, "printing.barcode":{},
+            "payments.list":{}, "sales.checkout":{"payment":"現金","paid":100,"items":[{"variant_id":self.variant_id,"qty":1,"unit_price":100}]}, "sales.list":{}, "sales.summary":{}, "sales.export_save":{}, "printing.barcode":{"variant_id":self.variant_id,"copies":1},
         }
         return values[action]
 
@@ -442,7 +444,7 @@ class ActionContractTests(FacadeTestCase):
         if action == "sales.export_save":
             return self.facade.sales._prepare_payload("sales.export", payload)
         if action == "printing.barcode":
-            return self.facade.printing.invoke(action, payload)
+            return self.facade.printing._prepare_payload(action, payload)
         for facade in (self.facade.settings, self.facade.products, self.facade.stock,
                        self.facade.sales, self.facade.stocktake):
             if action in facade.ACTIONS:
@@ -588,10 +590,10 @@ class ActionContractTests(FacadeTestCase):
             with self.subTest(action=action, location=location):
                 with self.assertRaises(ValidationError): self._prepare(action, candidate)
 
-        for printing_payload in ({}, {"variant_id":self.variant_id},
+        for printing_payload in ({}, {"variant_id":self.variant_id, "copies":0},
                                  {"variant_id":"wrong", "unexpected":True}):
             with self.subTest(printing_payload=printing_payload):
-                with self.assertRaisesRegex(ValidationError, "列印功能尚未支援"):
+                with self.assertRaises(ValidationError):
                     self.invoke("printing.barcode", printing_payload)
         with self.assertRaisesRegex(ValidationError, "單項折扣不可超過"):
             self.invoke("sales.checkout", {
@@ -611,6 +613,9 @@ class ActionContractTests(FacadeTestCase):
                 self.invoke(action, self.valid_payload(action))
         elif action == "sales.export_save":
             self.facade.sales._prepare_payload("sales.export", self.valid_payload(action))
+        elif action == "printing.barcode":
+            with patch("lib.printing_service.LabelPrinter.print"):
+                self.invoke(action, self.valid_payload(action))
         else:
             self.invoke(action, self.valid_payload(action))
 
@@ -703,7 +708,7 @@ class ActionContractTests(FacadeTestCase):
                     for action,contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items()
                     for path,spec in contract["fields"].items()
                     if spec["default"] != "missing"}
-        self.assertEqual(len(declared), 86)
+        self.assertEqual(len(declared), 87)
         self.assertEqual(declared, EXPECTED_DEFAULTS)
         executed = {}
         for (action,path), expected in EXPECTED_DEFAULTS.items():
@@ -743,7 +748,7 @@ class ActionContractTests(FacadeTestCase):
         self.assertNotIn("skipped", executed.values())
         self.assertEqual(
             {strategy: list(executed.values()).count(strategy) for strategy in set(executed.values())},
-            {"materialized_by_validator":15, "exact_validator_omission":71},
+            {"materialized_by_validator":16, "exact_validator_omission":71},
         )
 
         field_id = self.invoke("fields.create", {"name":"預設型態"})["field_id"]

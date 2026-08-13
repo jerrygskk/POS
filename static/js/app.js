@@ -4,7 +4,7 @@ document.addEventListener("DOMContentLoaded", () => {
     data() {
       return { page: "checkout", error: "", pages: [
         ["checkout", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"],
-        ["records", "銷售紀錄"], ["catalog", "商品資料庫"], ["settings", "設定"]] };
+        ["records", "銷售紀錄"], ["catalog", "商品資料庫"], ["labels", "標籤列印"], ["settings", "設定"]] };
     },
     methods: {
       showError(msg) { this.error = msg; setTimeout(() => this.error = "", 5000); },

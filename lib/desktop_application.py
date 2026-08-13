@@ -17,7 +17,7 @@ class DesktopFacade:
         self.stock = StockFacade(db_path)
         self.sales = SalesFacade(db_path)
         self.stocktake = StocktakeFacade(db_path)
-        self.printing = PrintingFacade()
+        self.printing = PrintingFacade(db_path)
 
     def invoke(self, action, payload=None):
         if not isinstance(action, str):
