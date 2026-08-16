@@ -34,6 +34,8 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `lib/db_seed.py` | 共用欄(商品描述/顏色)、付款方式種子 |
 | `lib/product_rules.py` | 共用商品規則(`FIELD_TYPES`、欄位型別驗證、自取碼取號) |
 | `lib/backup.py` | GFS 備份(日7/週4/月12) |
+| `lib/label_printer.py` | NIIMBOT B1 協定與序列埠溝通(自動尋埠、送圖、錯誤轉譯) |
+| `lib/label_layout.py` | 商品標籤版面繪製(純函式,輸入四個字串輸出 Pillow 影像) |
 | `lib/*_service.py` | 正式 Facade／Service／Repository 應用層與資料存取實作 |
 | `static/` | `index.html` + `css/pos.css` + `js/*.js`（Vue 3、DesktopBridge 包裝、各頁邏輯） |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
@@ -55,6 +57,39 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 - **共用欄 NULL 去重提醒**:`AttributeField` 的共用欄 `category_id` 為 NULL;SQLite 的 `UNIQUE` 對 NULL 不視為相等,故去重不能單靠資料庫唯一鍵,需靠應用層先查再插。
 - **Schema 與 migration**:`lib/db_schema.py` 是現行 schema DDL 的唯一來源；`lib/legacy_migrations.py` 封存 v1–v13 的歷史 migration DDL。未來修改現行 schema 時，仍須依 migration 規則新增升級步驟，讓既有資料庫可安全演進。
 
+### 標籤列印(NIIMBOT B1)
+
+⚠️ 動到此功能務必實機驗證,且**至少連續印兩張不同商品**。單元測試只驗證
+「送出正確的位元組」,機器收到之後的行為完全測不到;整合當時七個問題全數
+是實機才現形,症狀與根因見 `PITFALLS.md` LBL 組。
+
+**分層**:`label_printer.py` 只管跟機器溝通、`label_layout.py` 只管畫圖(純函式、可單測)、
+`printing_service.py` 串接資料查詢。協定自行實作而非引用函式庫——參考實作
+(`AndBondStyle/niimprint`)不在 PyPI 上,onefile 打包不宜依賴 GitHub 來源。
+
+**硬體實測值**:USB 序列(CDC),`VID:PID=3513:0002` 自動尋埠(**不可寫死 COM 埠**,
+換孔換機都會變);115200;兩軸皆 **8 點/mm(203dpi)**,40 × 20mm ＝ **320 × 160 點**;
+列印濃度 5(B1 支援 1–5,D11 系列上限才是 3)。
+
+**列印流程**:開埠後必須放掉 DTR → 心跳(順帶擋上蓋未關)→ 濃度 → 紙型 →
+`start_print`(**須重試到機器回應內容為 1**)→ 每張各送一次頁面(頁面 → 尺寸 →
+張數 → 逐列送圖 → `end_page_print` → **等狀態頁數累加**)→ `end_print`。
+不論成功失敗都要送 `end_print`,否則工作留在未收工狀態會讓下次列印被回絕。
+機器錯誤封包(type 219)的錯誤碼:`1` 上蓋開啟、`8` 卡紙/送紙異常。
+
+**版面規則**(`label_layout.py`):品名優先大字單行(26→18px),放不下換兩行
+(20→16px,斷在空白處);規格**字級固定 14px**,最多兩行且**只斷在「｜」段落邊界**;
+號碼靠右擠進規格第一行(省一整行給條碼);條碼高 40–56 點,吃剩餘空間;
+**下緣留白 8 點絕不犧牲**,空間不足時依序犧牲規格第二行、品名第二行。
+⚠️ 畫字必須 `draw.fontmode = "1"` 關閉灰階平滑:熱感列印只有黑白,
+灰色細筆畫二值化時會消失,筆畫密的字(如「框」)印出來缺半邊。
+
+**業務規則**:只印 `source='store'` 的店內條碼(原廠條碼包裝上已有,回錯誤不印);
+`Variant.price` 為 NULL 就留白不印;標籤尺寸固定 40 × 20mm 不做設定項;
+失敗即取消,由使用者接好機器後自行重送,不做佇列與自動重試。
+前端取資料走 `catalog.list`(**`products.list` 不回傳 `barcodes`**,用它會讓店內
+條碼全部顯示成「尚無」)。
+
 ### UI 風格規範(源自維護者 theme_guide,Apple HIG 風;定義於 `static/css/pos.css` 檔頭)
 
 - **色票**:背景 `#f2f2f7`|元件底 `#fff`|主文字 `#1c1c1e`|次要 `#636366`|佔位/停用字 `#aeaeb2`|邊框 `#c6c6c8`|hover 底/停用底 `#e5e5ea`|pressed 底/停用框 `#d1d1d6`|強調(焦點/選中/chip.on) `#8fa8c8`|主要鈕 `#a1b4cb`/hover `#4977b1`/pressed `#39649a`|危險 `#e74c3c`/hover `#c0392b`。換主色時全域搜尋一起換。
@@ -71,7 +106,9 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 python -m unittest discover -s tests
 ```
 
-目前 439 個測試,涵蓋 schema/migration、Desktop action 契約、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份等模組,檔名皆 `test_*.py`。
+目前 491 個測試,涵蓋 schema/migration、Desktop action 契約、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。
+
+⚠️ 標籤列印的測試以替身模擬機器,**通過不等於印得出來**;改動該功能一律另外實機驗證(見 §2 標籤列印)。
 
 ## 4. 打包
 
@@ -84,6 +121,12 @@ pyinstaller --clean --onefile --version-file version_info.txt --icon "assets/POS
 本節是完整打包命令的唯一真實來源。上列命令先清除舊 `build/`、`dist/`、`POS.spec`，
 再以 `--clean --onefile` 打包 static 與版本資訊，並以 `assets/POS.ico` 作為執行檔圖示；Desktop-only runtime 不需要 uvicorn hidden-import。
 產出 `dist/POS.exe`。執行前須將既有 `pos.db` 放在 exe 同層；備份寫入同層的 `backups/`。
+
+標籤列印新增的三個相依（`pyserial`、`pillow`、`python-barcode`）不需額外 hidden-import，
+PyInstaller 自動收錄，含尋埠所需的 `serial.tools.list_ports_windows`（實測 v0.1.0 後，
+onefile 產出約 32.6 MB，其中 Pillow 為大宗）。`python-barcode` 內附的
+`fonts/DejaVuSansMono.ttf` 未被收錄但不影響：本專案傳入的字級為 0，
+`ImageWriter._paint_text` 在載入字型前就先回傳。
 
 **`sys._MEIPASS` 雷**：PyInstaller onefile 模式執行時會把打包資源解壓至暫存目錄 `sys._MEIPASS`；
 若仍以程式檔位置推算 `static/`，打包後會找不到前端。`RuntimePaths.detect()` 在 frozen 環境將
