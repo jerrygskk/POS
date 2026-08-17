@@ -16,8 +16,10 @@ version_info.txt
 # docs 整個資料夾不入庫(交接、spec、店內資料)
 docs/
 
-# 一次性匯入工具(店內資料相關,不入庫)
+# 一次性匯入工具(店內資料相關,不入庫);其測試直接 import 該檔,一併不入庫,
+# 否則 fresh clone 跑測試會 error(不是 skip)
 tools/import_excel.py
+tests/test_import_excel.py
 
 # 設計／除錯階段的暫存產物(設計稿、走查腳本與其輸出)
 .superpowers/
