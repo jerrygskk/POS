@@ -8,12 +8,26 @@
   --dialog-cancel-hover: #E5E5EA;
 }
 
+/* 以下三組取自維護者另一個專案已調校過的彈窗公版(PoliceDocSys `lib/theme.py`):
+   細捲軸、文字選取反白、按鈕 hover/pressed 灰階。
+   ⚠️ 該專案的 checkbox 是純色塊,勾選與否分不出來,**不採用**;本檔的
+   checkbox 見下方,一律畫出白色勾號。 */
+::selection { background: #8fa8c8; color: #ffffff; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #c7c7cc; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #aeaeb2; }
+::-webkit-scrollbar-corner { background: transparent; }
+
 * {
   box-sizing: border-box;
   font-size: 14pt;
   font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
 }
-html, body, #variant-editor { width: 100%; height: 100%; overflow: hidden; }
+html, body, #variant-editor, #variant-batch-window {
+  width: 100%; height: 100%; overflow: hidden;
+}
 body { background: #ffffff; color: #1c1c1e; }
 [v-cloak] { display: none; }
 
@@ -41,12 +55,25 @@ body { background: #ffffff; color: #1c1c1e; }
   flex: 0 0 18px; vertical-align: middle; margin: 0 6px 0 0;
   border: 1.5px solid #c6c6c8; border-radius: 4px; background: #ffffff;
 }
+/* 勾選要「看得出是勾」:色塊(藍底＋白內縮框)分不出已勾選/半選,實測看錯過。
+   改成藍底＋白色打勾,停用時整體轉灰但勾仍在。 */
+.dialog-shell input[type="checkbox"] { position: relative; }
 .dialog-shell input[type="checkbox"]:checked {
-  background: #8fa8c8; border-color: #8fa8c8;
-  box-shadow: inset 0 0 0 3px #ffffff;
+  background: #8fa8c8; border-color: #8fa8c8; box-shadow: none;
+}
+.dialog-shell input[type="checkbox"]:checked::after {
+  content: ""; position: absolute; left: 5px; top: 1px;
+  width: 5px; height: 10px; border: solid #ffffff;
+  border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.dialog-shell input[type="checkbox"]:focus-visible {
+  outline: 2px solid #8fa8c8; outline-offset: 1px;
 }
 .dialog-shell input[type="checkbox"]:disabled {
   background: #E5E5EA; border-color: #d1d1d6;
+}
+.dialog-shell input[type="checkbox"]:checked:disabled {
+  background: #d1d1d6; border-color: #d1d1d6;
 }
 .dialog-shell .chip { display: inline-flex; align-items: center; width: max-content;
   max-width: 100%; flex: 0 0 auto; }
@@ -56,14 +83,18 @@ body { background: #ffffff; color: #1c1c1e; }
   min-width: 80px; padding: 7px 16px; font-weight: bold; color: #1c1c1e; }
 .dialog-confirm { background: #D0ECF5; }
 .dialog-confirm:hover { background: #B8D8E8; }
+.dialog-confirm:active { background: #A6CCE0; }
 .dialog-cancel { background: #F2F2F7; }
 .dialog-cancel:hover { background: #E5E5EA; }
+.dialog-cancel:active { background: #D1D1D6; }
 .dialog-shell button:disabled { background: #E5E5EA; color: #aeaeb2;
   border-color: #d1d1d6; cursor: default; }
 .dialog-small { min-width: 0 !important; padding: 4px 10px !important;
   font-size: 11pt !important; background: #F2F2F7; }
 .dialog-small:hover { background: #E5E5EA; }
+.dialog-small:active { background: #D1D1D6; }
 .dialog-small.danger { color: #e74c3c; }
+.dialog-small.danger:hover { color: #c0392b; }
 
 .dialog-footer { flex: 0 0 auto; border-top: 1px solid #cccccc; padding: 12px 20px;
   background: #ffffff; }
@@ -105,9 +136,40 @@ body { background: #ffffff; color: #1c1c1e; }
 }
 .dialog-shell .tag-selector button.chip:not(.tag-chip):hover,
 .dialog-shell .chip-box > .chip-wrap button.chip:not(.on):hover,
-.dialog-shell .model-picker .chip:hover { background: #F2F2F7; }
+.dialog-shell .model-picker .chip:hover { background: #E5E5EA; }
+.dialog-shell .tag-selector button.chip:not(.tag-chip):active,
+.dialog-shell .chip-box > .chip-wrap button.chip:not(.on):active,
+.dialog-shell .model-picker .chip:active { background: #D1D1D6; }
 .dialog-shell .tag-count { color: #636366; font-size: 10pt; margin-left: 4px; }
 .dialog-shell .model-picker { max-width: none; }
+
+/* ── 新增款式視窗:預覽表、行內操作與單層修改 popup ── */
+.dialog-check { display: flex; align-items: center; cursor: pointer; margin-top: 10px; }
+.dialog-inline-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+.dialog-field + .dialog-field { margin-top: 10px; }
+
+.dialog-table { width: 100%; border-collapse: collapse; font-size: 12pt; }
+.dialog-table th, .dialog-table td {
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e5ea;
+  vertical-align: top;
+}
+.dialog-table th { color: #636366; font-weight: normal; white-space: nowrap; }
+.dialog-table tbody tr:last-child td { border-bottom: 0; }
+.dialog-table tr.invalid td { background: #fdf3f2; }
+.dialog-table .dialog-error-cell { color: #c0392b; }
+.dialog-table button + button { margin-left: 6px; }
+.dialog-done { color: #1c1c1e; background: #eef6f9; border-radius: 4px;
+  padding: 10px 12px; margin-top: 12px; }
+.dialog-actions-spacer { margin-right: auto; }
+
+/* 單層 popup:視窗內再開一層,只用遮罩＋白面板,不再加外框 */
+.dialog-overlay { position: fixed; inset: 0; background: rgba(28, 28, 30, 0.35);
+  display: flex; align-items: center; justify-content: center; padding: 24px; }
+.dialog-panel { display: flex; flex-direction: column; background: #ffffff;
+  border-radius: 8px; width: min(680px, 100%); max-height: 100%;
+  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.28); overflow: hidden; }
+.dialog-panel .dialog-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.dialog-panel .dialog-content h1 { font-size: 16pt; }
 
 @media (max-width: 640px) {
   .dialog-content { padding: 14px; }

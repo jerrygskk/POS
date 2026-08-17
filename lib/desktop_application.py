@@ -8,7 +8,7 @@ from lib.sales_service import SalesFacade
 from lib.stocktake_service import StocktakeFacade
 from lib.printing_service import PrintingFacade
 from lib.application_errors import ValidationError
-from lib.variant_editor_window import VariantEditorWindowCoordinator
+from lib.child_window import ChildWindowCoordinator
 
 
 class DesktopFacade:
@@ -68,13 +68,13 @@ class DesktopApplication:
             js_api=self.bridge,
         )
         self.bridge._set_window(window, getattr(webview, "SAVE_DIALOG", "save"))
-        variant_editor = VariantEditorWindowCoordinator(
+        child_window = ChildWindowCoordinator(
             webview,
             self.paths.static_dir,
             window,
             self.bridge._facade,
             logger=self.bridge._logger,
         )
-        self.bridge._set_variant_editor(variant_editor)
+        self.bridge._set_child_window(child_window)
         webview.start(gui="edgechromium")
         return window

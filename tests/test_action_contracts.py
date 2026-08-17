@@ -225,9 +225,9 @@ def validate_retired_source_metadata(contracts):
 
 FRONTEND_ACTIONS = set(ACTION_CONTRACTS)
 DESKTOP_WINDOW_ACTIONS = {
-    "desktop.variant_editor.open",
-    "desktop.variant_editor.context",
-    "desktop.variant_editor.close",
+    "desktop.child_window.open",
+    "desktop.child_window.context",
+    "desktop.child_window.close",
 }
 
 

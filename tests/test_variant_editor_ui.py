@@ -199,9 +199,12 @@ BODY
     def test_load_initializes_fields_models_selected_values_and_barcodes(self):
         out = self._run(r'''
 API.invoke = async action => ({
-  product:{product_id:3,category_id:5,name:"殼"},
-  variant:{variant_id:7,attributes:{顏色:"紅"},price:490,
-    models:["17 Pro"],barcodes:[{barcode:"B1",source:"factory"}]},
+  page:"variant_editor",
+  context:{
+    product:{product_id:3,category_id:5,name:"殼"},
+    variant:{variant_id:7,attributes:{顏色:"紅"},price:490,
+      models:["17 Pro"],barcodes:[{barcode:"B1",source:"factory"}]},
+  },
 });
 API.categoryFields = async () => [{field_id:11,name:"顏色",field_type:"select"}];
 API.listModels = async () => [
@@ -243,10 +246,11 @@ const failure = "FAILURE";
 const calls=[];
 API.invoke = async action => {
   calls.push(action);
-  if (action === "desktop.variant_editor.context" && failure === "context")
+  if (action === "desktop.child_window.context" && failure === "context")
     throw new Error("context failed");
-  return {product:{product_id:3,category_id:5,name:"殼"},
-    variant:{variant_id:7,attributes:{顏色:"紅"},price:490,models:[],barcodes:[]}};
+  return {page:"variant_editor",
+    context:{product:{product_id:3,category_id:5,name:"殼"},
+      variant:{variant_id:7,attributes:{顏色:"紅"},price:490,models:[],barcodes:[]}}};
 };
 API.categoryFields = async () => {
   if (failure === "fields") throw new Error("fields failed");
@@ -322,7 +326,7 @@ API.updateVariantEditor = async payload => calls.push(["update",payload]);
 let closes=0;
 API.invoke = async (action,payload) => {
   calls.push([action,payload]);
-  if (action === "desktop.variant_editor.close" && ++closes === 1)
+  if (action === "desktop.child_window.close" && ++closes === 1)
     throw new Error("close failed");
 };
 const s = mkState({variant:{variant_id:7}, product:{category_id:5}, fields:[],
@@ -341,12 +345,12 @@ s.factoryBarcode="F2"; s.addFactoryBarcode(); s.addStoreBarcode();
             ["update", {"id": 7, "fields": {"attributes": {"顏色": "紅"},
              "price": 490}, "model_ids": [21], "deleted_barcodes": ["B1"],
              "factory_barcodes": ["F2"], "store_barcode_count": 1}],
-            ["desktop.variant_editor.close", {"saved": True}],
+            ["desktop.child_window.close", {"saved": True}],
         ])
         self.assertTrue(out["committed"])
         self.assertEqual(out["retryCalls"], [
-            ["desktop.variant_editor.close", {"saved": True}],
-            ["desktop.variant_editor.close", {"saved": True}],
+            ["desktop.child_window.close", {"saved": True}],
+            ["desktop.child_window.close", {"saved": True}],
         ])
 
     def test_atomic_save_failure_keeps_complete_queue_for_retry(self):

@@ -36,9 +36,9 @@ window.VariantEditorApp = {
       this.ready = false;
       this.error = "";
       try {
-        const context = await API.invoke("desktop.variant_editor.context", {});
-        const product = context.product;
-        const variant = context.variant;
+        const context = await API.invoke("desktop.child_window.context", {});
+        const product = context.context.product;
+        const variant = context.context.variant;
         const [fields, models] = await Promise.all([
           API.categoryFields(product.category_id),
           API.listModels({}),
@@ -127,7 +127,7 @@ window.VariantEditorApp = {
           store_barcode_count: this.pendingStoreCount,
         });
         this.committed = true;
-        await API.invoke("desktop.variant_editor.close", {saved: true});
+        await API.invoke("desktop.child_window.close", {saved: true});
       } catch (error) {
         this.error = error.message;
       } finally {
@@ -136,7 +136,7 @@ window.VariantEditorApp = {
     },
     async cancel() {
       if (this.saving) return;
-      await API.invoke("desktop.variant_editor.close", {saved: this.committed});
+      await API.invoke("desktop.child_window.close", {saved: this.committed});
     },
     async handleKeydown(event) {
       if (event.key === "Escape") await this.cancel();

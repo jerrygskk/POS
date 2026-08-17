@@ -103,7 +103,7 @@ window.PosDesktopLock = {
 API.invoke = async (action, payload) => {
   order.push(action);
   out.payload = payload;
-  if (payload.variant.variant_id === 9) throw new Error("開啟失敗");
+  if (payload.context.variant.variant_id === 9) throw new Error("開啟失敗");
 };
 const s = mkState();
 (async () => {
@@ -116,22 +116,43 @@ const s = mkState();
 })();
 ''')
         self.assertEqual(out["successOrder"], [
-            "lock", "desktop.variant_editor.open"])
+            "lock", "desktop.child_window.open"])
         self.assertEqual(out["failureOrder"], [
-            "lock", "desktop.variant_editor.open",
-            "lock", "desktop.variant_editor.open", "unlock"])
+            "lock", "desktop.child_window.open",
+            "lock", "desktop.child_window.open", "unlock"])
         self.assertEqual(out["payload"], {
-            "product": {"product_id": 1}, "variant": {"variant_id": 9}})
+            "page": "variant_editor",
+            "context": {"product": {"product_id": 1}, "variant": {"variant_id": 9}}})
         self.assertEqual(out["errors"], ["開啟失敗"])
 
-    def test_editor_close_refreshes_only_after_successful_save(self):
+    def test_add_variant_opens_batch_child_window_with_product_context(self):
+        out = self._run(r'''
+const payloads = [];
+API.invoke = async (action, payload) => { payloads.push([action, payload]); };
+const s = mkState();
+(async () => {
+  await s.openAddVariant({product_id: 5, category_id: 3});
+  await s.openAddVariant(null);
+  out.payloads = payloads;
+  done();
+})();
+''')
+        self.assertEqual(out["payloads"], [
+            ["desktop.child_window.open",
+             {"page": "variant_batch",
+              "context": {"category_id": 3, "product_id": 5}}],
+            ["desktop.child_window.open",
+             {"page": "variant_batch", "context": {}}],
+        ])
+
+    def test_child_window_close_refreshes_only_after_successful_save(self):
         out = self._run(r'''
 let reloads = 0;
 const s = mkState({reload: async () => { reloads++; }});
 (async () => {
-  await s.onVariantEditorClosed({detail:{saved:false}});
+  await s.onChildWindowClosed({detail:{saved:false}});
   out.afterCancel = reloads;
-  await s.onVariantEditorClosed({detail:{saved:true}});
+  await s.onChildWindowClosed({detail:{saved:true}});
   out.afterSave = reloads;
   done();
 })();
@@ -172,7 +193,7 @@ const letter = {key:"a", prevented:false, preventDefault(){ this.prevented = tru
 listeners.keydown(letter);
 context.window.scrollX = 200; context.window.scrollY = 300;
 listeners.scroll();
-listeners["pos-variant-editor-closed"]({detail:{saved:false}});
+listeners["pos-child-window-closed"]({detail:{saved:false}});
 process.stdout.write(JSON.stringify({
   locked, unlocked:!root.inert, wheelPrevented:wheel.prevented,
   pageDownPrevented:pageDown.prevented, letterPrevented:letter.prevented,
@@ -203,7 +224,7 @@ process.stdout.write(JSON.stringify({
         source = (STATIC / "js" / "app.js").read_text(encoding="utf-8")
         self.assertNotIn("overlay", source.lower())
 
-    def test_api_allows_desktop_variant_editor_action(self):
+    def test_api_allows_desktop_child_window_action(self):
         api_script = r'''
 const fs = require("fs"), vm = require("vm");
 const calls = [];
@@ -212,7 +233,7 @@ const context = {window:{pywebview:{api:{invoke:async (action, payload) => {
 }}}}, console, setTimeout, clearTimeout};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
-vm.runInContext('API.invoke("desktop.variant_editor.open", {variant:{variant_id:7}})', context)
+vm.runInContext('API.invoke("desktop.child_window.open", {page:"variant_editor"})', context)
   .then(() => process.stdout.write(JSON.stringify(calls)))
   .catch(error => { console.error(error.message); process.exit(1); });
 '''
@@ -223,7 +244,7 @@ vm.runInContext('API.invoke("desktop.variant_editor.open", {variant:{variant_id:
         if result.returncode != 0:
             self.fail(result.stderr)
         self.assertEqual(json.loads(result.stdout), [[
-            "desktop.variant_editor.open", {"variant": {"variant_id": 7}}]])
+            "desktop.child_window.open", {"page": "variant_editor"}]])
 
     def test_refresh_uses_all_filters_for_inactive_lookup_and_counts_variants(self):
         out = self._run(r'''
@@ -403,7 +424,7 @@ class CatalogTemplateContractTests(unittest.TestCase):
         cls.catalog_js = (STATIC / "js" / "catalog.js").read_text(
             encoding="utf-8")
         cls.catalog = html.split('<template id="tpl-catalog">', 1)[1].split(
-            '<template id="tpl-variant-batch">', 1)[0]
+            '<template id="tpl-settings">', 1)[0]
 
     def test_catalog_is_one_table_without_expand_mechanism(self):
         self.assertEqual(self.catalog.count("<table"), 1)
@@ -463,8 +484,12 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertNotIn("p.active ?", info)
 
     def test_add_variant_entry_is_only_for_active_products_and_uses_ui_term(self):
-        self.assertIn('v-if="p.active && addingFor === p.product_id"', self.catalog)
-        self.assertIn('v-if="p.active && addingFor !== p.product_id"', self.catalog)
+        # 新增款式一律開子視窗:行內快速新增表單已移除,列上只留入口按鈕
+        self.assertIn('<tr v-if="p.active">', self.catalog)
+        self.assertIn('@click="openAddVariant(p)"', self.catalog)
+        self.assertIn('@click="openAddVariant(null)"', self.catalog)
+        self.assertNotIn("addingFor", self.catalog)
+        self.assertNotIn("newVariant", self.catalog)
         self.assertIn("新增款式", self.catalog)
         self.assertNotIn("新增子產品", self.catalog)
 
@@ -483,7 +508,7 @@ class CatalogTemplateContractTests(unittest.TestCase):
     def test_catalog_uses_display_products_and_bumped_resource_version(self):
         self.assertIn('v-for="p in displayProducts"', self.catalog)
         self.assertNotIn("?v=67", self.html)
-        self.assertIn("?v=69", self.html)
+        self.assertIn("?v=70", self.html)
 
 
 if __name__ == "__main__":

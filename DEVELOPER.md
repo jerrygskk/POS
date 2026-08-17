@@ -27,7 +27,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `lib/runtime_paths.py` | 集中決定開發／onefile 的 DB、備份、錯誤記錄與 static 路徑 |
 | `lib/desktop_application.py` | 建立 pywebview 視窗，串接 `DesktopBridge` 與各 Facade |
 | `lib/desktop_bridge.py` | pywebview JS bridge：轉送 action、統一成功／錯誤 envelope、處理匯出存檔 |
-| `lib/variant_editor_window.py` | 款式修改子視窗協調器：唯一子視窗、傳入編輯脈絡、關閉時通知主視窗解鎖 |
+| `lib/child_window.py` | 子視窗協調器：唯一子視窗、頁面白名單、傳入脈絡、關閉時通知主視窗解鎖 |
 | `lib/version.py` | `VERSION` 字串 |
 | `lib/db.py` | `get_conn` / `db_conn`(context manager)/ `init_db`,純資料層(零框架依賴) |
 | `lib/db_schema.py` | 現行 schema DDL 唯一來源；未來變更仍依 migration 規則升級既有資料庫 |
@@ -40,6 +40,8 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `lib/*_service.py` | 正式 Facade／Service／Repository 應用層與資料存取實作 |
 | `static/` | `index.html` + `css/pos.css` + `js/*.js`（Vue 3、DesktopBridge 包裝、各頁邏輯） |
 | `static/variant_editor.html` | 款式修改子視窗頁面（獨立 Vue app，共用 `attrfields`／`modelpicker`／`optpicker` 元件） |
+| `static/variant_batch.html` | 新增款式子視窗頁面（`variant_batch_window.js` 外殼＋既有建檔頁元件與樣板） |
+| `static/js/pos_shared.js` | 主視窗與子視窗共用的全域 mixin（`guard`／`guardReload`／`attrText`） |
 | `static/css/dialog-theme.css` | 子視窗對話框外觀（`.dialog-*` 公版，沿用 §2 UI 風格色票） |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
 | `tests/` | 單元測試（`tests/base.py` 共用 `ConnTestCase`／`FacadeTestCase` 與 fixture helper） |
@@ -61,25 +63,37 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 - **商品資料庫搜尋**:關鍵字以空白切成多個詞,採 **AND**(每個詞都要命中才算符合),大小寫與全半形以 `casefold` 正規化。比對範圍為商品名稱、種類、廠牌、款式的規格值(含 multi/tags 的每個值)、適用型號與條碼,命中時只保留符合的款式列。查無啟用中資料時另查一次停用資料,回報筆數並提供「顯示已停用」入口,不直接把停用商品混進結果。條碼只針對當頁款式查詢(`variant_id IN (...)`),不整表撈。
 - **Schema 與 migration**:`lib/db_schema.py` 是現行 schema DDL 的唯一來源；`lib/legacy_migrations.py` 封存 v1–v13 的歷史 migration DDL。未來修改現行 schema 時，仍須依 migration 規則新增升級步驟，讓既有資料庫可安全演進。
 
-### 款式修改視窗(pywebview 子視窗)
+### 子視窗(pywebview 款式修改／新增款式)
 
-商品資料庫頁按「編輯」時,不開網頁對話框,而是由
-`VariantEditorWindowCoordinator` 建立**唯一一個** pywebview 子視窗載入
-`static/variant_editor.html`。理由:規格、型號、售價、條碼四段內容在單一
-網頁對話框裡會逼出巢狀彈窗與捲動層層相疊,違反 UI 從簡;子視窗可獨立
-調整大小、由作業系統管理焦點。
+商品資料庫頁的「編輯」與「新增款式」都不開網頁對話框,而是由
+`ChildWindowCoordinator` 建立**唯一一個** pywebview 子視窗。理由:規格、型號、
+售價、條碼這些內容在單一網頁對話框裡會逼出巢狀彈窗與捲動層層相疊,違反 UI 從簡;
+子視窗可獨立調整大小、由作業系統管理焦點。
 
-**唯一性與脈絡**:協調器以 `RLock` 保護狀態,已開啟時再按「編輯」只 `restore()`
-既有視窗,不會開第二個。子視窗自己不帶查詢參數,改由 `desktop.variant_editor.context`
-向協調器拿主視窗開窗時傳入的脈絡副本(`copy.deepcopy`,子視窗改不到主視窗資料)。
-子視窗有自己的 `DesktopBridge` 實例,共用同一個 Facade。
+**頁面白名單**:`CHILD_PAGES` 決定可開啟的頁面(`variant_editor`／`variant_batch`)
+與各自標題、尺寸。前端只送 key,**不送檔名**,避免任意本機檔被載入。
+
+**唯一性與脈絡**:協調器以 `RLock` 保護狀態,已開啟時再按只 `restore()` 既有視窗,
+不會開第二個(編輯與新增也因此不會同時開)。子視窗自己不帶查詢參數,改由
+`desktop.child_window.context` 向協調器拿主視窗開窗時傳入的脈絡副本
+(`copy.deepcopy`,子視窗改不到主視窗資料)。子視窗有自己的 `DesktopBridge` 實例,
+共用同一個 Facade。
+
+**新增款式的入口與脈絡**:工具列的「新增款式」開空脈絡(子視窗內自己選種類與大產品);
+商品列的「新增款式」帶 `category_id`／`product_id`,子視窗直接鎖定該款。
+⚠️ 建檔頁在 `mounted` 讀 props 決定預選,外殼必須**先取到脈絡再掛載**
+(`v-if="ready"`),否則預選永遠是空的(PITFALLS VUE-9)。
+原本商品列的行內快速新增表單已移除:兩個入口統一走建檔流程,連帶都會做重複款式檢查。
 
 **主視窗上鎖**(`window.PosDesktopLock`,`static/js/app.js`):開窗即對 `#app`
 設 `inert` 並攔截 `wheel`／`touchmove`／捲動鍵與 `scroll` 事件、記住捲動位置並還原。
 ⚠️ 只設 `inert` 不夠——`inert` 擋得住點擊與焦點,擋不住滾輪與 PageDown 之類的
 捲動;店員在子視窗打字時主視窗跟著滑走會誤以為程式壞了。解鎖靠協調器關窗時
-`evaluate_js` 對主視窗派 `pos-variant-editor-closed` 事件,**取消、Esc、按視窗 X
+`evaluate_js` 對主視窗派 `pos-child-window-closed` 事件,**取消、Esc、按視窗 X
 三條路徑都會走到**(X 走 `window.events.closed`),避免主視窗永久鎖死。
+
+**建檔完成的刷新**:新增款式子視窗每成功送出一批就記下 `saved`,關窗事件帶回主視窗
+觸發商品資料庫重新查詢;沒建檔就關掉不會白跑一次查詢。
 
 **儲存為單一交易**:前端不逐項呼叫 API,一次送 `variants.update_editor`
 (規格、售價、型號清單、刪除條碼、新增原廠碼、待產生自取碼數量),
@@ -128,6 +142,10 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 - **圓角 8px**(chip/tag 圓膠囊除外);一般鈕 `min-width: 80px` 保持等寬,小型鈕(`.btn-sm`/chip/表格操作鈕)歸零。
 - **表單對齊**:「標籤(固定寬 `--label-w`,預設 9em)＋輸入框」兩欄 grid,同表單內全部欄位對齊同一垂直線,列距 10px;label 內文字+輸入框靠 grid 匿名項對齊,html 不需加 span。巢狀框(如 `.spec-box`)在框內覆寫 `--label-w` 扣掉 padding+border,維持框內外同線。新表單一律照此規則。
 - **設定頁結構**:單一左欄分群選單(`.cat-list`:「商品種類」清單＋「基礎資料」群組的廠牌/手機品牌與型號)＋右側單一內容區,由 `settings.js` 的 `section` 狀態(`category`/`brands`/`models`)切換;新增設定分區時在左欄基礎資料群組加一項、右側加一段 `v-else-if`,不另開大分頁。
+- **子視窗外觀**:`static/css/dialog-theme.css` 是子視窗公版。細捲軸(8px、`#c7c7cc`)、
+  文字選取反白(`#8fa8c8`)與按鈕 hover/pressed 灰階(`#e5e5ea`／`#d1d1d6`)取自維護者
+  另一個專案已調校過的彈窗公版(`PoliceDocSys/lib/theme.py`);該專案的 checkbox 色塊
+  刻意不採用(勾選狀態辨識度不足),本專案維持自己的 checkbox 樣式。
 - ⚠️ **勿在 v-if/v-else 元素上掛動態 `:key`**:與 prod 版 Vue(`vue.global.prod.js`)的 `stringifyStatic` 靜態節點快取衝突,key 變動重建區塊後快取 vnode 的 DOM 參照被清空,之後所有畫面更新拋 TypeError、整個 app 卡死;dev 版 Vue 測不出來,務必以 prod 版驗證(v0.1.0 後設定頁曾因此崩潰)。內容全走資料綁定即可,不需 key 強制重建。
 
 ## 3. 測試

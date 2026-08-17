@@ -10,13 +10,13 @@ class DesktopBridge:
     """將應用操作結果轉為桌面前端使用的固定 envelope。"""
 
     def __init__(self, logger=None, facade=None, window=None, save_dialog_type=None,
-                 file_writer=None, variant_editor=None):
+                 file_writer=None, child_window=None):
         self._logger = logger or logging.getLogger(__name__)
         self._facade = facade
         self._window = window
         self._save_dialog_type = save_dialog_type
         self._file_writer = file_writer or self._write_text
-        self._variant_editor = variant_editor
+        self._child_window = child_window
 
     @staticmethod
     def _write_text(path, content):
@@ -27,21 +27,21 @@ class DesktopBridge:
         self._window = window
         self._save_dialog_type = save_dialog_type
 
-    def _set_variant_editor(self, variant_editor):
-        self._variant_editor = variant_editor
+    def _set_child_window(self, child_window):
+        self._child_window = child_window
 
     def invoke(self, action, payload=None):
-        if action == "desktop.variant_editor.open":
-            return self._respond(lambda: self._require_variant_editor().open(
+        if action == "desktop.child_window.open":
+            return self._respond(lambda: self._require_child_window().open(
                 {} if payload is None else payload))
-        if action == "desktop.variant_editor.context":
-            return self._respond(lambda: self._require_variant_editor().context())
-        if action == "desktop.variant_editor.close":
+        if action == "desktop.child_window.context":
+            return self._respond(lambda: self._require_child_window().context())
+        if action == "desktop.child_window.close":
             data = {} if payload is None else payload
-            return self._respond(lambda: self._require_variant_editor().close(
+            return self._respond(lambda: self._require_child_window().close(
                 bool(data.get("saved", False))))
-        if action == "variants.update_editor" and self._variant_editor is not None:
-            return self._respond(lambda: self._variant_editor.update_editor(
+        if action == "variants.update_editor" and self._child_window is not None:
+            return self._respond(lambda: self._child_window.update_editor(
                 {} if payload is None else payload))
         if self._facade is None:
             return self._respond(lambda: (_ for _ in ()).throw(
@@ -52,10 +52,10 @@ class DesktopBridge:
             lambda: self._facade.invoke(action, {} if payload is None else payload)
         )
 
-    def _require_variant_editor(self):
-        if self._variant_editor is None:
-            raise InternalError("款式編輯服務尚未初始化")
-        return self._variant_editor
+    def _require_child_window(self):
+        if self._child_window is None:
+            raise InternalError("子視窗服務尚未初始化")
+        return self._child_window
 
     def _export_sales(self, payload):
         if self._window is None or self._save_dialog_type is None:

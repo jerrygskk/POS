@@ -123,7 +123,12 @@ window.PosComponents["tag-selector"] = {
 // 新增子產品內容頁:draft array 單一資料來源、連續建檔、預覽表、單層修改 popup。
 window.PosPages["page-variant-batch"] = {
   template: "#tpl-variant-batch",
-  inject: ["showError", "goPage"],
+  inject: ["showError", "goPage", "markSaved"],
+  // 由子視窗外殼帶入:從商品資料庫某商品進來時直接鎖定該種類與大產品。
+  props: {
+    initCategoryId: { default: null },
+    initProductId: { default: null },
+  },
   data() {
     return {
       categories: [], products: [], models: [],
@@ -153,6 +158,11 @@ window.PosPages["page-variant-batch"] = {
       this.categories = await API.listCategories({});
       this.products = await API.listCatalog({});
       this.models = await API.listModels({});
+      if (this.initCategoryId != null) {
+        this.catId = this.initCategoryId;
+        this.productId = this.initProductId;
+        if (this.productId != null) await this.onProductChange();
+      }
     });
   },
   unmounted() { document.removeEventListener("keydown", this._escHandler); },
@@ -179,7 +189,7 @@ window.PosPages["page-variant-batch"] = {
         this.input.attrs = window.initFormAttrs(this.fields, {});
       });
     },
-    goCatalog() { this.goPage("catalog"); },
+    closeWindow() { this.goPage("catalog"); },
 
     // ---- 加入 / 刪除 / 復原 ----
     missingRequired(attrs) {
@@ -285,7 +295,8 @@ window.PosPages["page-variant-batch"] = {
       this.commitErrors = {};
       try {
         const res = await API.batchCreateVariants(this.productId, this.buildPayload());
-        this.doneMsg = "已建立 " + res.results.length + " 筆子產品。";
+        this.doneMsg = "已建立 " + res.results.length + " 筆款式。";
+        this.markSaved();
         this.drafts = [];            // 成功才清空
         this.input = this.blankInput();
         this.input.attrs = window.initFormAttrs(this.fields, {});

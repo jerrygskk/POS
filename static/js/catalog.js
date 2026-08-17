@@ -56,7 +56,6 @@ window.PosPages["page-catalog"] = {
       categories: [], brands: [], models: [],
       products: [], fieldsByCat: {}, fieldOptions: {}, fieldUsageByCat: {},
       inactiveMatchCount: null, inactiveLookupFailed: false, _refreshToken: 0,
-      addingFor: null, newVariant: { attrs: {}, price: null, barcode: "", model_ids: [] },
     };
   },
   computed: {
@@ -76,8 +75,8 @@ window.PosPages["page-catalog"] = {
     },
   },
   async mounted() {
-    this._variantEditorClosed = (event) => this.onVariantEditorClosed(event);
-    window.addEventListener("pos-variant-editor-closed", this._variantEditorClosed);
+    this._childWindowClosed = (event) => this.onChildWindowClosed(event);
+    window.addEventListener("pos-child-window-closed", this._childWindowClosed);
     await this.guard(async () => {
       this.categories = await API.listCategories({});
       this.brands = await API.listBrands({});
@@ -86,7 +85,7 @@ window.PosPages["page-catalog"] = {
     await this.reload();
   },
   unmounted() {
-    window.removeEventListener("pos-variant-editor-closed", this._variantEditorClosed);
+    window.removeEventListener("pos-child-window-closed", this._childWindowClosed);
   },
   methods: {
     // 只重撈資料,不動編輯狀態(條碼即時新增/刪除用,避免把使用者踢出編輯)
@@ -145,23 +144,33 @@ window.PosPages["page-catalog"] = {
     },
     async reload() {
       await this.refresh();
-      this.addingFor = null;
     },
     editInSettings() { this.goPage("settings"); },
     groupedVariants(p) {
       return window.groupVariantsByModel(p.variants, this.modelOrder);
     },
 
-    async openVariantEditor(product, variant) {
+    // 款式修改與新增款式共用同一個子視窗機制:開窗前先鎖主視窗,
+    // 開窗失敗要自己解鎖(成功時由關窗事件解鎖)。
+    async openChildWindow(page, context) {
       window.PosDesktopLock.lock();
       try {
-        await API.invoke("desktop.variant_editor.open", {product, variant});
+        await API.invoke("desktop.child_window.open", {page, context});
       } catch (error) {
         window.PosDesktopLock.unlock();
         this.showError(error.message);
       }
     },
-    async onVariantEditorClosed(event) {
+    async openVariantEditor(product, variant) {
+      await this.openChildWindow("variant_editor", {product, variant});
+    },
+    // product 為 null=不指定大產品(由子視窗自己選)
+    async openAddVariant(product) {
+      await this.openChildWindow("variant_batch", product ? {
+        category_id: product.category_id, product_id: product.product_id,
+      } : {});
+    },
+    async onChildWindowClosed(event) {
       if (event && event.detail && event.detail.saved) await this.reload();
     },
 
@@ -206,28 +215,6 @@ window.PosPages["page-catalog"] = {
     mainBarcode(v) {
       if (!v.barcodes || !v.barcodes.length) return null;
       return v.barcodes.find(b => b.source === "factory") || v.barcodes[0];
-    },
-    // 新增變體
-    async startAddVariant(p) {
-      await this.ensureFields(p.category_id);
-      this.newVariant = {
-        attrs: window.initFormAttrs(this.fieldsByCat[p.category_id], {}),
-        price: null, barcode: "", model_ids: [], _cat: p.category_id };
-      this.addingFor = p.product_id;
-    },
-    async saveNewVariant(p) {
-      const n = this.newVariant;
-      const barcodes = n.barcode.trim()
-        ? [{ barcode: n.barcode.trim(), source: "factory" }] : [];
-      await this.guardReload(async () => {
-        await window.CatalogFields.ensureOptions(
-          this.fieldsByCat[p.category_id] || [], n.attrs, this.fieldOptions);
-        await API.createVariant(p.product_id, {
-          attributes: window.buildAttrPayload(this.fieldsByCat[p.category_id], n.attrs),
-          price: n.price === "" ? null : (n.price ?? null),
-          model_ids: n.model_ids, barcodes });
-      });
-      await this.reloadFieldUsage(p.category_id);
     },
   },
 };

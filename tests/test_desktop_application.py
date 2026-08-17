@@ -73,6 +73,8 @@ class DesktopApplicationTest(unittest.TestCase):
         (self.root / "static" / "index.html").write_text("POS", encoding="utf-8")
         (self.root / "static" / "variant_editor.html").write_text(
             "editor", encoding="utf-8")
+        (self.root / "static" / "variant_batch.html").write_text(
+            "batch", encoding="utf-8")
         self.paths = RuntimePaths.from_root(self.root)
 
     def test_creates_one_local_window_with_bridge_and_starts_webview2(self):
@@ -131,7 +133,7 @@ class DesktopApplicationTest(unittest.TestCase):
         log = self.paths.error_log_path.read_text(encoding="utf-8")
         self.assertIn("private detail", log)
 
-    def test_variant_editor_is_singleton_and_child_bridge_only_exposes_invoke(self):
+    def test_child_window_is_singleton_and_child_bridge_only_exposes_invoke(self):
         webview = FakeWebview()
         bridge = DesktopBridge()
         application = DesktopApplication(
@@ -139,13 +141,18 @@ class DesktopApplicationTest(unittest.TestCase):
         application.run()
         original = {"product": {"product_id": 10}, "variant": {"variant_id": 20}}
 
-        first = bridge.invoke("desktop.variant_editor.open", original)
-        second = bridge.invoke("desktop.variant_editor.open", {
-            "product": {"product_id": 11}, "variant": {"variant_id": 21}})
+        first = bridge.invoke("desktop.child_window.open",
+                              {"page": "variant_editor", "context": original})
+        second = bridge.invoke("desktop.child_window.open", {
+            "page": "variant_editor",
+            "context": {"product": {"product_id": 11},
+                        "variant": {"variant_id": 21}}})
 
         self.assertTrue(first["ok"])
-        self.assertEqual(first["data"], {"opened": True, "reused": False})
-        self.assertEqual(second["data"], {"opened": True, "reused": True})
+        self.assertEqual(first["data"],
+                         {"opened": True, "reused": False, "page": "variant_editor"})
+        self.assertEqual(second["data"],
+                         {"opened": True, "reused": True, "page": "variant_editor"})
         self.assertEqual(len(webview.create_window_calls), 2)
         args, kwargs = webview.create_window_calls[1]
         self.assertEqual(args, (
@@ -153,7 +160,8 @@ class DesktopApplicationTest(unittest.TestCase):
         child_bridge = kwargs["js_api"]
         self.assertIsInstance(child_bridge, DesktopBridge)
         self.assertEqual(
-            child_bridge.invoke("desktop.variant_editor.context")["data"], original)
+            child_bridge.invoke("desktop.child_window.context")["data"],
+            {"page": "variant_editor", "context": original})
         self.assertEqual(webview.windows[1].restore_calls, 1)
 
         from webview.util import inject_pywebview
@@ -170,17 +178,18 @@ class DesktopApplicationTest(unittest.TestCase):
         recursive_cell.cell_contents = get_functions
         self.assertEqual({"invoke"}, set(get_functions(child_bridge)))
 
-    def test_variant_editor_close_and_native_x_dispatch_exactly_once(self):
+    def test_child_window_close_and_native_x_dispatch_exactly_once(self):
         webview = FakeWebview()
         bridge = DesktopBridge()
         DesktopApplication(
             self.paths, bridge=bridge, webview_module=webview).run()
         context = {"product": {"product_id": 1}, "variant": {"variant_id": 2}}
 
-        bridge.invoke("desktop.variant_editor.open", context)
+        bridge.invoke("desktop.child_window.open",
+                      {"page": "variant_editor", "context": context})
         child = webview.windows[1]
         result = child and bridge.invoke(
-            "desktop.variant_editor.close", {"saved": True})
+            "desktop.child_window.close", {"saved": True})
         child.events.closed.fire()
 
         self.assertEqual(result["data"], {"closed": True})
@@ -188,14 +197,15 @@ class DesktopApplicationTest(unittest.TestCase):
         self.assertEqual(len(webview.windows[0].js_calls), 1)
         self.assertIn('"saved": true', webview.windows[0].js_calls[0])
 
-        bridge.invoke("desktop.variant_editor.open", context)
+        bridge.invoke("desktop.child_window.open",
+                      {"page": "variant_editor", "context": context})
         x_child = webview.windows[2]
         x_child.events.closed.fire()
         x_child.events.closed.fire()
         self.assertEqual(len(webview.windows[0].js_calls), 2)
         self.assertIn('"saved": false', webview.windows[0].js_calls[1])
 
-    def test_concurrent_variant_editor_open_creates_only_one_child(self):
+    def test_concurrent_child_window_open_creates_only_one_child(self):
         class BlockingWebview(FakeWebview):
             def __init__(self):
                 super().__init__()
@@ -214,9 +224,9 @@ class DesktopApplicationTest(unittest.TestCase):
         context = {"product": {"product_id": 1}, "variant": {"variant_id": 2}}
         results = []
         first = threading.Thread(target=lambda: results.append(
-            bridge.invoke("desktop.variant_editor.open", context)))
+            bridge.invoke("desktop.child_window.open", {"page": "variant_editor", "context": context})))
         second = threading.Thread(target=lambda: results.append(
-            bridge.invoke("desktop.variant_editor.open", context)))
+            bridge.invoke("desktop.child_window.open", {"page": "variant_editor", "context": context})))
 
         first.start()
         self.assertTrue(webview.child_entered.wait(1))
@@ -227,8 +237,10 @@ class DesktopApplicationTest(unittest.TestCase):
         self.assertFalse(first.is_alive() or second.is_alive())
         self.assertEqual(len(webview.create_window_calls), 2)
         data = [result["data"] for result in results]
-        self.assertIn({"opened": True, "reused": False}, data)
-        self.assertIn({"opened": True, "reused": True}, data)
+        self.assertIn({"opened": True, "reused": False,
+                       "page": "variant_editor"}, data)
+        self.assertIn({"opened": True, "reused": True,
+                       "page": "variant_editor"}, data)
 
     def test_variant_editor_create_failure_does_not_poison_next_open(self):
         class FailOnceWebview(FakeWebview):
@@ -247,12 +259,13 @@ class DesktopApplicationTest(unittest.TestCase):
         DesktopApplication(self.paths, bridge=bridge, webview_module=webview).run()
         context = {"product": {"product_id": 1}, "variant": {"variant_id": 2}}
 
-        failed = bridge.invoke("desktop.variant_editor.open", context)
-        retried = bridge.invoke("desktop.variant_editor.open", context)
+        failed = bridge.invoke("desktop.child_window.open", {"page": "variant_editor", "context": context})
+        retried = bridge.invoke("desktop.child_window.open", {"page": "variant_editor", "context": context})
 
         self.assertFalse(failed["ok"])
         self.assertTrue(retried["ok"])
-        self.assertEqual(retried["data"], {"opened": True, "reused": False})
+        self.assertEqual(retried["data"],
+                         {"opened": True, "reused": False, "page": "variant_editor"})
         self.assertEqual(len(webview.create_window_calls), 2)
 
     def test_native_x_after_committed_update_dispatches_saved_true(self):
@@ -266,14 +279,14 @@ class DesktopApplicationTest(unittest.TestCase):
         bridge = DesktopBridge(facade=facade)
         DesktopApplication(self.paths, bridge=bridge, webview_module=webview).run()
         context = {"product": {"product_id": 1}, "variant": {"variant_id": 2}}
-        bridge.invoke("desktop.variant_editor.open", context)
+        bridge.invoke("desktop.child_window.open", {"page": "variant_editor", "context": context})
         child = webview.windows[1]
         child_bridge = webview.create_window_calls[1][1]["js_api"]
 
         result = child_bridge.invoke("variants.update_editor", {"id": 2})
         webview.windows[0].evaluate_errors = 1
         failed_close = child_bridge.invoke(
-            "desktop.variant_editor.close", {"saved": True})
+            "desktop.child_window.close", {"saved": True})
         child.events.closed.fire()
 
         self.assertTrue(result["ok"])

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>新增款式</title>
+<link rel="stylesheet" href="css/pos.css?v=70">
+<link rel="stylesheet" href="css/dialog-theme.css?v=70">
+</head>
+<body>
+<div id="variant-batch-window" v-cloak>
+  <div v-if="error" class="dialog-error">{{ error }}</div>
+  <!-- 先取得脈絡再掛載建檔頁:元件在 mounted 讀 props 決定預選,晚給就來不及 -->
+  <page-variant-batch v-if="ready" :init-category-id="initCategoryId"
+                      :init-product-id="initProductId"></page-variant-batch>
+</div>
+<template id="tpl-variant-batch">
+<div class="dialog-shell">
+  <div class="dialog-content">
+    <h1>新增款式</h1>
+
+    <section class="dialog-section">
+      <label class="dialog-field">種類
+        <select v-model.number="catId" @change="onCategoryChange">
+          <option :value="null">選擇種類</option>
+          <option v-for="c in categories" :key="c.category_id" :value="c.category_id">{{ c.name }}</option>
+        </select>
+      </label>
+      <label class="dialog-field">大產品
+        <select v-model.number="productId" @change="onProductChange" :disabled="catId==null">
+          <option :value="null">選擇大產品</option>
+          <option v-for="p in catProducts" :key="p.product_id" :value="p.product_id">{{ p.name }}</option>
+        </select>
+      </label>
+      <div v-if="catId!=null && !catProducts.length" class="dialog-hint">
+        此種類尚無大產品,請先於設定建立。
+      </div>
+      <div v-else-if="product" class="dialog-hint">
+        種類 {{ product.category_name || '—' }}｜廠牌 {{ product.brand_name || '—' }}｜備註 {{ product.note || '—' }}
+      </div>
+    </section>
+
+    <template v-if="product">
+      <section class="dialog-section">
+        <h2>規格</h2>
+        <attr-fields :fields="formalFields" :options="fieldOptions" :usage="fieldUsage"
+                     :attrs="input.attrs" :model-ids="input.model_ids"></attr-fields>
+      </section>
+
+      <section v-if="featureField" class="dialog-section">
+        <h2>{{ featureField.name }}(選填)</h2>
+        <tag-selector v-model="input.attrs[featureField.name]" :usage="tagUsage"></tag-selector>
+      </section>
+
+      <section v-if="modelMode==='required'" class="dialog-section">
+        <h2>適用手機型號</h2>
+        <model-picker :models="models" v-model:model_ids="input.model_ids"></model-picker>
+      </section>
+
+      <section class="dialog-section">
+        <h2>售價與條碼</h2>
+        <label class="dialog-field">售價
+          <input type="number" v-model.number="input.price" min="0" placeholder="可留空">
+        </label>
+        <label class="dialog-field">原廠條碼
+          <input v-model="input.barcode" placeholder="可留空">
+        </label>
+        <label class="dialog-check">
+          <input type="checkbox" v-model="input.store"> 配自取碼
+        </label>
+        <div class="dialog-inline-actions">
+          <button type="button" class="dialog-confirm" @click="addDraft">加入預覽</button>
+        </div>
+      </section>
+
+      <section v-if="drafts.length" class="dialog-section">
+        <h2>預覽（{{ drafts.length }} 筆）</h2>
+        <table class="dialog-table">
+          <thead><tr><th>操作</th><th>規格</th><th>特性詞條</th>
+            <th v-if="modelMode==='required'">適用型號</th>
+            <th>售價</th><th>條碼</th><th>問題</th></tr></thead>
+          <tbody>
+            <tr v-for="(d, i) in drafts" :key="d.draft_id" :class="{invalid: draftErrors(d).length}">
+              <td>
+                <button type="button" class="dialog-small" @click="openEdit(i)">修改</button>
+                <button type="button" class="dialog-small danger" @click="removeDraft(i)">刪除</button>
+              </td>
+              <td>{{ draftSpecText(d) }}</td>
+              <td>{{ draftTags(d) || '—' }}</td>
+              <td v-if="modelMode==='required'">{{ draftModels(d) || '—' }}</td>
+              <td>{{ d.price == null || d.price === '' ? '未定價' : d.price }}</td>
+              <td>{{ draftBarcode(d) }}</td>
+              <td class="dialog-error-cell">
+                <div v-for="msg in draftErrors(d)" :key="msg">{{ msg }}</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <div v-if="doneMsg" class="dialog-done">{{ doneMsg }}</div>
+    </template>
+  </div>
+
+  <footer class="dialog-footer">
+    <div class="dialog-actions">
+      <button type="button" v-if="lastDeleted" class="dialog-cancel"
+              @click="undoDelete">復原刪除</button>
+      <span class="dialog-hint dialog-actions-spacer">預覽 {{ drafts.length }} 筆</span>
+      <button type="button" class="dialog-cancel" @click="closeWindow">關閉</button>
+      <button type="button" class="dialog-confirm" :disabled="!drafts.length"
+              @click="commitAll">建立全部款式</button>
+    </div>
+  </footer>
+
+  <!-- 修改 draft(單層 popup,深複本;取消/Escape 不影響原 draft)-->
+  <div v-if="editing" class="dialog-overlay" @click.self="cancelEdit">
+    <div class="dialog-panel">
+      <div class="dialog-content">
+        <h1>修改款式</h1>
+        <section class="dialog-section">
+          <h2>規格</h2>
+          <attr-fields :fields="formalFields" :options="fieldOptions" :usage="fieldUsage"
+                       :attrs="editing.draft.attrs"
+                       :model-ids="editing.draft.model_ids"></attr-fields>
+        </section>
+        <section v-if="featureField" class="dialog-section">
+          <h2>{{ featureField.name }}</h2>
+          <tag-selector v-model="editing.draft.attrs[featureField.name]" :usage="tagUsage"></tag-selector>
+        </section>
+        <section v-if="modelMode==='required'" class="dialog-section">
+          <h2>適用手機型號</h2>
+          <model-picker :models="models" v-model:model_ids="editing.draft.model_ids"></model-picker>
+        </section>
+        <section class="dialog-section">
+          <h2>售價與條碼</h2>
+          <label class="dialog-field">售價
+            <input type="number" v-model.number="editing.draft.price" min="0" placeholder="可留空">
+          </label>
+          <label class="dialog-field">原廠條碼
+            <input v-model="editing.draft.barcode" placeholder="可留空">
+          </label>
+          <label class="dialog-check">
+            <input type="checkbox" v-model="editing.draft.store"> 配自取碼
+          </label>
+        </section>
+      </div>
+      <footer class="dialog-footer">
+        <div class="dialog-actions">
+          <button type="button" class="dialog-cancel" @click="cancelEdit">取消</button>
+          <button type="button" class="dialog-confirm" @click="applyEdit">套用</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+</div>
+</template>
+      <template v-if="modelMode==='required'">
+        <div class="step-title">適用手機型號</div>
+        <model-picker :models="models" v-model:model_ids="editing.draft.model_ids"></model-picker>
+      </template>
+      <label>售價 <input type="number" v-model.number="editing.draft.price" min="0" class="w100"></label>
+      <label>原廠條碼 <input v-model="editing.draft.barcode"></label>
+      <label class="chk"><input type="checkbox" v-model="editing.draft.store"> 配自取碼</label>
+      <div class="modal-actions">
+        <button class="primary" @click="applyEdit">套用</button>
+        <button @click="cancelEdit">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+</template>
+<script src="js/vue.global.prod.js?v=70"></script>
+<script src="js/api.js?v=70"></script>
+<script src="js/pos_shared.js?v=70"></script>
+<script src="js/catalogfields.js?v=70"></script>
+<script src="js/variant_batch.js?v=70"></script>
+<script src="js/modelpicker.js?v=70"></script>
+<script src="js/attrfields.js?v=70"></script>
+<script src="js/variant_batch_window.js?v=70"></script>
+</body>
+</html>

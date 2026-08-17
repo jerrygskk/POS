@@ -32,7 +32,7 @@ class StaticDesktopContractTests(unittest.TestCase):
         self.assertEqual(len(versions), 1, versions)
 
     def test_formal_javascript_contains_no_network_transport_or_api_urls(self):
-        forbidden = ("/api", "fetch(", "XMLHttpRequest", "axios", "window.open", "API._do", "_waitForBridge")
+        forbidden = ("/api", "fetch(", "XMLHttpRequest", "axios", "window.open(", "API._do", "_waitForBridge")
         for path in (STATIC / "js").glob("*.js"):
             text = path.read_text(encoding="utf-8")
             for token in forbidden:
