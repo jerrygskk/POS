@@ -199,7 +199,47 @@ class TestGlassProductLines(unittest.TestCase):
         self.assertEqual(stats["variants_total"], 2)
         self.assertEqual(warnings, [])
 
-    def test_adamas_super_tough_imports_as_product_line_without_feature_tags(self):
+    def test_cozy_five_fold_privacy_spec_does_not_repeat_product_line_as_tag(self):
+        record = importer.parse_row({
+            importer.COL_CODE: "TEST-COZY-FIVEFOLD-PRIVACY",
+            importer.COL_CATEGORY: importer.GLASS_CATEGORY,
+            importer.COL_BRAND: "COZY五倍強化",
+            importer.COL_SPEC: "五倍防窺",
+            importer.COL_CAT1: "滿版",
+        })
+
+        # 「五倍強化」已在款名裡,規格不可再長出同名詞條。
+        self.assertEqual(importer.product_name(record), "COZY 五倍強化")
+        self.assertEqual(importer.glass_spec("五倍防窺"), (["防窺"], []))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "test.db")
+            init_db(db_path)
+            conn = get_conn(db_path)
+            try:
+                stats, warnings = importer.run_import(conn, [record])
+                specs = [row[0] for row in conn.execute(
+                    "SELECT ao.value FROM VariantAttribute va "
+                    "JOIN AttributeField af ON af.field_id=va.field_id "
+                    "JOIN AttributeOption ao ON ao.option_id=va.option_id "
+                    "WHERE af.name=?",
+                    (importer.GLASS_SPEC_FIELD,),
+                )]
+                tag_values = conn.execute(
+                    "SELECT COUNT(*) FROM VariantAttribute va "
+                    "JOIN AttributeField af ON af.field_id=va.field_id "
+                    "WHERE af.name=?",
+                    (importer.GLASS_TAGS_FIELD,),
+                ).fetchone()[0]
+            finally:
+                conn.close()
+
+        self.assertEqual(specs, ["防窺"])
+        self.assertEqual(tag_values, 0)
+        self.assertEqual(stats["variants_total"], 1)
+        self.assertEqual(warnings, [])
+
+    def test_adamas_super_tough_keeps_six_fold_tag(self):
         records = [
             importer.parse_row({
                 importer.COL_CODE: f"TEST-ADAMAS-{index:02d}",
@@ -219,8 +259,9 @@ class TestGlassProductLines(unittest.TestCase):
             all(importer.product_name(record) == "ADAMAS 超強硬派"
                 for record in records)
         )
+        # 款名「ADAMAS 超強硬派」不含倍數,6 倍必須留在詞條才查得到。
         self.assertTrue(
-            all(importer.glass_brand_tags(record["brand_raw"]) == []
+            all(importer.glass_brand_tags(record["brand_raw"]) == ["6倍強化"]
                 for record in records)
         )
 
@@ -234,17 +275,18 @@ class TestGlassProductLines(unittest.TestCase):
                     "SELECT b.name, p.name FROM Product p "
                     "JOIN Brand b ON b.brand_id=p.brand_id"
                 )]
-                tag_values = conn.execute(
-                    "SELECT COUNT(*) FROM VariantAttribute va "
+                tag_values = [tuple(row) for row in conn.execute(
+                    "SELECT ao.value, COUNT(*) FROM VariantAttribute va "
                     "JOIN AttributeField af ON af.field_id=va.field_id "
-                    "WHERE af.name=?",
+                    "JOIN AttributeOption ao ON ao.option_id=va.option_id "
+                    "WHERE af.name=? GROUP BY ao.value",
                     (importer.GLASS_TAGS_FIELD,),
-                ).fetchone()[0]
+                )]
             finally:
                 conn.close()
 
         self.assertEqual(products, [("ADAMAS", "ADAMAS 超強硬派")])
-        self.assertEqual(tag_values, 0)
+        self.assertEqual(tag_values, [("6倍強化", 12)])
         self.assertEqual(stats["variants_total"], 12)
         self.assertEqual(stats["barcodes_total"], 12)
         self.assertEqual(warnings, [])
@@ -350,6 +392,73 @@ class TestAceiceWatchGlass(unittest.TestCase):
         self.assertEqual(attrs, {"款式": "3D全玻璃", "尺寸": "45mm"})
         self.assertNotIn("特性詞條", attrs)
         self.assertEqual(stats["variants_total"], 1)
+        self.assertEqual(warnings, [])
+
+
+class TestPhoneModelSorting(unittest.TestCase):
+    def test_sort_key_orders_newest_generation_and_largest_variant_first(self):
+        names = [
+            "iPhone 16", "iPhone 17 Pro", "iPhone XR", "iPhone 13 mini",
+            "iPhone SE3", "iPhone 17 Pro Max", "iPhone XS", "iPhone 17",
+            "iPhone 13 Pro", "iPhone 17 Air", "iPhone XS Max", "iPhone 14",
+            "iPhone 16 Plus", "iPhone SE2", "iPhone 12",
+        ]
+
+        self.assertEqual(importer.sorted_model_names(names), [
+            "iPhone 17 Pro Max", "iPhone 17 Pro", "iPhone 17 Air", "iPhone 17",
+            "iPhone 16 Plus", "iPhone 16",
+            "iPhone 14",
+            "iPhone SE3",                      # 2022,排在 14 與 13 之間
+            "iPhone 13 Pro", "iPhone 13 mini",
+            "iPhone 12",
+            "iPhone SE2",                      # 2020,排在 12 與 11 之間
+            "iPhone XS Max", "iPhone XS",
+            "iPhone XR",                       # 同代入門款,排在標準款之後
+        ])
+
+    def test_sort_key_puts_unparsable_model_last(self):
+        self.assertEqual(
+            importer.sorted_model_names(["未知機型", "iPhone 12"]),
+            ["iPhone 12", "未知機型"],
+        )
+
+    def test_import_writes_model_sort_and_keeps_manual_order(self):
+        records = [
+            importer.parse_row({
+                importer.COL_CODE: f"TEST-MODEL-SORT-{index:02d}",
+                importer.COL_CATEGORY: importer.GLASS_CATEGORY,
+                importer.COL_BRAND: "HODA",
+                importer.COL_SPEC: "亮面",
+                importer.COL_CAT1: "滿版",
+                importer.COL_PHONE_BRAND: "iPhone",
+                importer.COL_PHONE_MODEL: model,
+            })
+            for index, model in enumerate(["16", "17promax", "13mini", "17"])
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "test.db")
+            init_db(db_path)
+            conn = get_conn(db_path)
+            try:
+                stats, warnings = importer.run_import(conn, records)
+                ordered = [row["name"] for row in conn.execute(
+                    "SELECT name FROM PhoneModel ORDER BY sort, model_id")]
+                # 手動排序過(sort>0)的型號不得被下一次匯入覆蓋
+                conn.execute(
+                    "UPDATE PhoneModel SET sort=99 WHERE name='iPhone 17 Pro Max'")
+                importer.run_import(conn, records)
+                manual = conn.execute(
+                    "SELECT sort FROM PhoneModel WHERE name='iPhone 17 Pro Max'"
+                ).fetchone()[0]
+            finally:
+                conn.close()
+
+        self.assertEqual(ordered, [
+            "iPhone 17 Pro Max", "iPhone 17", "iPhone 16", "iPhone 13 mini",
+        ])
+        self.assertEqual(stats["resorted_models"], 4)
+        self.assertEqual(manual, 99)
         self.assertEqual(warnings, [])
 
 
