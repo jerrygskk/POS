@@ -9,6 +9,9 @@
 - **VUE-3**: **自動走查收不到 JS 錯誤，畫面明明壞了** → prod 版 Vue 的錯誤只進 `console.error`，光掛 `window.onerror` 收不到；收集器要 hook `console.error`＋`window.onerror` 兩邊。
 - **VUE-4**: **css／js 改了畫面沒變** → 忘記 bump `index.html` 的 `?v=`；css 與全部 js 共用同一版號，一起 bump。
 - **VUE-5**: **快速連點清單／分頁後，畫面停在「前一個」選擇的資料** → 載入函式內多個 `await`，慢回應後到蓋掉新資料。多段 await 的載入函式要加載入序號戳記，寫入 state 前比對仍是最新請求才寫（參考 `settings.js` `loadCategoryDetail`）。
+- **VUE-6**: **自動走查腳本一抓元件實例就 `Cannot read properties of undefined`** → prod 版 Vue 不掛 `__vueParentComponent`，`__vue_app__`／`app._instance` 也只在 dev 版才設；靠這些入口存取 Vue 狀態的走查腳本在真實 runtime 一定失敗。走查一律改走使用者真的會碰的 DOM（`setValue` 原生 setter＋派 `input`／`change`、點按鈕與 chip），順帶把事件繫結一起驗到。
+- **VUE-7**: **走查截圖抓到的是別的視窗（瀏覽器、桌面）** → `ImageGrab` 依螢幕座標抓，pywebview 視窗沒在前景就抓到前景程式的畫面，維護者同時在用電腦時必然發生。版面判斷改用 DOM 量測（`clientWidth`/`scrollWidth`/`getBoundingClientRect`），截圖只當輔助、不作為證據。
+- **VUE-8**: **子視窗開著時主視窗仍被滾輪／PageDown 捲走** → `inert` 只擋點擊與焦點，不擋捲動。要另外攔 `wheel`／`touchmove`／捲動鍵與 `scroll` 並還原位置（`window.PosDesktopLock`，DEVELOPER §2 款式修改視窗）；解鎖事件要涵蓋取消、Esc 與按視窗 X 三條路徑，漏一條主視窗就永久鎖死。
 
 #### PS：PowerShell 5.1／環境
 

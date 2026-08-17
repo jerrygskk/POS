@@ -27,6 +27,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `lib/runtime_paths.py` | 集中決定開發／onefile 的 DB、備份、錯誤記錄與 static 路徑 |
 | `lib/desktop_application.py` | 建立 pywebview 視窗，串接 `DesktopBridge` 與各 Facade |
 | `lib/desktop_bridge.py` | pywebview JS bridge：轉送 action、統一成功／錯誤 envelope、處理匯出存檔 |
+| `lib/variant_editor_window.py` | 款式修改子視窗協調器：唯一子視窗、傳入編輯脈絡、關閉時通知主視窗解鎖 |
 | `lib/version.py` | `VERSION` 字串 |
 | `lib/db.py` | `get_conn` / `db_conn`(context manager)/ `init_db`,純資料層(零框架依賴) |
 | `lib/db_schema.py` | 現行 schema DDL 唯一來源；未來變更仍依 migration 規則升級既有資料庫 |
@@ -38,6 +39,8 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `lib/label_layout.py` | 商品標籤版面繪製(純函式,輸入四個字串輸出 Pillow 影像) |
 | `lib/*_service.py` | 正式 Facade／Service／Repository 應用層與資料存取實作 |
 | `static/` | `index.html` + `css/pos.css` + `js/*.js`（Vue 3、DesktopBridge 包裝、各頁邏輯） |
+| `static/variant_editor.html` | 款式修改子視窗頁面（獨立 Vue app，共用 `attrfields`／`modelpicker`／`optpicker` 元件） |
+| `static/css/dialog-theme.css` | 子視窗對話框外觀（`.dialog-*` 公版，沿用 §2 UI 風格色票） |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
 | `tests/` | 單元測試（`tests/base.py` 共用 `ConnTestCase`／`FacadeTestCase` 與 fixture helper） |
 
@@ -55,7 +58,34 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 - **盤點結案防重**:結案先以 `status='open'` 條件原子更新盤點單;不存在回 404,已結案回 409,避免重複產生 `adjust` 庫存異動。
 - **有效售價**:`Variant.price` 不為 NULL 時採用,否則退回 `Product.default_price`,兩者皆 NULL 則售價為 `null`。
 - **共用欄 NULL 去重提醒**:`AttributeField` 的共用欄 `category_id` 為 NULL;SQLite 的 `UNIQUE` 對 NULL 不視為相等,故去重不能單靠資料庫唯一鍵,需靠應用層先查再插。
+- **商品資料庫搜尋**:關鍵字以空白切成多個詞,採 **AND**(每個詞都要命中才算符合),大小寫與全半形以 `casefold` 正規化。比對範圍為商品名稱、種類、廠牌、款式的規格值(含 multi/tags 的每個值)、適用型號與條碼,命中時只保留符合的款式列。查無啟用中資料時另查一次停用資料,回報筆數並提供「顯示已停用」入口,不直接把停用商品混進結果。條碼只針對當頁款式查詢(`variant_id IN (...)`),不整表撈。
 - **Schema 與 migration**:`lib/db_schema.py` 是現行 schema DDL 的唯一來源；`lib/legacy_migrations.py` 封存 v1–v13 的歷史 migration DDL。未來修改現行 schema 時，仍須依 migration 規則新增升級步驟，讓既有資料庫可安全演進。
+
+### 款式修改視窗(pywebview 子視窗)
+
+商品資料庫頁按「編輯」時,不開網頁對話框,而是由
+`VariantEditorWindowCoordinator` 建立**唯一一個** pywebview 子視窗載入
+`static/variant_editor.html`。理由:規格、型號、售價、條碼四段內容在單一
+網頁對話框裡會逼出巢狀彈窗與捲動層層相疊,違反 UI 從簡;子視窗可獨立
+調整大小、由作業系統管理焦點。
+
+**唯一性與脈絡**:協調器以 `RLock` 保護狀態,已開啟時再按「編輯」只 `restore()`
+既有視窗,不會開第二個。子視窗自己不帶查詢參數,改由 `desktop.variant_editor.context`
+向協調器拿主視窗開窗時傳入的脈絡副本(`copy.deepcopy`,子視窗改不到主視窗資料)。
+子視窗有自己的 `DesktopBridge` 實例,共用同一個 Facade。
+
+**主視窗上鎖**(`window.PosDesktopLock`,`static/js/app.js`):開窗即對 `#app`
+設 `inert` 並攔截 `wheel`／`touchmove`／捲動鍵與 `scroll` 事件、記住捲動位置並還原。
+⚠️ 只設 `inert` 不夠——`inert` 擋得住點擊與焦點,擋不住滾輪與 PageDown 之類的
+捲動;店員在子視窗打字時主視窗跟著滑走會誤以為程式壞了。解鎖靠協調器關窗時
+`evaluate_js` 對主視窗派 `pos-variant-editor-closed` 事件,**取消、Esc、按視窗 X
+三條路徑都會走到**(X 走 `window.events.closed`),避免主視窗永久鎖死。
+
+**儲存為單一交易**:前端不逐項呼叫 API,一次送 `variants.update_editor`
+(規格、售價、型號清單、刪除條碼、新增原廠碼、待產生自取碼數量),
+服務層在同一連線內完成,任一步失敗整筆 rollback、自取碼計數器一併回復,
+錯誤訊息回子視窗且視窗保留讓店員修正。新出現的 select/multi/tags 值會自動
+補進 `AttributeOption`(比照建檔流程,不重新啟用已停用選項)。
 
 ### 標籤列印(NIIMBOT B1)
 
@@ -107,6 +137,10 @@ python -m unittest discover -s tests
 ```
 
 目前 557 個測試,涵蓋 schema/migration、Desktop action 契約、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
+
+⚠️ 前端改動的最終驗證一律以真實 pywebview 走查(`RuntimePaths` 指向 `pos.db` 副本＋repo `static/`),
+走查腳本**只能操作 DOM**,不可去抓 Vue 元件實例——prod 版 Vue 沒有 `__vue_app__`／`__vueParentComponent`
+(PITFALLS VUE-6);版面判斷用 DOM 量測而非截圖(VUE-7)。
 
 ⚠️ 標籤列印的測試以替身模擬機器,**通過不等於印得出來**;改動該功能一律另外實機驗證(見 §2 標籤列印)。
 
