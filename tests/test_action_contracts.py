@@ -132,6 +132,7 @@ ACTION_CONTRACTS = {
     "variants.update": schema([I("id", required=True), M("fields", default={}), M("fields.attributes"), I("fields.price", nullable=True), I("fields.active", nullable=True)], notes=("Facade rejects attributes=null.",)),
     "variants.set_models": schema([I("id", required=True), LI("model_ids", default=[])]),
     "variants.update_details": schema([I("id", required=True), M("fields", default={}), M("fields.attributes"), I("fields.price", nullable=True), I("fields.active", nullable=True), LI("model_ids", default=[])], notes=("Desktop-only action.",)),
+    "variants.update_editor": schema([I("id", required=True), M("fields", default={}), M("fields.attributes"), I("fields.price", nullable=True), LI("model_ids", default=[]), field("deleted_barcodes", "list[str]", default=[], wrong="x", list_element={"expect":"reject","value":1}), field("factory_barcodes", "list[str]", default=[], wrong="x", list_element={"expect":"reject","value":1}), I("store_barcode_count", default=0, constraint=">=0")], notes=("Desktop-only atomic editor action; factory barcodes are stripped and blank values rejected.",)),
     "variants.delete": schema([I("id", required=True)]),
     "variants.batch_create": schema([I("product_id", required=True), field("drafts", "list[Draft]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), S("drafts[].draft_id", nullable=True), M("drafts[].attributes", normalization="field names normalize_key; display values normalize_display; duplicate values removed"), I("drafts[].price", nullable=True), I("drafts[].active", nullable=True, default=1, normalization="truthy becomes 1, falsy becomes 0"), LI("drafts[].model_ids", default=[], normalization="deduplicate preserving order"), field("drafts[].barcodes", "list[Barcode]", default=[], wrong="x", list_element={"expect":"reject","value":"x"}), S("drafts[].barcodes[].barcode", nullable=True, default=None, normalization="trim; blank becomes None"), S("drafts[].barcodes[].source", default="store", normalization="falsy becomes factory for supplied code, store for generated code")], notes=("Desktop-only action.",)),
     "variants.field_usage": schema([I("category_id", required=True), I("field_id", required=True)], notes=("Desktop-only action.",)),
@@ -170,7 +171,7 @@ SETTINGS_CONTRACT_ACTIONS = {
 }
 PRODUCT_CONTRACT_ACTIONS = {
     "products.create","products.list","products.update","products.delete","catalog.list",
-    "variants.create","variants.update","variants.set_models","variants.update_details","variants.delete","variants.batch_create","variants.field_usage","variants.activate","variants.issues",
+    "variants.create","variants.update","variants.set_models","variants.update_details","variants.update_editor","variants.delete","variants.batch_create","variants.field_usage","variants.activate","variants.issues",
     "barcodes.scan","barcodes.add","barcodes.delete",
 }
 TARGET_BY_ACTION = {
@@ -223,6 +224,11 @@ def validate_retired_source_metadata(contracts):
                     f"wrong retired source for {action}.{path}: expected {wanted!r}, got {source!r}")
 
 FRONTEND_ACTIONS = set(ACTION_CONTRACTS)
+DESKTOP_WINDOW_ACTIONS = {
+    "desktop.variant_editor.open",
+    "desktop.variant_editor.context",
+    "desktop.variant_editor.close",
+}
 
 
 NORMALIZATION_PROBE_PATHS = {
@@ -249,6 +255,7 @@ EXPECTED_DEFAULTS = {
         ("sales.checkout","order_discount"),
         ("sales.checkout","paid"),
         ("sales.checkout","items[].discount"),
+        ("variants.update_editor","store_barcode_count"),
     }, 0),
     ("printing.barcode", "copies"): 1,
     **dict.fromkeys({
@@ -287,6 +294,9 @@ EXPECTED_DEFAULTS = {
         ("variants.create","fields.barcodes"),
         ("variants.set_models","model_ids"),
         ("variants.update_details","model_ids"),
+        ("variants.update_editor","model_ids"),
+        ("variants.update_editor","deleted_barcodes"),
+        ("variants.update_editor","factory_barcodes"),
         ("variants.batch_create","drafts[].model_ids"),
         ("variants.batch_create","drafts[].barcodes"),
     }, []),
@@ -313,6 +323,7 @@ EXPECTED_DEFAULTS = {
     **dict.fromkeys({
         ("products.update","fields"), ("variants.create","fields.attributes"),
         ("variants.update","fields"), ("variants.update_details","fields"),
+        ("variants.update_editor","fields"),
     }, {}),
     ("variants.batch_create","drafts[].active"): 1,
 }
@@ -433,7 +444,7 @@ class ActionContractTests(FacadeTestCase):
             "models.list":{}, "models.create":{"phone_brand_id":self.phone_brand_id,"name":"新增型號"}, "models.update":{"id":self.model_id,"fields":{}}, "models.delete":{"id":self.delete_model_id}, "models.sort":{"ids":[]},
             "fields.list":{}, "fields.create":{"name":"尺寸"}, "fields.update":{"id":self.field_id,"fields":{}}, "options.list":{"field_id":self.field_id}, "options.create":{"field_id":self.field_id,"value":"白"}, "options.update":{"id":self.option_id,"fields":{}}, "options.delete":{"id":self.delete_option_id}, "options.models":{"id":self.option_id}, "options.set_models":{"id":self.option_id,"model_ids":[]}, "options.cleanup":{},
             "products.create":{"name":"新增商品","category_id":self.category_id,"variants":[{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"new-code","source":"store"}]}]}, "products.list":{}, "products.update":{"id":self.product_id,"fields":{}}, "products.delete":{"id":self.delete_product_id}, "catalog.list":{},
-            "variants.create":{"product_id":self.product_id,"fields":{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"variant-new","source":"store"}]}}, "variants.update":{"id":self.variant_id,"fields":{}}, "variants.set_models":{"id":self.variant_id,"model_ids":[]}, "variants.update_details":{"id":self.variant_id,"fields":{},"model_ids":[]}, "variants.delete":{"id":self.delete_variant_id}, "variants.batch_create":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"batch-new","source":"store"}]}]}, "variants.field_usage":{"category_id":self.category_id,"field_id":self.field_id}, "variants.activate":{"id":self.variant_id}, "variants.issues":{},
+            "variants.create":{"product_id":self.product_id,"fields":{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"variant-new","source":"store"}]}}, "variants.update":{"id":self.variant_id,"fields":{}}, "variants.set_models":{"id":self.variant_id,"model_ids":[]}, "variants.update_details":{"id":self.variant_id,"fields":{},"model_ids":[]}, "variants.update_editor":{"id":self.variant_id,"fields":{},"model_ids":[],"deleted_barcodes":[],"factory_barcodes":[],"store_barcode_count":0}, "variants.delete":{"id":self.delete_variant_id}, "variants.batch_create":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"batch-new","source":"store"}]}]}, "variants.field_usage":{"category_id":self.category_id,"field_id":self.field_id}, "variants.activate":{"id":self.variant_id}, "variants.issues":{},
             "barcodes.scan":{"code":"contract-1"}, "barcodes.add":{"variant_id":self.variant_id,"barcode":"contract-2"}, "barcodes.delete":{"code":"contract-1"}, "stock.receive":{"variant_id":self.variant_id,"qty":1}, "stock.detail":{"variant_id":self.variant_id},
             "stocktake.create":{}, "stocktake.list":{}, "stocktake.detail":{"session_id":self.session_id}, "stocktake.scan":{"session_id":self.session_id,"variant_id":self.variant_id,"qty":1}, "stocktake.set_counted":{"session_id":self.session_id,"variant_id":self.variant_id,"counted_qty":1}, "stocktake.close":{"session_id":self.session_id},
             "payments.list":{}, "sales.checkout":{"payment":"現金","paid":100,"items":[{"variant_id":self.variant_id,"qty":1,"unit_price":100}]}, "sales.list":{}, "sales.summary":{}, "sales.export_save":{}, "printing.barcode":{"variant_id":self.variant_id,"copies":1},
@@ -458,8 +469,8 @@ class ActionContractTests(FacadeTestCase):
         direct = set().union(self.facade.settings.ACTIONS, self.facade.products.ACTIONS,
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
                              self.facade.stocktake.ACTIONS, self.facade.printing.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 65)
-        self.assertEqual(browser_actions, FRONTEND_ACTIONS)
+        self.assertEqual(len(ACTION_CONTRACTS), 66)
+        self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
         self.assertEqual(set(TARGET_BY_ACTION), FRONTEND_ACTIONS | {"sales.export"})
@@ -583,6 +594,10 @@ class ActionContractTests(FacadeTestCase):
         payload = self.valid_payload("variants.batch_create")
         payload["drafts"][0]["barcodes"][0]["unexpected"] = 1
         cases.append(("variants.batch_create", payload, "drafts[].barcodes[]"))
+        for extra in ("active", "barcodes", "model_ids", "unexpected"):
+            payload = self.valid_payload("variants.update_editor")
+            payload["fields"][extra] = [] if extra in ("barcodes", "model_ids") else 1
+            cases.append(("variants.update_editor", payload, f"fields.{extra}"))
         payload = self.valid_payload("sales.checkout")
         payload["items"][0]["unexpected"] = 1
         cases.append(("sales.checkout", payload, "items[]"))
@@ -708,7 +723,7 @@ class ActionContractTests(FacadeTestCase):
                     for action,contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items()
                     for path,spec in contract["fields"].items()
                     if spec["default"] != "missing"}
-        self.assertEqual(len(declared), 87)
+        self.assertEqual(len(declared), 92)
         self.assertEqual(declared, EXPECTED_DEFAULTS)
         executed = {}
         for (action,path), expected in EXPECTED_DEFAULTS.items():
@@ -748,7 +763,7 @@ class ActionContractTests(FacadeTestCase):
         self.assertNotIn("skipped", executed.values())
         self.assertEqual(
             {strategy: list(executed.values()).count(strategy) for strategy in set(executed.values())},
-            {"materialized_by_validator":16, "exact_validator_omission":71},
+            {"materialized_by_validator":17, "exact_validator_omission":75},
         )
 
         field_id = self.invoke("fields.create", {"name":"預設型態"})["field_id"]

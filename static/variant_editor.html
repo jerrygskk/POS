@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>款式修改</title>
+<link rel="stylesheet" href="css/pos.css?v=69">
+<link rel="stylesheet" href="css/dialog-theme.css?v=69">
+</head>
+<body>
+<div id="variant-editor" v-cloak>
+  <form class="dialog-shell" @submit.prevent="save">
+    <div class="dialog-content">
+      <h1>{{ product ? product.name : '款式修改' }}</h1>
+      <div v-if="loading" class="dialog-loading">正在載入款式資料…</div>
+      <template v-else-if="variant">
+        <section class="dialog-section">
+          <h2>規格</h2>
+          <attr-fields :fields="fields" :options="fieldOptions" :usage="fieldUsage"
+                       :attrs="attrs" :model-ids="modelIds"
+                       tags-style="chips"></attr-fields>
+        </section>
+
+        <section class="dialog-section">
+          <h2>適用手機型號</h2>
+          <model-picker :models="models" v-model:model_ids="modelIds"></model-picker>
+        </section>
+
+        <section class="dialog-section">
+          <h2>售價</h2>
+          <label class="dialog-field">自身售價
+            <input type="number" min="0" v-model.number="price" placeholder="可留空">
+          </label>
+        </section>
+
+        <section class="dialog-section">
+          <h2>條碼</h2>
+          <div class="dialog-barcode-list">
+            <div v-for="b in barcodes" :key="b.barcode" class="dialog-barcode-row">
+              <span>{{ b.barcode }}</span>
+              <span class="dialog-hint">{{ b.source === 'store' ? '店內自取碼' : '原廠條碼' }}</span>
+              <button type="button" class="dialog-small danger"
+                      @click="removeBarcode(b)">刪除</button>
+            </div>
+            <div v-for="n in pendingStoreCount" :key="'store-' + n"
+                 class="dialog-barcode-row dialog-hint">儲存後產生店內自取碼</div>
+          </div>
+          <div class="dialog-barcode-add">
+            <input v-model="factoryBarcode" placeholder="原廠條碼"
+                   @keydown.enter="handleFactoryBarcodeEnter">
+            <button type="button" class="dialog-small" @click="addFactoryBarcode">新增原廠碼</button>
+            <button type="button" class="dialog-small" @click="addStoreBarcode">新增自取碼</button>
+          </div>
+          <div v-if="barcodeError" class="dialog-error">{{ barcodeError }}</div>
+        </section>
+      </template>
+    </div>
+
+    <footer class="dialog-footer">
+      <div v-if="error" class="dialog-error">{{ error }}</div>
+      <div class="dialog-actions">
+        <button type="button" class="dialog-cancel" :disabled="saving" @click="cancel">取消</button>
+        <button type="submit" class="dialog-confirm" :disabled="saving || !ready">
+          {{ saving ? '儲存中…' : '儲存' }}
+        </button>
+      </div>
+    </footer>
+  </form>
+</div>
+<script src="js/vue.global.prod.js?v=69"></script>
+<script src="js/api.js?v=69"></script>
+<script src="js/catalogfields.js?v=69"></script>
+<script src="js/variant_batch.js?v=69"></script>
+<script src="js/modelpicker.js?v=69"></script>
+<script src="js/attrfields.js?v=69"></script>
+<script src="js/variant_editor.js?v=69"></script>
+</body>
+</html>

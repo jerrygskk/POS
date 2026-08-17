@@ -106,8 +106,21 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .w120 { width: 120px; } .w160 { width: 160px; }
 .chk { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.catalog-filter-row { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+.catalog-search-input { flex: 1 0 320px; min-width: 320px; }
 table.sub { margin: 0; }
 table.sub th, table.sub td { background: var(--surface-alt); font-size: 15px; }
+.catalog-table-scroll { overflow-x: auto; }
+.catalog-table { min-width: 1240px; }
+.catalog-table .catalog-variant-row > td { vertical-align: top; }
+.catalog-table .catalog-product-row > td { vertical-align: middle; background: var(--hover); }
+.catalog-product-info strong { margin-right: 18px; }
+.catalog-product-info span { margin-right: 14px; color: var(--text-2); }
+.catalog-inactive-badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
+  background: var(--pressed); color: var(--text-2); font-size: 13px; }
+.catalog-product-actions { text-align: right; white-space: nowrap; }
+.catalog-empty-result { background: var(--text-2); }
+.catalog-empty-result button { margin-left: 10px; }
 tr.inactive > td { opacity: 0.55; }
 .bc-line { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; white-space: nowrap; }
 /* 條碼新增區:輸入框在上(寬度對齊上方條碼列刪鈕右緣),新增/自取鈕列在下 */
@@ -212,20 +225,19 @@ button.primary:active { background: var(--primary-active); transform: translateY
 /* 編輯中的變體列:淡藍灰底 */
 .sub tr.editing > td { background: var(--accent-soft); }
 
-/* 子產品表:型號欄固定 160px;規格欄 370px(需容納材質 4 chip 一排:
-   chip 52×4+間距 232,加標籤欄 5em 與內距)。
-   (只設在 th:型號欄 rowspan 合併後,後續列的 td 序位會位移,不能用 td:nth-child) */
+/* 商品資料庫表以 colgroup 定欄：型號固定 180px，規格欄吸收寬螢幕剩餘空間。
+   總寬至少 1240px，小視窗由頁內容器承接橫向捲動。 */
 /* 欄寬全固定(table-layout: fixed):編輯狀態的輸入框不會推擠其他欄,
    避免「狀態」等窄欄被擠到折行、整表列高跳動 */
 table.sub { table-layout: fixed; }
-table.sub th:nth-child(1) { width: 350px; }  /* 型號(容納型號選取清單) */
-table.sub th:nth-child(2) { width: 280px; }  /* 規格(chip 框整排放標籤下方) */
-table.sub th:nth-child(3) { width: 52px; }   /* 庫存 */
-table.sub th:nth-child(4) { width: 210px; }  /* 條碼 */
-table.sub th:nth-child(5) { width: 110px; }  /* 自身售價 */
-table.sub th:nth-child(6) { width: 90px; }   /* 有效售價 */
-table.sub th:nth-child(7) { width: 64px; }   /* 狀態 */
-table.sub th:nth-child(8) { width: 170px; }  /* 操作 */
+.catalog-col-model { width: 180px; }
+.catalog-col-spec { width: auto; }
+.catalog-col-stock { width: 60px; }
+.catalog-col-barcode { width: 185px; }
+.catalog-col-price { width: 100px; }
+.catalog-col-effective-price { width: 100px; }
+.catalog-col-status { width: 75px; }
+.catalog-col-actions { width: 190px; }
 table.sub th:nth-child(7), table.sub td { overflow-wrap: break-word; }
 /* 編輯儲存格內標籤欄縮窄(材質/特性詞條 4 字即可),把寬度讓給 chip 框 */
 table.sub .attr-row { --label-w: 5em; }

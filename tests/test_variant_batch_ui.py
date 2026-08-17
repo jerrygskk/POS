@@ -206,6 +206,30 @@ done();
 ''')
         self.assertEqual(out["added"], ["A", "B"])
 
+    def test_opt_picker_enter_consumes_event_and_selects_candidate_without_form_save(self):
+        out = self._run(r'''
+const s = { $emit: (ev, val) => { s._emitted = val; }, modelValue: "",
+  usage: [{option_id:1,value:"軍規",active:true,usage_count:1,model_ids:[]}],
+  multiple: true, asList: false, modelIds: [] };
+for (const k of Object.keys(optPicker.methods)) s[k] = optPicker.methods[k].bind(s);
+for (const k of Object.keys(optPicker.computed))
+  Object.defineProperty(s, k, { get: optPicker.computed[k].bind(s), configurable: true });
+Object.assign(s, optPicker.data());
+s.query = "軍規";
+let prevented=false, stopped=false, saves=0;
+const event={preventDefault:()=>{prevented=true;},stopPropagation:()=>{stopped=true;}};
+s.handleSearchEnter(event);
+if (!prevented && !stopped) saves += 1;
+out.prevented=prevented; out.stopped=stopped; out.saves=saves;
+out.selected=s._emitted; out.query=s.query;
+done();
+''')
+        self.assertTrue(out["prevented"])
+        self.assertTrue(out["stopped"])
+        self.assertEqual(out["saves"], 0)
+        self.assertEqual(out["selected"], "軍規")
+        self.assertEqual(out["query"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

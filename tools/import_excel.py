@@ -74,6 +74,8 @@ CASE_PRODUCT_LINES = {
 
 GLASS_PRODUCT_LINES = {
     "ADAMAS超強硬派": "超強硬派",
+    "COZY五倍強化": "五倍強化",
+    "COZY微晶盾": "微晶盾",
 }
 
 UNBRANDED_PRODUCT_LINES = {"多卡槽牛皮皮套"}
@@ -143,7 +145,7 @@ BRAND_ALIASES = {
     "ACEICEWatch玻璃": "ACEICE",
     "犀牛盾充電線": "RS犀牛盾",     # 通則會得「犀牛盾」,須併入既有 RS犀牛盾
     # 註:NAVJack手機殼 由通則去尾綴即得 NAVJack,不必列。
-    # 註:COZY五倍強化/COZY微晶盾/硬派6倍強化 改走 GLASS_BRAND_TAGS(廠牌+詞條)。
+    # 註:COZY 兩系列與 ADAMAS 超強硬派改走 GLASS_PRODUCT_LINES。
 }
 
 # 敘述而非廠牌,無法還原純廠牌,保留原字串並記警告
@@ -384,12 +386,12 @@ GLASS_SPEC_MAP = {
     "藍寶石低藍光": (["藍光"], ["藍寶石", "低藍光"]),
 }
 
-# 廠牌尾綴→特性詞條(僅鋼化玻璃生效):原始廠牌字串 → (純廠牌, [詞條...])。
-# 詞條寫進鋼化玻璃的「特性詞條」tags 欄。取代舊 BRAND_ALIASES 的 COZY 兩筆。
+# 鋼化玻璃複合廠牌字串 → (純廠牌, [廠牌字串衍生詞條...])。
+# 產品線由 GLASS_PRODUCT_LINES 保留在 Product 名稱，不當成特性詞條。
 GLASS_BRAND_TAGS = {
     "硬派6倍強化": ("硬派", ["6倍強化"]),
-    "COZY五倍強化": ("COZY", ["五倍強化"]),
-    "COZY微晶盾": ("COZY", ["微晶盾"]),
+    "COZY五倍強化": ("COZY", []),
+    "COZY微晶盾": ("COZY", []),
 }
 
 

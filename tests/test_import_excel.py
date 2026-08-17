@@ -126,6 +126,79 @@ class TestCaseProductLines(unittest.TestCase):
 
 
 class TestGlassProductLines(unittest.TestCase):
+    def test_cozy_glass_product_lines_parse_as_separate_products_without_brand_tags(self):
+        fivefold = importer.parse_row({
+            importer.COL_CODE: "TEST-COZY-FIVEFOLD",
+            importer.COL_CATEGORY: importer.GLASS_CATEGORY,
+            importer.COL_BRAND: "COZY五倍強化",
+            importer.COL_SPEC: "亮面",
+            importer.COL_CAT1: "滿版",
+        })
+        crystal = importer.parse_row({
+            importer.COL_CODE: "TEST-COZY-CRYSTAL",
+            importer.COL_CATEGORY: importer.GLASS_CATEGORY,
+            importer.COL_BRAND: "COZY微晶盾",
+            importer.COL_SPEC: "亮面",
+            importer.COL_CAT1: "滿版",
+        })
+
+        self.assertEqual(
+            (fivefold["brand"], fivefold["product_line"],
+             importer.product_name(fivefold)),
+            ("COZY", "五倍強化", "COZY 五倍強化"),
+        )
+        self.assertEqual(
+            (crystal["brand"], crystal["product_line"],
+             importer.product_name(crystal)),
+            ("COZY", "微晶盾", "COZY 微晶盾"),
+        )
+        self.assertNotEqual(
+            importer.product_key(fivefold), importer.product_key(crystal)
+        )
+        self.assertEqual(importer.glass_brand_tags(fivefold["brand_raw"]), [])
+        self.assertEqual(importer.glass_brand_tags(crystal["brand_raw"]), [])
+
+    def test_cozy_glass_product_lines_import_as_two_products_without_brand_tags(self):
+        records = [
+            importer.parse_row({
+                importer.COL_CODE: "TEST-COZY-FIVEFOLD",
+                importer.COL_CATEGORY: importer.GLASS_CATEGORY,
+                importer.COL_BRAND: "COZY五倍強化",
+                importer.COL_SPEC: "亮面",
+                importer.COL_CAT1: "滿版",
+            }),
+            importer.parse_row({
+                importer.COL_CODE: "TEST-COZY-CRYSTAL",
+                importer.COL_CATEGORY: importer.GLASS_CATEGORY,
+                importer.COL_BRAND: "COZY微晶盾",
+                importer.COL_SPEC: "亮面",
+                importer.COL_CAT1: "滿版",
+            }),
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "test.db")
+            init_db(db_path)
+            conn = get_conn(db_path)
+            try:
+                stats, warnings = importer.run_import(conn, records)
+                products = [row["name"] for row in conn.execute(
+                    "SELECT name FROM Product ORDER BY name"
+                )]
+                tag_values = conn.execute(
+                    "SELECT COUNT(*) FROM VariantAttribute va "
+                    "JOIN AttributeField af ON af.field_id=va.field_id "
+                    "WHERE af.name=?",
+                    (importer.GLASS_TAGS_FIELD,),
+                ).fetchone()[0]
+            finally:
+                conn.close()
+
+        self.assertEqual(products, ["COZY 五倍強化", "COZY 微晶盾"])
+        self.assertEqual(tag_values, 0)
+        self.assertEqual(stats["variants_total"], 2)
+        self.assertEqual(warnings, [])
+
     def test_adamas_super_tough_imports_as_product_line_without_feature_tags(self):
         records = [
             importer.parse_row({

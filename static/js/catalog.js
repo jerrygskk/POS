@@ -3,9 +3,8 @@ window.PosPages = window.PosPages || {};
 // 依型號分組並附 rowspan 資訊的純函式。
 // variants:變體陣列(v.models 已為別名字串、依型號 sort 序排好)。
 // modelOrder:{ 型號別名 → 全域排序索引 },用於群組間排序;撈不到則以名稱排序。
-// editId:目前行內編輯中的 variant_id(可為 null),編輯列強制自成一段以保有型號欄位置。
 // 回傳列陣列,每列 { v, label, models, showModel, rowspan }。
-window.groupVariantsByModel = function (variants, modelOrder, editId) {
+window.groupVariantsByModel = function (variants, modelOrder) {
   modelOrder = modelOrder || {};
   const groups = [];
   const idx = {};
@@ -36,26 +35,12 @@ window.groupVariantsByModel = function (variants, modelOrder, editId) {
     })
     .forEach((e, pos) => (e.g._pos = pos));
   groups.sort((a, b) => a._pos - b._pos);
-  // 攤平成列;編輯中的變體自成一段(rowspan=1),其餘連續列合併
+  // 攤平成列，同型號群組共用一個 rowspan 型號格。
   const out = [];
   for (const g of groups) {
-    let i = 0;
-    while (i < g.rows.length) {
-      const cur = g.rows[i];
-      if (editId != null && cur.variant_id === editId) {
-        out.push({ v: cur, label: g.label, models: g.models, showModel: true, rowspan: 1 });
-        i++;
-        continue;
-      }
-      let j = i;
-      while (j < g.rows.length &&
-             !(editId != null && g.rows[j].variant_id === editId)) j++;
-      const run = j - i;
-      for (let k = i; k < j; k++) {
-        out.push({ v: g.rows[k], label: g.label, models: g.models,
-                   showModel: k === i, rowspan: k === i ? run : 0 });
-      }
-      i = j;
+    for (let i = 0; i < g.rows.length; i++) {
+      out.push({ v: g.rows[i], label: g.label, models: g.models,
+                 showModel: i === 0, rowspan: i === 0 ? g.rows.length : 0 });
     }
   }
   return out;
@@ -66,12 +51,11 @@ window.PosPages["page-catalog"] = {
   inject: ["showError", "goPage"],
   data() {
     return {
-      q: "", includeInactive: false, pending: false, pendingCount: 0,
+      q: "", appliedQ: "", includeInactive: false, pending: false, pendingCount: 0,
       fCategory: null, fBrand: null, fModel: null,
       categories: [], brands: [], models: [],
       products: [], fieldsByCat: {}, fieldOptions: {}, fieldUsageByCat: {},
-      expanded: {}, bcInput: {}, bcError: {},
-      editVariant: null,
+      inactiveMatchCount: null, inactiveLookupFailed: false, _refreshToken: 0,
       addingFor: null, newVariant: { attrs: {}, price: null, barcode: "", model_ids: [] },
     };
   },
@@ -82,14 +66,18 @@ window.PosPages["page-catalog"] = {
       this.models.forEach((m, i) => { o[m.alias || m.name] = i; });
       return o;
     },
+    displayVariantCount() {
+      return this.variantCount(this.products);
+    },
+    displayProducts() {
+      const hasKeyword = Boolean((this.appliedQ || "").trim());
+      return this.products.filter(p =>
+        (p.variants || []).length > 0 || (!hasKeyword && p.active));
+    },
   },
   async mounted() {
-    // ESC 取消行內編輯(子產品),不存檔
-    this._escHandler = (ev) => {
-      if (ev.key !== "Escape") return;
-      if (this.editVariant) this.editVariant = null;
-    };
-    document.addEventListener("keydown", this._escHandler);
+    this._variantEditorClosed = (event) => this.onVariantEditorClosed(event);
+    window.addEventListener("pos-variant-editor-closed", this._variantEditorClosed);
     await this.guard(async () => {
       this.categories = await API.listCategories({});
       this.brands = await API.listBrands({});
@@ -98,40 +86,83 @@ window.PosPages["page-catalog"] = {
     await this.reload();
   },
   unmounted() {
-    document.removeEventListener("keydown", this._escHandler);
+    window.removeEventListener("pos-variant-editor-closed", this._variantEditorClosed);
   },
   methods: {
     // 只重撈資料,不動編輯狀態(條碼即時新增/刪除用,避免把使用者踢出編輯)
     async refresh() {
+      const token = ++this._refreshToken;
+      const params = this.catalogParams();
       await this.guard(async () => {
-        this.products = await API.listCatalog({q: this.q,
-          include_inactive: this.includeInactive, category_id: this.fCategory,
-          brand_id: this.fBrand, model_id: this.fModel, pending: this.pending});
-        const summary = await API.variantIssues();
+        const [products, summary] = await Promise.all([
+          API.listCatalog(params), API.variantIssues(),
+        ]);
+        if (token !== this._refreshToken) return;
+        this.products = products;
+        this.appliedQ = params.q;
         this.pendingCount = summary.pending_variant_count || 0;
+        this.inactiveMatchCount = null;
+        this.inactiveLookupFailed = false;
+
+        if (params.include_inactive || this.variantCount(products) !== 0) return;
+        try {
+          const inactiveProducts = await API.listCatalog({
+            ...params, include_inactive: true,
+          });
+          if (token !== this._refreshToken) return;
+          this.inactiveMatchCount = this.variantCount(inactiveProducts);
+        } catch (error) {
+          if (token !== this._refreshToken) return;
+          this.inactiveLookupFailed = true;
+          this.showError(error.message);
+        }
       });
+    },
+    catalogParams() {
+      return {q: this.q, include_inactive: this.includeInactive,
+        category_id: this.fCategory, brand_id: this.fBrand,
+        model_id: this.fModel, pending: this.pending};
+    },
+    variantCount(products) {
+      return (products || []).reduce(
+        (total, product) => total + (product.variants || []).length, 0);
+    },
+    async showInactiveResults() {
+      this.includeInactive = true;
+      await this.reload();
     },
     // 待處理問題轉正式中文說明(missing_required/duplicate_barcode/duplicate_signature)
     issueText(it) {
       if (it.issue_type === "missing_required")
         return `缺少必填「${it.field_name || it.source_value || "規格"}」`;
       if (it.issue_type === "duplicate_barcode")
-        return `條碼「${it.source_value}」與其他子產品重複` +
+        return `條碼「${it.source_value}」與其他款式重複` +
           (it.related_label ? `（${it.related_label}）` : "");
       if (it.issue_type === "duplicate_signature")
-        return "規格與其他子產品重複" +
+        return "規格與其他款式重複" +
           (it.related_label ? `（${it.related_label}）` : "");
       return "資料異常";
     },
     async reload() {
       await this.refresh();
-      this.editVariant = null; this.addingFor = null;
+      this.addingFor = null;
     },
     editInSettings() { this.goPage("settings"); },
-    toggleExpand(pid) { this.expanded[pid] = !this.expanded[pid]; },
     groupedVariants(p) {
-      const editId = this.editVariant ? this.editVariant.variant_id : null;
-      return window.groupVariantsByModel(p.variants, this.modelOrder, editId);
+      return window.groupVariantsByModel(p.variants, this.modelOrder);
+    },
+
+    async openVariantEditor(product, variant) {
+      window.PosDesktopLock.lock();
+      try {
+        await API.invoke("desktop.variant_editor.open", {product, variant});
+      } catch (error) {
+        window.PosDesktopLock.unlock();
+        this.showError(error.message);
+      }
+    },
+    async onVariantEditorClosed(event) {
+      if (event && event.detail && event.detail.saved) await this.reload();
     },
 
     async ensureFields(cid) {
@@ -153,18 +184,6 @@ window.PosPages["page-catalog"] = {
       await window.CatalogFields.loadFieldUsage(cid, this.fieldsByCat[cid], usage);
       this.fieldUsageByCat[cid] = usage;
     },
-    modelIdsByNames(cat_names) {
-      // 依顯示名稱反查 model_id:後端回傳的 v.models 是別名(無別名=全名),
-      // 須先比對別名再比對全名,否則有別名的型號反查不到,存檔會清空綁定
-      const ids = [];
-      for (const n of cat_names) {
-        const m = this.models.find(x => (x.alias || x.name) === n)
-              || this.models.find(x => x.name === n);
-        if (m) ids.push(m.model_id);
-      }
-      return ids;
-    },
-
     async toggleProductActive(p) {
       await this.guardReload(() =>
         API.updateProduct(p.product_id, { active: p.active ? 0 : 1 }));
@@ -174,38 +193,12 @@ window.PosPages["page-catalog"] = {
       await this.guardReload(() => API.deleteProduct(p.product_id));
     },
 
-    // 變體編輯
-    async startEditVariant(p, v) {
-      await this.ensureFields(p.category_id);
-      this.editVariant = { variant_id: v.variant_id, price: v.price,
-        attrs: window.initFormAttrs(this.fieldsByCat[p.category_id], v.attributes),
-        model_ids: this.modelIdsByNames(v.models || []),
-        _cat: p.category_id };
-    },
-    async saveVariant() {
-      const e = this.editVariant;
-      try {
-        await window.CatalogFields.ensureOptions(
-          this.fieldsByCat[e._cat] || [], e.attrs, this.fieldOptions);
-        await API.updateVariantDetails(e.variant_id, {
-          attributes: window.buildAttrPayload(this.fieldsByCat[e._cat], e.attrs),
-          price: e.price === "" ? null : (e.price ?? null)
-        }, e.model_ids);
-        await this.reload();
-        await this.reloadFieldUsage(e._cat);
-      } catch (err) {
-        this.showError(err.message);
-        // 雙寫可能部分成功,重新載入拉回後端真實狀態,避免畫面停在舊資料
-        await this.reload();
-        await this.reloadFieldUsage(e._cat);
-      }
-    },
     async toggleVariantActive(p, v) {
       await this.guardReload(() =>
         API.updateVariant(v.variant_id, { active: v.active ? 0 : 1 }));
     },
     async deleteVariant(p, v) {
-      if (!confirm("確定刪除此子產品?刪除後無法復原。")) return;
+      if (!confirm("確定刪除此款式?刪除後無法復原。")) return;
       await this.guardReload(() => API.deleteVariant(v.variant_id));
     },
 
@@ -214,35 +207,6 @@ window.PosPages["page-catalog"] = {
       if (!v.barcodes || !v.barcodes.length) return null;
       return v.barcodes.find(b => b.source === "factory") || v.barcodes[0];
     },
-    async removeBarcode(p, code) {
-      if (!confirm(`確定移除條碼「${code}」?`)) return;
-      await this.guard(async () => {
-        await API.deleteBarcode(code);
-        await this.refresh();
-      });
-    },
-    async addFactoryBarcode(p, v) {
-      const code = (this.bcInput[v.variant_id] || "").trim();
-      if (!code) { this.bcError[v.variant_id] = "請輸入原廠條碼"; return; }
-      if (code.toUpperCase().startsWith("TL")) {
-        this.bcError[v.variant_id] = "TL 開頭為系統保留，如有需求請按自取";
-        return;
-      }
-      try {
-        await API.addBarcode({variant_id: v.variant_id,
-                              barcode: code, source: "factory"});
-        this.bcInput[v.variant_id] = "";
-        this.bcError[v.variant_id] = "";
-        await this.refresh();
-      } catch (e) { this.bcError[v.variant_id] = e.message; }
-    },
-    async addStoreBarcode(p, v) {
-      await this.guard(async () => {
-        await API.addBarcode({variant_id: v.variant_id, source: "store"});
-        await this.refresh();
-      });
-    },
-
     // 新增變體
     async startAddVariant(p) {
       await this.ensureFields(p.category_id);

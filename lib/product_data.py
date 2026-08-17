@@ -285,8 +285,15 @@ def catalog(conn, include_inactive=False, category_id=None, brand_id=None, model
     ids=[r["variant_id"] for r in rows]; attrs=attrs_by_variant(conn,ids);disp=display_attrs(conn,ids);models=models_by_variant(conn,ids);sorts=variant_sort_keys(conn,ids);stocks=stock_map(conn,ids);issues=variant_issues(conn,ids)
     if pending:
         rows=[r for r in rows if issues.get(r["variant_id"])]
+    barcode_ids=[r["variant_id"] for r in rows]
     bars={}
-    for r in conn.execute("SELECT variant_id,barcode,source FROM Barcode ORDER BY variant_id,barcode"):bars.setdefault(r["variant_id"],[]).append({"barcode":r["barcode"],"source":r["source"]})
+    if barcode_ids:
+        qs=in_clause(barcode_ids)
+        for r in conn.execute(
+                f"SELECT variant_id,barcode,source FROM Barcode "
+                f"WHERE variant_id IN ({qs}) ORDER BY variant_id,barcode", barcode_ids):
+            bars.setdefault(r["variant_id"],[]).append(
+                {"barcode":r["barcode"],"source":r["source"]})
     by={}
     for r in rows:by.setdefault(r["product_id"],[]).append(r)
     out=[]
@@ -300,10 +307,24 @@ def catalog(conn, include_inactive=False, category_id=None, brand_id=None, model
 
 
 def filter_catalog(products,q):
-    if not q:return products
-    q=q.lower();out=[]
+    terms=[term.casefold() for term in str(q or "").split()]
+    if not terms:return products
+    out=[]
     for p in products:
-        if q in (p["name"] or "").lower():out.append(p);continue
-        hits=[v for v in p["variants"] if any(q in str(x).lower() for x in v["attributes"].values())]
-        if hits:p["variants"]=hits;out.append(p)
+        shared=[p.get("name"),p.get("category_name"),p.get("brand_name")]
+        hits=[]
+        for v in p["variants"]:
+            values=list(shared)
+            for value in v.get("attributes",{}).values():
+                if isinstance(value,(list,tuple)):
+                    values.extend(value)
+                else:
+                    values.append(value)
+            values.extend(v.get("models",[]))
+            values.extend(b.get("barcode") for b in v.get("barcodes",[]))
+            searchable=[str(value).casefold() for value in values if value is not None]
+            if all(any(term in value for value in searchable) for term in terms):
+                hits.append(v)
+        if hits:
+            matched=dict(p);matched["variants"]=hits;out.append(matched)
     return out

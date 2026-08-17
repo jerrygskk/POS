@@ -72,6 +72,11 @@ window.PosComponents["opt-picker"] = {
       this.emitList(this.selected.filter(s => s.toLowerCase() !== val.toLowerCase()));
     },
     addFromSearch() { this.add(this.query); this.query = ""; },
+    handleSearchEnter(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.addFromSearch();
+    },
     pickMatch(o) { this.add(o.value); this.query = ""; },
   },
   template: `
@@ -94,7 +99,7 @@ window.PosComponents["opt-picker"] = {
       </template>
     </div>
     <div class="tag-search">
-      <input v-model="query" :placeholder="placeholder" @keyup.enter.stop="addFromSearch">
+      <input v-model="query" :placeholder="placeholder" @keydown.enter="handleSearchEnter">
       <button type="button" class="btn-sm" v-if="query.trim() && !exactExists"
               @click="addFromSearch">新增「{{ query.trim() }}」</button>
     </div>

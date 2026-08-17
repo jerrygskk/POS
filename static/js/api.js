@@ -23,11 +23,12 @@ const API = {
       "fields.list", "fields.create", "fields.update",
       "options.list", "options.create", "options.update", "options.delete", "options.models", "options.set_models", "options.cleanup",
       "products.create", "products.list", "products.update", "products.delete", "catalog.list",
-      "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.delete",
+      "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.update_editor", "variants.delete",
       "variants.batch_create", "variants.field_usage", "variants.activate", "variants.issues",
       "barcodes.scan", "barcodes.add", "barcodes.delete", "stock.receive", "stock.detail",
       "stocktake.create", "stocktake.list", "stocktake.detail", "stocktake.scan", "stocktake.set_counted", "stocktake.close",
-      "payments.list", "sales.checkout", "sales.list", "sales.summary", "sales.export_save", "printing.barcode"
+      "payments.list", "sales.checkout", "sales.list", "sales.summary", "sales.export_save", "printing.barcode",
+      "desktop.variant_editor.open", "desktop.variant_editor.context", "desktop.variant_editor.close"
     ]);
     if (!allowed.has(action)) throw new Error("不支援的桌面操作");
     const api = await this._bridge();
@@ -69,6 +70,9 @@ const API = {
     return this.invoke("variants.update_details", {
       id, fields, model_ids: modelIds
     });
+  },
+  updateVariantEditor(payload) {
+    return this.invoke("variants.update_editor", payload);
   },
   exportSales(payload) { return this.invoke("sales.export_save", payload); },
   printBarcode(variant_id, copies = 1) { return this.invoke("printing.barcode", {variant_id, copies}); },

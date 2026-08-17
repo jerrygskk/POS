@@ -106,7 +106,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 python -m unittest discover -s tests
 ```
 
-目前 491 個測試,涵蓋 schema/migration、Desktop action 契約、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。
+目前 557 個測試,涵蓋 schema/migration、Desktop action 契約、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
 
 ⚠️ 標籤列印的測試以替身模擬機器,**通過不等於印得出來**;改動該功能一律另外實機驗證(見 §2 標籤列印)。
 

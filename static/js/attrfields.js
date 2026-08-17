@@ -29,14 +29,6 @@ window.PosComponents["attr-fields"] = {
       return window.CatalogFields.filterOptions(this.options[f.field_id] || [], this.modelIds);
     },
     datalistId(f) { return "af-" + this.afUid + "-" + f.field_id; },
-    tagList(str) { return window.parseTagList(str); },
-    tagHas(str, val) { return this.tagList(str).includes(val); },
-    toggleTag(obj, fname, val) {
-      const arr = this.tagList(obj[fname]);
-      const i = arr.indexOf(val);
-      if (i >= 0) arr.splice(i, 1); else arr.push(val);
-      obj[fname] = arr.join(", ");
-    },
   },
   template: `
   <div v-for="f in fields" :key="f.field_id" class="attr-row">
@@ -60,12 +52,10 @@ window.PosComponents["attr-fields"] = {
     <template v-else-if="f.field_type === 'tags' && tagsStyle === 'chips'">
       <div class="attr-name">{{ f.name }}</div>
       <div class="chip-box">
-        <div class="chip-wrap">
-          <button type="button" v-for="o in (f.options || [])" :key="o.option_id" class="chip"
-                  :class="{ on: tagHas(attrs[f.name], o.value) }"
-                  @click="toggleTag(attrs, f.name, o.value)">{{ o.value }}</button>
-        </div>
-        <input v-model="attrs[f.name]" placeholder="以逗號分隔,可自由新增">
+        <opt-picker :model-value="attrs[f.name]"
+                    @update:model-value="attrs[f.name] = $event"
+                    :usage="usage[f.field_id] || []" :multiple="true" :as-list="false"
+                    :model-ids="modelIds" :placeholder="'搜尋或輸入' + f.name"></opt-picker>
       </div>
     </template>
     <label v-else-if="f.field_type === 'tags'">{{ f.name }}

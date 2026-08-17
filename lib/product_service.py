@@ -48,6 +48,14 @@ def _validate_variant(value):
         for item in value["barcodes"]: _validate_barcode(item)
 
 
+def _validate_editor_fields(value):
+    value = _mapping(value, "更新欄位")
+    _allow(value, {"attributes", "price"})
+    if "attributes" in value: _mapping(value["attributes"], "規格")
+    if value.get("price") is not None and not _is_int(value["price"]):
+        raise ValidationError("售價格式不正確")
+
+
 def _validate_draft(value):
     value = _mapping(value, "子產品")
     _allow(value, {"draft_id", "attributes", "price", "active", "model_ids", "barcodes"})
@@ -76,6 +84,20 @@ def _validate_action_payload(action, payload):
     if action=="variants.field_usage":
         _allow(payload,{"category_id","field_id"})
         if not _is_int(payload.get("category_id")) or not _is_int(payload.get("field_id")):raise ValidationError("識別碼格式不正確")
+        return
+    if action=="variants.update_editor":
+        _allow(payload,{"id","fields","model_ids","deleted_barcodes","factory_barcodes","store_barcode_count"})
+        if not _is_int(payload.get("id")):raise ValidationError("識別碼格式不正確")
+        _validate_editor_fields(payload.get("fields",{}))
+        _int_list(payload.get("model_ids",[]),"型號")
+        for key in ("deleted_barcodes","factory_barcodes"):
+            codes=payload.get(key,[])
+            if not isinstance(codes,list) or any(not isinstance(code,str) for code in codes):
+                raise ValidationError("條碼清單格式不正確")
+            if key=="factory_barcodes" and any(not code.strip() for code in codes):
+                raise ValidationError("原廠條碼不可空白")
+        count=payload.get("store_barcode_count",0)
+        if not _is_int(count) or count < 0:raise ValidationError("自取碼數量格式不正確")
         return
     if action=="products.create":
         _allow(payload,{"name","category_id","brand_id","brand_name","note","variants"})
@@ -316,6 +338,45 @@ class ProductService:
                 raise ValidationError("子產品仍有待處理問題,無法啟用", details=state["issues"])
         return {"ok": True}
 
+    def update_variant_editor(self, payload):
+        vid = payload["id"]
+        self.repo.require_variant(vid)
+        row = self.repo.one(
+            "SELECT p.category_id FROM Variant v JOIN Product p ON v.product_id=p.product_id "
+            "WHERE v.variant_id=?", (vid,))
+        attributes = payload.get("fields", {}).get("attributes", {})
+        self._ensure_editor_options(row["category_id"], attributes)
+        self.update_variant(vid, payload.get("fields", {}), payload.get("model_ids", []))
+        for code in payload.get("deleted_barcodes", []):
+            if self.repo.execute(
+                    "DELETE FROM Barcode WHERE barcode=? AND variant_id=?", (code, vid)).rowcount == 0:
+                raise NotFoundError("找不到此條碼")
+        for code in payload.get("factory_barcodes", []):
+            self._add_barcode(vid, {"barcode": code, "source": "factory"})
+        store_barcodes = []
+        for _ in range(payload.get("store_barcode_count", 0)):
+            store_barcodes.append(self._add_barcode(
+                vid, {"source": "store"})["barcode"])
+        return {"ok": True, "store_barcodes": store_barcodes}
+
+    def _ensure_editor_options(self, category_id, attributes):
+        for name, raw in (attributes or {}).items():
+            field = product_data._resolve_field(self.repo.connection, name, category_id)
+            if field is None or field["field_type"] not in ("select", "multi", "tags"):
+                continue
+            values = raw if isinstance(raw, (list, tuple)) else [raw]
+            values = dict.fromkeys(
+                str(item).strip() for item in values if str(item).strip())
+            for value in values:
+                self.repo.execute(
+                    "INSERT OR IGNORE INTO AttributeOption(field_id,value,sort) VALUES(?,?,?)",
+                    (field["field_id"], value, next_sort(
+                        self.repo.connection, "AttributeOption", "field_id=?",
+                        (field["field_id"],))))
+                self.repo.execute(
+                    "UPDATE AttributeOption SET active=1 WHERE field_id=? AND value=?",
+                    (field["field_id"], value))
+
     def activate_variant(self, vid):
         self.repo.require_variant(vid)
         from lib.variant_issue_service import VariantIssueService
@@ -359,7 +420,7 @@ class ProductService:
 
 class ProductFacade(BaseFacade):
     ACTIONS = {"products.create", "products.list", "catalog.list", "products.update", "products.delete",
-               "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.delete",
+               "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.update_editor", "variants.delete",
                "variants.batch_create", "variants.field_usage", "variants.activate", "variants.issues",
                "barcodes.scan", "barcodes.add", "barcodes.delete"}
 
@@ -367,6 +428,9 @@ class ProductFacade(BaseFacade):
 
     def _prepare_payload(self, action, payload):
         _validate_action_payload(action, payload)
+        if action == "variants.update_editor":
+            return {**payload, "factory_barcodes": [
+                code.strip() for code in payload.get("factory_barcodes", [])]}
         return payload
 
     def _dispatch(self, action, payload, connection):
@@ -380,6 +444,7 @@ class ProductFacade(BaseFacade):
         if action == "variants.update": return s.update_variant(payload["id"], payload.get("fields", {}))
         if action == "variants.set_models": return s.update_variant(payload["id"], {}, payload.get("model_ids", []))
         if action == "variants.update_details": return s.update_variant(payload["id"], payload.get("fields", {}), payload.get("model_ids", []))
+        if action == "variants.update_editor": return s.update_variant_editor(payload)
         if action == "variants.delete": return s.delete_variant(payload["id"])
         if action == "variants.activate": return s.activate_variant(payload["id"])
         if action == "variants.issues": return s.list_issues()
