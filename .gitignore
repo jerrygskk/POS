@@ -19,6 +19,10 @@ docs/
 # 一次性匯入工具(店內資料相關,不入庫)
 tools/import_excel.py
 
+# 設計／除錯階段的暫存產物(設計稿、走查腳本與其輸出)
+.superpowers/
+.tmp_*/
+
 # 執行期產物(與 exe 同層)
 pos.db
 error.log
