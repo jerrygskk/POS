@@ -8,7 +8,10 @@ from lib.sales_service import SalesFacade
 from lib.stocktake_service import StocktakeFacade
 from lib.printing_service import PrintingFacade
 from lib.application_errors import ValidationError
-from lib.child_window import ChildWindowCoordinator
+from lib.child_window import (ChildWindowCoordinator, fit_position,
+                              screen_work_size)
+
+MAIN_WINDOW_SIZE = (1024, 768)
 
 
 class DesktopFacade:
@@ -62,10 +65,16 @@ class DesktopApplication:
             raise FileNotFoundError(f"找不到桌面前端入口：{entry_point}")
 
         webview = self._webview()
+        # 主視窗:靠左、垂直與子視窗同樣落在中央偏上(量不到工作區則交給系統預設)
+        position = fit_position(MAIN_WINDOW_SIZE, screen_work_size())
+        extra = {"x": 0, "y": position[1]} if position is not None else {}
         window = webview.create_window(
             "POS",
             entry_point.resolve().as_uri(),
             js_api=self.bridge,
+            width=MAIN_WINDOW_SIZE[0],
+            height=MAIN_WINDOW_SIZE[1],
+            **extra,
         )
         self.bridge._set_window(window, getattr(webview, "SAVE_DIALOG", "save"))
         child_window = ChildWindowCoordinator(

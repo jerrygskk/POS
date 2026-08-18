@@ -81,7 +81,7 @@ def init_db(db_path, require_existing=False):
             _set_schema_version(conn, db_schema.SCHEMA_VERSION)
         else:
             _run_migrations(conn)
-        db_seed.seed(conn)
+        db_seed.seed(conn, fresh=is_new)
         violations = conn.execute("PRAGMA foreign_key_check").fetchall()
         if violations:
             tables = ", ".join(sorted({row[0] for row in violations}))

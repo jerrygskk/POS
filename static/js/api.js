@@ -16,7 +16,7 @@ const API = {
   },
   async invoke(action, payload) {
     const allowed = new Set([
-      "categories.list", "categories.create", "categories.update", "categories.delete", "categories.sort", "categories.fields", "categories.set_common_fields", "categories.set_field",
+      "categories.list", "categories.create", "categories.update", "categories.delete", "categories.sort", "categories.fields", "categories.set_common_fields", "categories.set_field", "categories.delete_field",
       "brands.list", "brands.create", "brands.update", "brands.delete", "brands.sort", "brands.set_categories",
       "phone_brands.list", "phone_brands.create", "phone_brands.update", "phone_brands.delete", "phone_brands.sort",
       "models.list", "models.create", "models.update", "models.delete", "models.sort",
@@ -47,6 +47,7 @@ const API = {
   sortCategories: ids => API.invoke("categories.sort", {ids}), categoryFields: id => API.invoke("categories.fields", {id}),
   setCategoryCommonFields: (id, field_ids) => API.invoke("categories.set_common_fields", {id, field_ids}),
   setCategoryField: (category_id, field_id, fields) => API.invoke("categories.set_field", {category_id, field_id, fields}),
+  deleteCategoryField: (category_id, field_id) => API.invoke("categories.delete_field", {category_id, field_id}),
   listBrands: p => API.invoke("brands.list", p), createBrand: p => API.invoke("brands.create", p), updateBrand: (id, fields) => API.invoke("brands.update", {id, fields}), deleteBrand: id => API.invoke("brands.delete", {id}), sortBrands: ids => API.invoke("brands.sort", {ids}), setBrandCategories: (id, category_ids) => API.invoke("brands.set_categories", {id, category_ids}),
   listPhoneBrands: p => API.invoke("phone_brands.list", p), createPhoneBrand: p => API.invoke("phone_brands.create", p), updatePhoneBrand: (id, fields) => API.invoke("phone_brands.update", {id, fields}), deletePhoneBrand: id => API.invoke("phone_brands.delete", {id}), sortPhoneBrands: ids => API.invoke("phone_brands.sort", {ids}),
   listModels: p => API.invoke("models.list", p), createModel: p => API.invoke("models.create", p), updateModel: (id, fields) => API.invoke("models.update", {id, fields}), deleteModel: id => API.invoke("models.delete", {id}), sortModels: ids => API.invoke("models.sort", {ids}),
@@ -54,7 +55,7 @@ const API = {
   listOptions: p => API.invoke("options.list", p), createOption: p => API.invoke("options.create", p), updateOption: (id, fields) => API.invoke("options.update", {id, fields}), deleteOption: id => API.invoke("options.delete", {id}), cleanupOptions: field_id => API.invoke("options.cleanup", field_id == null ? {} : {field_id}),
   createProduct: p => API.invoke("products.create", p), listProducts: p => API.invoke("products.list", p), listCatalog: p => API.invoke("catalog.list", p), updateProduct: (id, fields) => API.invoke("products.update", {id, fields}), deleteProduct: id => API.invoke("products.delete", {id}),
   createVariant: (product_id, fields) => API.invoke("variants.create", {product_id, fields}), updateVariant: (id, fields) => API.invoke("variants.update", {id, fields}), deleteVariant: id => API.invoke("variants.delete", {id}),
-  batchCreateVariants: (product_id, drafts) => API.invoke("variants.batch_create", {product_id, drafts}), fieldUsage: (category_id, field_id) => API.invoke("variants.field_usage", {category_id, field_id}),
+  batchCreateVariants: (product_id, drafts) => API.invoke("variants.batch_create", {product_id, drafts}), fieldUsage: (category_id, field_id, scope) => API.invoke("variants.field_usage", Object.assign({category_id, field_id}, scope || {})),
   activateVariant: id => API.invoke("variants.activate", {id}), variantIssues: () => API.invoke("variants.issues", {}),
   addBarcode: p => API.invoke("barcodes.add", p), deleteBarcode: code => API.invoke("barcodes.delete", {code}), scanBarcode: code => API.invoke("barcodes.scan", {code}),
   receiveStock: p => API.invoke("stock.receive", p), stockDetail: variant_id => API.invoke("stock.detail", {variant_id}),

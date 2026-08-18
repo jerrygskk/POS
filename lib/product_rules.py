@@ -5,6 +5,34 @@ from lib.application_errors import ValidationError
 
 FIELD_TYPES = {"select", "text", "multi", "tags"}
 
+# 候選選單固定次序:玻璃貼「材質」(實際是鍍膜)依店內慣用順序排,不隨使用次數浮動。
+# 只釘住列在這裡的值,同名欄位的其他值(如藍寶石／康寧)照原本使用次數排序。
+PINNED_OPTION_VALUES = ("亮面", "霧面", "藍光", "防窺")
+
+
+def pinned_option_rank(value):
+    """回傳固定次序的名次;不在清單內回 None(表示照原順序)。"""
+    try:
+        return PINNED_OPTION_VALUES.index(value)
+    except ValueError:
+        return None
+
+
+def sort_pinned_options(options):
+    """把固定次序的選項照 PINNED_OPTION_VALUES 排到最前,其餘維持原順序。
+
+    options 為 dict 清單(需有 value 鍵),回傳新清單。
+    """
+    items = list(options)
+    tail = len(PINNED_OPTION_VALUES)
+    return sorted(
+        items,
+        key=lambda o: (
+            tail if pinned_option_rank(o.get("value")) is None
+            else pinned_option_rank(o.get("value")),
+        ),
+    )
+
 
 def is_int(value):
     return isinstance(value, int) and not isinstance(value, bool)

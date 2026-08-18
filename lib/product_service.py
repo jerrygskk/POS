@@ -82,8 +82,11 @@ def _validate_action_payload(action, payload):
         for item in payload["drafts"]:_validate_draft(item)
         return
     if action=="variants.field_usage":
-        _allow(payload,{"category_id","field_id"})
+        _allow(payload,{"category_id","field_id","brand_id","product_id"})
         if not _is_int(payload.get("category_id")) or not _is_int(payload.get("field_id")):raise ValidationError("識別碼格式不正確")
+        # 候選前排範圍:未提供或 None 表示不指定(退回種類次數)
+        for key in ("brand_id","product_id"):
+            if payload.get(key) is not None and not _is_int(payload[key]):raise ValidationError("識別碼格式不正確")
         return
     if action=="variants.update_editor":
         _allow(payload,{"id","fields","model_ids","deleted_barcodes","factory_barcodes","store_barcode_count"})
@@ -452,7 +455,9 @@ class ProductFacade(BaseFacade):
             from lib.variant_batch_service import VariantBatchService
             return VariantBatchService(connection).batch_create(payload)
         if action == "variants.field_usage":
-            return product_data.option_usage_in_category(connection, payload["field_id"], payload["category_id"])
+            return product_data.option_usage_in_category(
+                connection, payload["field_id"], payload["category_id"],
+                brand_id=payload.get("brand_id"), product_id=payload.get("product_id"))
         if action == "barcodes.scan": return s.scan(payload["code"])
         if action == "barcodes.delete": return s.delete_barcode(payload["code"])
         return s.add_barcode(payload)

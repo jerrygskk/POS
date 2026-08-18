@@ -230,6 +230,44 @@ done();
         self.assertEqual(out["selected"], "軍規")
         self.assertEqual(out["query"], "")
 
+    def test_opt_picker_front_row_uses_lead_values_and_hides_rest_in_more(self):
+        # 前排＝服務層標記 lead 的值(該廠牌/大產品曾出現過);其餘一律收進「更多…」,
+        # 完全沒有 lead 時才退回種類次數前 8。
+        out = self._run(r'''
+function mkPick(usage) {
+  const s = { $emit: () => {}, modelValue: "", usage, multiple: false,
+              asList: false, modelIds: [] };
+  for (const k of Object.keys(optPicker.methods)) s[k] = optPicker.methods[k].bind(s);
+  for (const k of Object.keys(optPicker.computed))
+    Object.defineProperty(s, k, { get: optPicker.computed[k].bind(s), configurable: true });
+  Object.assign(s, optPicker.data());
+  return s;
+}
+const row = (id, value, extra) => Object.assign(
+  {option_id:id, value, active:true, model_ids:[], usage_count:0, lead:false,
+   lead_count:0}, extra || {});
+let s = mkPick([
+  row(1, "皮套", {lead:true, lead_count:6, usage_count:9}),
+  row(2, "SolidX", {usage_count:20}),
+  row(3, "透明", {usage_count:5}),
+]);
+out.leadTop = s.topChips.map(o => o.value);
+out.leadMore = s.moreChips.map(o => o.value);
+out.leadCounts = s.topChips.map(o => s.countOf(o));
+// 沒有任何 lead:退回種類次數前 8(此處只有 3 筆,全部進前排)
+s = mkPick([row(1, "A", {usage_count:3}), row(2, "B", {usage_count:1})]);
+out.fallbackTop = s.topChips.map(o => o.value);
+out.fallbackMore = s.moreChips.map(o => o.value);
+out.fallbackCounts = s.topChips.map(o => s.countOf(o));
+done();
+''')
+        self.assertEqual(out["leadTop"], ["皮套"])
+        self.assertEqual(out["leadMore"], ["SolidX", "透明"])
+        self.assertEqual(out["leadCounts"], [6])
+        self.assertEqual(out["fallbackTop"], ["A", "B"])
+        self.assertEqual(out["fallbackMore"], [])
+        self.assertEqual(out["fallbackCounts"], [3, 1])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,7 @@
 from lib.application_errors import ValidationError
 from lib.db import in_clause, next_sort, stock_map
 from lib.normalize import normalize_key
+from lib import product_rules
 from lib.product_rules import FIELD_TYPES
 
 FEATURE_FIELD_KEY = normalize_key("特性詞條")  # 固定欄位:不需綁定即可使用
@@ -183,11 +184,29 @@ def variant_sort_keys(conn, ids):
     return {vid:(k[0],k[1],tuple(k[2]),tuple(k[3])) for vid,k in keys.items()}
 
 
-def option_usage_in_category(conn, field_id, category_id):
+def _option_scope_counts(conn, field_id, column, value):
+    """回傳 {option_id: 次數}:該欄位選項在指定範圍(廠牌或大產品)內的使用子產品數。"""
+    rows = conn.execute(
+        "SELECT va.option_id, COUNT(DISTINCT va.variant_id) c "
+        "FROM VariantAttribute va "
+        "JOIN Variant v ON v.variant_id=va.variant_id "
+        "JOIN Product p ON p.product_id=v.product_id "
+        "WHERE va.field_id=? AND p." + column + "=? AND va.option_id IS NOT NULL "
+        "GROUP BY va.option_id", (field_id, value)).fetchall()
+    return {r["option_id"]: r["c"] for r in rows}
+
+
+def option_usage_in_category(conn, field_id, category_id, brand_id=None,
+                             product_id=None):
     """回傳指定欄位在指定種類內各選項的使用次數排序清單。
     可重用:特性詞條選取器與後續規格候選選單皆走「該種類用過的值優先＋搜尋全部」。
     使用次數=該種類內以此選項為值的子產品數。
-    排序:使用次數多→少、既有 sort、選項值、option_id(穩定)。含停用選項(帶 active)。"""
+    排序:使用次數多→少、既有 sort、選項值、option_id(穩定)。含停用選項(帶 active)。
+
+    前排範圍(lead)採三層退路:該廠牌用過 → 該大產品用過 → 都沒有則不指定,
+    由前端沿用種類次數前幾名。理由:廠牌能區隔各家專屬款式(如 SolidX 只有一家有);
+    廠牌欄為空的商品(無品牌皮套)退回大產品仍能收斂;全新大產品第一筆才無歷史可用。
+    固定次序的值(PINNED_OPTION_VALUES)一律列入前排且次序寫死。"""
     rows = conn.execute(
         "SELECT o.option_id, o.value, o.active, o.sort, "
         "COUNT(DISTINCT va.variant_id) usage_count "
@@ -205,9 +224,30 @@ def option_usage_in_category(conn, field_id, category_id):
             "JOIN AttributeOption o ON o.option_id=om.option_id "
             "WHERE o.field_id=? ORDER BY om.model_id", (field_id,)):
         om.setdefault(r["option_id"], []).append(r["model_id"])
-    return [{"option_id": r["option_id"], "value": r["value"],
-             "active": bool(r["active"]), "usage_count": r["usage_count"],
-             "model_ids": om.get(r["option_id"], [])} for r in rows]
+    out = [{"option_id": r["option_id"], "value": r["value"],
+            "active": bool(r["active"]), "usage_count": r["usage_count"],
+            "model_ids": om.get(r["option_id"], [])} for r in rows]
+    # 前排範圍:廠牌優先,廠牌欄為空(或該廠牌無紀錄)退回大產品,再無則不指定
+    lead = {}
+    if brand_id is not None:
+        lead = _option_scope_counts(conn, field_id, "brand_id", brand_id)
+    if not lead and product_id is not None:
+        lead = _option_scope_counts(conn, field_id, "product_id", product_id)
+    for o in out:
+        count = lead.get(o["option_id"], 0)
+        o["lead_count"] = count
+        o["lead"] = bool(lead) and count > 0
+    if lead:
+        # 前排內部依次數多→少;非前排維持種類次數順序(sorted 穩定)
+        out.sort(key=lambda o: (0, -o["lead_count"]) if o["lead"] else (1, 0))
+    # 玻璃貼材質等固定次序的值排到最前並強制列入前排
+    out = product_rules.sort_pinned_options(out)
+    if lead:
+        # 有前排範圍時,固定次序的值即使該廠牌沒用過也要留在前排
+        for o in out:
+            if product_rules.pinned_option_rank(o["value"]) is not None:
+                o["lead"] = True
+    return out
 
 
 def stock_of(conn, vid): return conn.execute("SELECT COALESCE(SUM(qty),0) s FROM StockMovement WHERE variant_id=?",(vid,)).fetchone()["s"]

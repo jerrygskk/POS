@@ -225,12 +225,12 @@ button.primary:active { background: var(--primary-active); transform: translateY
 /* 編輯中的變體列:淡藍灰底 */
 .sub tr.editing > td { background: var(--accent-soft); }
 
-/* 商品資料庫表以 colgroup 定欄：型號固定 180px，規格欄吸收寬螢幕剩餘空間。
+/* 商品資料庫表以 colgroup 定欄：型號固定 220px，規格欄吸收寬螢幕剩餘空間。
    總寬至少 1240px，小視窗由頁內容器承接橫向捲動。 */
 /* 欄寬全固定(table-layout: fixed):編輯狀態的輸入框不會推擠其他欄,
    避免「狀態」等窄欄被擠到折行、整表列高跳動 */
 table.sub { table-layout: fixed; }
-.catalog-col-model { width: 180px; }
+.catalog-col-model { width: 220px; }
 .catalog-col-spec { width: auto; }
 .catalog-col-stock { width: 60px; }
 .catalog-col-barcode { width: 185px; }
@@ -238,6 +238,8 @@ table.sub { table-layout: fixed; }
 .catalog-col-effective-price { width: 100px; }
 .catalog-col-status { width: 75px; }
 .catalog-col-actions { width: 190px; }
+/* 型號格一行一個型號:分隔號留在行尾,單一型號本身不折行 */
+.catalog-model-cell .catalog-model-line { white-space: nowrap; line-height: 1.45; }
 table.sub th:nth-child(7), table.sub td { overflow-wrap: break-word; }
 /* 編輯儲存格內標籤欄縮窄(材質/特性詞條 4 字即可),把寬度讓給 chip 框 */
 table.sub .attr-row { --label-w: 5em; }
@@ -287,15 +289,18 @@ table.sub td:last-child { white-space: nowrap; }
 .detail-line { color: var(--text-2); font-size: 14px; margin-top: 8px; }
 .tpl-list { border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
   margin: 6px 0 8px; }
+/* 整列不再是點擊區:一切動作走右側按鈕,避免誤觸 */
 .tpl-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
-  border-bottom: 1px solid var(--hover); cursor: pointer; }
+  border-bottom: 1px solid var(--hover); cursor: default; }
 .tpl-row:last-child { border-bottom: 0; }
-.tpl-row:not(.feature):hover { background: var(--hover); }
-.tpl-row.feature { cursor: default; background: var(--surface-alt); }
+.tpl-row.feature { background: var(--surface-alt); }
+.tpl-row.fixed { background: var(--surface-alt); }
 .tpl-row.inactive .tpl-name { color: var(--text-3); }
 .tpl-name { font-weight: 600; min-width: 6em; }
 .tpl-req { color: var(--text-2); font-size: 14px; }
-.tpl-def { margin-left: auto; }
+.tpl-def { color: var(--text-2); }
+/* 操作鈕靠右一排:✎ 修改與紅色 ✕(危險色同表格刪除鈕) */
+.tpl-actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: nowrap; }
 table.big-prod { margin: 6px 0 8px; }
 table.big-prod td:last-child { white-space: nowrap; }
 

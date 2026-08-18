@@ -41,6 +41,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `static/` | `index.html` + `css/pos.css` + `js/*.js`（Vue 3、DesktopBridge 包裝、各頁邏輯） |
 | `static/variant_editor.html` | 款式修改子視窗頁面（獨立 Vue app，共用 `attrfields`／`modelpicker`／`optpicker` 元件） |
 | `static/variant_batch.html` | 新增款式子視窗頁面（`variant_batch_window.js` 外殼＋既有建檔頁元件與樣板） |
+| `static/field_editor.html` | 規格設定子視窗頁面（`field_editor.js`；設定頁「新增規格／✎ 修改」由此開窗） |
 | `static/js/pos_shared.js` | 主視窗與子視窗共用的全域 mixin（`guard`／`guardReload`／`attrText`） |
 | `static/css/dialog-theme.css` | 子視窗對話框外觀（`.dialog-*` 公版，沿用 §2 UI 風格色票） |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
@@ -60,6 +61,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 - **盤點結案防重**:結案先以 `status='open'` 條件原子更新盤點單;不存在回 404,已結案回 409,避免重複產生 `adjust` 庫存異動。
 - **有效售價**:`Variant.price` 不為 NULL 時採用,否則退回 `Product.default_price`,兩者皆 NULL 則售價為 `null`。
 - **共用欄 NULL 去重提醒**:`AttributeField` 的共用欄 `category_id` 為 NULL;SQLite 的 `UNIQUE` 對 NULL 不視為相等,故去重不能單靠資料庫唯一鍵,需靠應用層先查再插。
+- **設定頁模板列與型號**:見下方「適用型號的使用與否」「規格欄的移除」「新種類的預設模板」三節。
 - **商品資料庫搜尋**:關鍵字以空白切成多個詞,採 **AND**(每個詞都要命中才算符合),大小寫與全半形以 `casefold` 正規化。比對範圍為商品名稱、種類、廠牌、款式的規格值(含 multi/tags 的每個值)、適用型號與條碼,命中時只保留符合的款式列。查無啟用中資料時另查一次停用資料,回報筆數並提供「顯示已停用」入口,不直接把停用商品混進結果。條碼只針對當頁款式查詢(`variant_id IN (...)`),不整表撈。
 - **Schema 與 migration**:`lib/db_schema.py` 是現行 schema DDL 的唯一來源；`lib/legacy_migrations.py` 封存 v1–v13 的歷史 migration DDL。未來修改現行 schema 時，仍須依 migration 規則新增升級步驟，讓既有資料庫可安全演進。
 
@@ -70,8 +72,13 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 售價、條碼這些內容在單一網頁對話框裡會逼出巢狀彈窗與捲動層層相疊,違反 UI 從簡;
 子視窗可獨立調整大小、由作業系統管理焦點。
 
-**頁面白名單**:`CHILD_PAGES` 決定可開啟的頁面(`variant_editor`／`variant_batch`)
+**頁面白名單**:`CHILD_PAGES` 決定可開啟的頁面(`variant_editor`／`variant_batch`／`field_editor`)
 與各自標題、尺寸。前端只送 key,**不送檔名**,避免任意本機檔被載入。
+
+**尺寸與位置**:`CHILD_PAGES` 的預設尺寸開窗前會被 `fit_size()` 夾進工作區
+(寬留 60、高留 80 給工作列與標題列,不低於 `min_size`),位置由 `fit_position()` 算成
+水平置中、垂直取剩餘空間 1/3(中央偏上)。工作區以 `screen_work_size()` 實測並換算
+邏輯像素——1920×1080 在 125% 縮放下可視高度只有約 816,寫死 820 會開到畫面外。
 
 **唯一性與脈絡**:協調器以 `RLock` 保護狀態,已開啟時再按只 `restore()` 既有視窗,
 不會開第二個(編輯與新增也因此不會同時開)。子視窗自己不帶查詢參數,改由
@@ -100,6 +107,47 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 服務層在同一連線內完成,任一步失敗整筆 rollback、自取碼計數器一併回復,
 錯誤訊息回子視窗且視窗保留讓店員修正。新出現的 select/multi/tags 值會自動
 補進 `AttributeOption`(比照建檔流程,不重新啟用已停用選項)。
+
+### 適用型號的使用與否(種類設定)
+
+`Category.model_mode` 只有 `required`／`hidden` 兩種:`required`＝該種類的款式**必填**適用型號,
+`hidden`＝該種類不使用型號。設定入口只有一個——設定頁「子產品規格模板」清單最上面的
+**固定列「手機型號」**,點列或列上按鈕切換(`static/js/settings.js` 的 `MODEL_ROW_ID`)。
+型號實際存於 `VariantModel` 關聯表,不是規格欄,故以固定列呈現而非真的建 `AttributeField`
+(真的建成規格欄要重做既有型號關聯與型號排序)。
+
+三處畫面一律照這個設定走:新增款式子視窗、款式修改子視窗、商品資料庫的型號欄。
+設為 `hidden` 時型號欄顯示「—」,**既有 VariantModel 關聯保留不刪**,重新開啟就會再顯示;
+款式修改視窗也不清空既有型號(送出時照原值送回),避免「關掉顯示」變成「刪掉資料」。
+
+### 規格候選的前排範圍(廠牌→大產品→種類)
+
+建檔／修改的規格候選 chip 前排不看種類總次數,改採三層退路(`variants.field_usage` 帶
+`brand_id`／`product_id`):**該廠牌用過 → 該大產品用過 → 都沒有才退回種類次數前 8**。
+服務層在每個選項上標 `lead`／`lead_count`,前端把 `lead` 的值全放前排、其餘收進「更多…」。
+理由:規格值常是某廠牌專屬(如 SolidX 只有一家有),用種類次數排會把別家的款式推到最前;
+廠牌欄為空的商品(無品牌皮套之類)退回大產品仍能收斂。全新大產品的第一筆無歷史可用,
+只能退回種類次數。
+
+`product_rules.PINNED_OPTION_VALUES`(亮面／霧面／藍光／防窺)為固定次序,一律排最前且
+不受次數影響——玻璃貼的鍍膜有店內慣用順序,浮動排序會讓店員每次都要找。
+
+### 規格欄的移除(設定頁模板列紅色 ✕)
+
+規格欄是全域共用的(同一個「顏色」掛在多個種類),故 ✕ 的語意是
+**從此種類移除掛勾＋清掉此種類商品填過的值**(`categories.delete_field`);
+其他種類不受影響。等到沒有任何種類再用、也沒有任何商品的值,才把欄位本身與其選項
+一起清掉(沿用零使用自動清理的慣例)。特性詞條與手機型號為固定列,不給 ✕。
+確認視窗必須顯示影響筆數(`fields.list` 回傳的 `cat_usage_count`),
+只寫「無法復原」店員無從判斷。
+
+### 新種類的預設模板
+
+新增種類時自動掛上既有全域欄位「顏色」「款式」(選填),空白模板讓店員無從下手。
+掛的動作在設定頁建立流程(`settings.js` 的 `attachDefaultFields`),不放在
+`categories.create`——服務層自動掛欄位會改寫所有測試 fixture 對「空白種類」的假設。
+全新資料庫另給起始選項(顏色:黑色／白色／透明;款式:款式A～C,預期被改掉),
+`db_seed.seed(fresh=True)` 只在建立全新資料庫時補,既有資料庫升級一律不碰選單庫。
 
 ### 標籤列印(NIIMBOT B1)
 
@@ -154,7 +202,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 python -m unittest discover -s tests
 ```
 
-目前入庫 549 個測試,涵蓋 schema/migration、Desktop action 契約、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
+目前入庫 584 個測試,涵蓋 schema/migration、Desktop action 契約、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
 ⚠️ `tests/test_import_excel.py` 與 `tools/import_excel.py` 一樣**不入庫**(直接 import 該工具,
 缺檔會 error 而非 skip);兩者仍在使用中的機器上會多跑 13 項,匯入驗收結束後一起刪除。
 
@@ -169,11 +217,13 @@ python -m unittest discover -s tests
 ```powershell
 Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
 Remove-Item -Force POS.spec -ErrorAction SilentlyContinue
-pyinstaller --clean --onefile --version-file version_info.txt --icon "assets/POS.ico" --name POS --add-data "static;static" main.py
+pyinstaller --clean --onefile --noconsole --version-file version_info.txt --icon "assets/POS.ico" --name POS --add-data "static;static" main.py
 ```
 
 本節是完整打包命令的唯一真實來源。上列命令先清除舊 `build/`、`dist/`、`POS.spec`，
 再以 `--clean --onefile` 打包 static 與版本資訊，並以 `assets/POS.ico` 作為執行檔圖示；Desktop-only runtime 不需要 uvicorn hidden-import。
+`--noconsole` 讓 exe 啟動時不另開命令列視窗（GUI 程式不需要主控台）；因此程式不得依賴
+stdout／stderr 顯示訊息，錯誤一律寫入 exe 同層的 `error.log`（`main.py` 已如此處理）。
 產出 `dist/POS.exe`。執行前須將既有 `pos.db` 放在 exe 同層；備份寫入同層的 `backups/`。
 
 標籤列印新增的三個相依（`pyserial`、`pillow`、`python-barcode`）不需額外 hidden-import，

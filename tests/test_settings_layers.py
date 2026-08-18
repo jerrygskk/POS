@@ -158,7 +158,43 @@ class SettingsLayersTests(unittest.TestCase):
         source = (Path(__file__).parents[1] / "static/js/settings.js").read_text(encoding="utf-8")
         self.assertIn("const seq = ++this._loadSeq", source)
         self.assertIn("if (seq !== this._loadSeq) return", source)
-        self.assertIn("await API.updateField(fid, patch)", source)
+        # 規格欄的儲存已搬到規格設定子視窗(field_editor.js)
+        editor = (Path(__file__).parents[1] / "static/js/field_editor.js").read_text(encoding="utf-8")
+        self.assertIn("await API.updateField(fieldId, patch)", editor)
+        self.assertIn("await API.setCategoryField(this.categoryId, fieldId, setFields)", editor)
+
+    def test_settings_template_list_has_model_row_and_row_actions(self):
+        source = (Path(__file__).parents[1] / "static/js/settings.js").read_text(encoding="utf-8")
+        html = (Path(__file__).parents[1] / "static/index.html").read_text(encoding="utf-8")
+        # 手機型號為模板固定列,點列或列上按鈕切換 model_mode
+        self.assertIn('const MODEL_ROW_ID = "__model__"', source)
+        self.assertIn('name: "手機型號", field_type: "model"', source)
+        self.assertIn('cat.model_mode === "required" ? "hidden" : "required"', source)
+        self.assertIn('isModelRow(f)', html)
+        # 新種類預設帶顏色與款式(選填)
+        self.assertIn('const DEFAULT_CATEGORY_FIELDS = ["顏色", "款式"]', source)
+        self.assertIn("await this.attachDefaultFields(r.category_id)", source)
+        self.assertIn("{ sort: sort++, required: 0, active: 1 }", source)
+        # 模板列操作鈕:✎ 修改與紅色 ✕(刪除前顯示影響筆數)
+        self.assertIn('@click.stop="openFieldPopup(f)"', html)
+        self.assertIn('class="btn-sm danger" @click.stop="deleteTemplateField(f)"', html)
+        self.assertIn("此種類有 ${used} 筆商品填過此規格", source)
+        self.assertIn("await API.deleteCategoryField(this.selCatId, f.field_id)", source)
+        # 規格編輯改開子視窗:原本的網頁遮罩對話框已移除
+        self.assertIn('page: "field_editor"', source)
+        self.assertNotIn("fieldPopup", source)
+        self.assertNotIn("fieldPopup", html)
+        self.assertIn("window.PosDesktopLock.lock()", source)
+
+    def test_field_editor_child_window_is_registered_and_self_contained(self):
+        from lib.child_window import CHILD_PAGES
+        self.assertEqual(CHILD_PAGES["field_editor"]["file"], "field_editor.html")
+        page = (Path(__file__).parents[1] / "static/field_editor.html").read_text(encoding="utf-8")
+        self.assertIn('<form class="dialog-shell" @submit.prevent="save">', page)
+        self.assertIn("dialog-theme.css", page)
+        editor = (Path(__file__).parents[1] / "static/js/field_editor.js").read_text(encoding="utf-8")
+        self.assertIn('API.invoke("desktop.child_window.context", {})', editor)
+        self.assertIn('API.invoke("desktop.child_window.close", { saved: true })', editor)
 
     def test_category_reference_guard_is_in_service(self):
         cid = self.facade.invoke("categories.create", {"name": "殼"})["category_id"]

@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=70">
+<link rel="stylesheet" href="css/pos.css?v=80">
 </head>
 <body>
 <div id="app">
   <nav>
-    <img class="nav-logo" src="img/logo.png?v=70" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=80" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="page=key">{{ label }}</button>
   </nav>
@@ -221,8 +221,10 @@
         </tr>
         <tr v-for="{ v, showModel, rowspan } in groupedVariants(p)" :key="v.variant_id"
             class="catalog-variant-row" :class="{inactive: !v.active}">
-          <td v-if="showModel" :rowspan="rowspan">
-            {{ v.models.length ? v.models.join('、') : '—' }}
+          <td v-if="showModel" :rowspan="rowspan" class="catalog-model-cell">
+            <template v-if="modelLines(p, v).length"><div v-for="(m, mi) in modelLines(p, v)" :key="mi"
+                 class="catalog-model-line">{{ m }}{{ mi === modelLines(p, v).length - 1 ? '' : '、' }}</div></template>
+            <template v-else>—</template>
           </td>
           <td>
             {{ attrText(v, '（無規格）') }}
@@ -305,11 +307,6 @@
       <div class="detail-head">
         <input class="name cat-title" v-model="selectedCat.name"
                @keyup.enter="saveCategoryName(selectedCat)">
-        <select :value="selectedCat.model_mode"
-                @change="setModelMode(selectedCat, $event.target.value)">
-          <option value="hidden">不使用適用型號</option>
-          <option value="required">使用適用型號</option>
-        </select>
         <button class="btn-sm" @click="saveCategoryName(selectedCat)">儲存名稱</button>
         <button class="btn-sm" @click="toggleCategoryActive(selectedCat)">
           {{ selectedCat.active ? '停用' : '啟用' }}</button>
@@ -317,21 +314,27 @@
       </div>
 
       <div class="grp-title">子產品規格模板</div>
-      <small class="hint">點整列可編輯必填、預設值與選項;特性詞條為固定欄。</small>
+      <small class="hint">以右側按鈕編輯必填、預設值與選項;手機型號與特性詞條為固定欄。</small>
       <div class="tpl-list">
         <div v-for="f in templateRows" :key="f.field_id" class="tpl-row"
-             :class="{inactive: !f.cf_active, feature: isFeature(f)}"
-             @click="openFieldPopup(f)">
+             :class="{inactive: !f.cf_active, feature: isFeature(f), fixed: isModelRow(f)}">
           <span class="tpl-name">{{ f.name }}</span>
-          <span class="tag">{{ fieldTypeLabel(f.field_type) }}</span>
-          <span class="tpl-req">{{ f.required && !isFeature(f) ? '必填' : '選填' }}</span>
+          <span class="tag" v-if="!isModelRow(f)">{{ fieldTypeLabel(f.field_type) }}</span>
+          <span class="tpl-req">{{ templateRowState(f) }}</span>
           <span class="tpl-def hint" v-if="defaultValueName(f)">預設 {{ defaultValueName(f) }}</span>
           <span class="tag" v-if="isFeature(f)">固定欄</span>
-          <span class="tag" v-else-if="!f.cf_active">已停用</span>
+          <span class="tag" v-else-if="!isModelRow(f) && !f.cf_active">已停用</span>
+          <span class="tpl-actions">
+            <button v-if="isModelRow(f)" class="btn-sm"
+                    @click.stop="toggleModelMode()">{{ f.cf_active ? '停用手機型號' : '啟用手機型號' }}</button>
+            <template v-else-if="!isFeature(f)">
+              <button class="btn-sm" @click.stop="openFieldPopup(f)">✎ 修改</button>
+              <button class="btn-sm danger" @click.stop="deleteTemplateField(f)">✕</button>
+            </template>
+          </span>
         </div>
       </div>
       <button class="btn-sm" @click="openFieldPopup(null)">新增規格</button>
-      <div class="detail-line">適用型號:{{ modeLabel(selectedCat.model_mode) }}</div>
 
       <div class="grp-title" style="margin-top:14px">此種類的大產品</div>
       <table class="big-prod">
@@ -435,61 +438,6 @@
     </section>
   </div>
 
-  <!-- 規格模板 popup(單層) -->
-  <div v-if="fieldPopup" class="modal-overlay" @click.self="fieldPopup=null">
-    <div class="modal">
-      <h3>{{ fieldPopup.mode==='new' ? '新增規格' : '修改規格' }}</h3>
-      <label>名稱 <input v-model="fieldPopup.name"></label>
-      <label>欄位型態
-        <select v-model="fieldPopup.field_type">
-          <option value="select">下拉選單</option>
-          <option value="text">文字</option>
-          <option value="multi">複選</option>
-        </select>
-      </label>
-      <label>排序 <input type="number" v-model.number="fieldPopup.sort" min="0" class="w80"></label>
-      <label>必填 <input type="checkbox" v-model="fieldPopup.required" :disabled="catHasVariant"></label>
-      <small v-if="catHasVariant" class="hint">此種類已有子產品,必填設定暫時鎖定。</small>
-      <label>規格狀態
-        <select v-model="fieldPopup.active">
-          <option :value="true">啟用</option>
-          <option :value="false">停用</option>
-        </select>
-      </label>
-      <label v-if="fieldPopup.field_type==='select'">預設值
-        <select v-model="fieldPopup.default_option_id">
-          <option :value="null">(無)</option>
-          <option v-for="o in activeOptions(fieldPopup.field_id)" :key="o.option_id"
-                  :value="o.option_id">{{ o.value }}</option>
-        </select>
-      </label>
-      <div v-if="fieldPopup.field_id!=null && ['select','multi','tags'].includes(fieldPopup.field_type)"
-           class="opt-block">
-        <div class="grp-title">選項</div>
-        <div class="inline-add option-add">
-          <input v-model="fieldPopup.newOption" placeholder="新增選項" @keyup.enter="addPopupOption">
-          <button class="btn-sm" @click="addPopupOption">加入</button>
-          <button class="btn-sm" @click="cleanupFieldOptions" title="硬刪使用數為 0 且非預設值的選項">清理未使用選項</button>
-        </div>
-        <div class="option-list-box">
-          <div v-for="o in (tplOptions[fieldPopup.field_id] || [])" :key="o.option_id"
-               class="option-row" :class="{inactive: !o.active}">
-            <span class="option-value">{{ o.value }}</span>
-            <span class="hint">{{ o.usage_count }} 使用中</span>
-            <button class="btn-sm danger" @click="deletePopupOption(o)">刪除</button>
-          </div>
-          <span v-if="!(tplOptions[fieldPopup.field_id] || []).length" class="hint">尚無選項</span>
-        </div>
-      </div>
-      <small v-if="fieldPopup.field_id==null && ['select','multi','tags'].includes(fieldPopup.field_type)"
-             class="hint">建立後即可加入選項。</small>
-      <div class="modal-actions">
-        <button class="primary" @click="savePopupField">儲存</button>
-        <button @click="fieldPopup=null">取消</button>
-      </div>
-    </div>
-  </div>
-
   <!-- 大產品 popup(單層) -->
   <div v-if="prodPopup" class="modal-overlay" @click.self="prodPopup=null">
     <div class="modal">
@@ -527,20 +475,20 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=70"></script>
-<script src="js/api.js?v=70"></script>
-<script src="js/pos_shared.js?v=70"></script>
-<script src="js/catalogfields.js?v=70"></script>
-<script src="js/checkout.js?v=70"></script>
-<script src="js/receive.js?v=70"></script>
-<script src="js/stocktake.js?v=70"></script>
-<script src="js/records.js?v=70"></script>
-<script src="js/catalog.js?v=70"></script>
-<script src="js/sortable.js?v=70"></script>
-<script src="js/modelpicker.js?v=70"></script>
-<script src="js/attrfields.js?v=70"></script>
-<script src="js/settings.js?v=70"></script>
-<script src="js/labels.js?v=70"></script>
-<script src="js/app.js?v=70"></script>
+<script src="js/vue.global.prod.js?v=80"></script>
+<script src="js/api.js?v=80"></script>
+<script src="js/pos_shared.js?v=80"></script>
+<script src="js/catalogfields.js?v=80"></script>
+<script src="js/checkout.js?v=80"></script>
+<script src="js/receive.js?v=80"></script>
+<script src="js/stocktake.js?v=80"></script>
+<script src="js/records.js?v=80"></script>
+<script src="js/catalog.js?v=80"></script>
+<script src="js/sortable.js?v=80"></script>
+<script src="js/modelpicker.js?v=80"></script>
+<script src="js/attrfields.js?v=80"></script>
+<script src="js/settings.js?v=80"></script>
+<script src="js/labels.js?v=80"></script>
+<script src="js/app.js?v=80"></script>
 </body>
 </html>

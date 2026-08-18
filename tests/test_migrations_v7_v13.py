@@ -532,7 +532,7 @@ class TestMigrationFinalForeignKeyProtection(unittest.TestCase):
     def test_migration_rolls_back_when_seed_leaves_foreign_key_violation(self):
         db = _new_v6_db()
 
-        def invalid_seed(conn):
+        def invalid_seed(conn, fresh=False):
             conn.execute("INSERT INTO Barcode(barcode, variant_id, source) VALUES(?,?,?)",
                          ("BROKEN", 999999, "factory"))
 

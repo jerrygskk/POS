@@ -7,8 +7,14 @@ const _MAINT = {
   models: { id: "model_id", label: "型號", list: "listModels", create: "createModel", update: "updateModel", delete: "deleteModel", sort: "sortModels" },
 };
 
-const _TYPE_LABEL = { select: "下拉選單", text: "文字", multi: "複選", tags: "特性詞條" };
-const _MODE_LABEL = { required: "使用適用型號", hidden: "不使用適用型號" };
+const _TYPE_LABEL = { select: "下拉選單", text: "文字", multi: "複選", tags: "特性詞條",
+                      model: "手機型號" };
+// 規格模板固定列:每個種類都有一列「手機型號」,點列切換該種類是否使用適用型號
+// (讀寫 Category.model_mode)。型號實際存於 VariantModel 關聯表,不是規格欄,
+// 故以固定列呈現而非真的建 AttributeField。
+const MODEL_ROW_ID = "__model__";
+// 新種類預設帶入的規格欄(既有全域欄位,不新建);與 lib/db_seed.NEW_CATEGORY_FIELDS 對齊
+const DEFAULT_CATEGORY_FIELDS = ["顏色", "款式"];
 
 window.PosPages["page-settings"] = {
   template: "#tpl-settings",
@@ -24,7 +30,6 @@ window.PosPages["page-settings"] = {
       selCatId: null, newCatName: "",
       tplFields: [], tplOptions: {}, catHasVariant: false, bigProducts: [],
       // 規格模板 popup(單層)
-      fieldPopup: null,
       // 大產品 popup(單層)
       prodPopup: null, brandMenuOpen: false,
       // 廠牌經營種類
@@ -41,8 +46,14 @@ window.PosPages["page-settings"] = {
       return this.categories.find(c => c.category_id === this.selCatId) || null;
     },
     templateRows() {
-      return this.tplFields.slice().sort((a, b) =>
+      const rows = this.tplFields.slice().sort((a, b) =>
         (a.sort - b.sort) || (a.field_id - b.field_id));
+      if (!this.selectedCat) return rows;
+      // 固定列排最前:手機型號(使用與否由 model_mode 決定)
+      const on = this.selectedCat.model_mode === "required";
+      rows.unshift({ field_id: MODEL_ROW_ID, name: "手機型號", field_type: "model",
+                     required: on, cf_active: on, default_option_id: null, sort: -1 });
+      return rows;
     },
     filteredBrands() {
       const q = ((this.prodPopup && this.prodPopup.brandQuery) || "").trim().toLowerCase();
@@ -57,7 +68,13 @@ window.PosPages["page-settings"] = {
   },
   async mounted() {
     this._loadSeq = 0;
+    // 規格設定子視窗存檔後關窗:重讀該種類模板(沒存檔就關掉不白跑一次查詢)
+    this._childWindowClosed = (event) => this.onChildWindowClosed(event);
+    window.addEventListener("pos-child-window-closed", this._childWindowClosed);
     await this.reloadAll();
+  },
+  unmounted() {
+    window.removeEventListener("pos-child-window-closed", this._childWindowClosed);
   },
   methods: {
     async reloadAll() {
@@ -76,13 +93,13 @@ window.PosPages["page-settings"] = {
     // ==== 商品設定:種類 ====
     selectSection(name) {
       this.section = name;
-      this.fieldPopup = null; this.prodPopup = null;
+      this.prodPopup = null;
       this.brandMenuOpen = false;
     },
     async selectCategory(c) {
       const same = this.selCatId === c.category_id;
       this.section = "category";
-      this.fieldPopup = null; this.prodPopup = null;
+      this.prodPopup = null;
       this.brandMenuOpen = false;
       if (same) return;
       this.selCatId = c.category_id;
@@ -108,10 +125,23 @@ window.PosPages["page-settings"] = {
       if (!name) { this.showError("請輸入商品種類名稱"); return; }
       await this.guard(async () => {
         const r = await API.createCategory({ name, model_mode: "hidden" });
+        await this.attachDefaultFields(r.category_id);
         this.newCatName = "";
         this.selCatId = r.category_id;
         await this.reloadAll();
       });
+    },
+    // 新種類預設帶「顏色」「款式」兩個規格欄(選填):空白模板讓店員無從下手。
+    // 掛的是既有全域欄位,不新建欄位;不需要的用模板列紅色 ✕ 移除。
+    async attachDefaultFields(categoryId) {
+      const all = await API.listFields({});
+      let sort = 1;
+      for (const name of DEFAULT_CATEGORY_FIELDS) {
+        const field = all.find(f => f.name === name);
+        if (!field) continue;
+        await API.setCategoryField(categoryId, field.field_id,
+                                   { sort: sort++, required: 0, active: 1 });
+      }
     },
     async saveCategoryName(c) {
       const name = (c.name || "").trim();
@@ -138,90 +168,65 @@ window.PosPages["page-settings"] = {
         await this.reloadAll();
       });
     },
-    modeLabel(m) { return _MODE_LABEL[m] || m; },
 
     // ==== 商品設定:規格模板 ====
     fieldTypeLabel(t) { return _TYPE_LABEL[t] || t; },
     isFeature(f) { return f.field_type === "tags"; },
+    isModelRow(f) { return f.field_id === MODEL_ROW_ID; },
+    // 型號固定列顯示使用狀態,其餘欄位維持必填／選填
+    templateRowState(f) {
+      if (this.isModelRow(f)) return f.cf_active ? "使用" : "不使用";
+      return f.required && !this.isFeature(f) ? "必填" : "選填";
+    },
+    // 點列:型號列切換使用與否,其餘照原本開規格編輯
+    toggleModelMode() {
+      const cat = this.selectedCat;
+      if (!cat) return;
+      this.setModelMode(cat, cat.model_mode === "required" ? "hidden" : "required");
+    },
+    // 紅色 ✕:把規格欄從此種類移除,並清掉此種類商品填過的值(欄位本身若沒人再用才一起刪)
+    async deleteTemplateField(f) {
+      const used = f.cat_usage_count || 0;
+      const impact = used
+        ? `此種類有 ${used} 筆商品填過此規格,一併刪除後無法復原。`
+        : "此種類尚無商品使用此規格。";
+      if (!confirm(`刪除規格「${f.name}」?\n${impact}`)) return;
+      await this.guard(async () => {
+        await API.deleteCategoryField(this.selCatId, f.field_id);
+        await this.loadCategoryDetail();
+      });
+    },
     defaultValueName(f) {
       if (f.default_option_id == null) return "";
       const o = (this.tplOptions[f.field_id] || []).find(x => x.option_id === f.default_option_id);
       return o ? o.value : "";
     },
-    activeOptions(fieldId) {
-      return (this.tplOptions[fieldId] || []).filter(o => o.active);
-    },
-    openFieldPopup(f) {
+    // 規格設定改開 pywebview 子視窗(可拖、可縮):f 為 null＝新增。
+    // 開窗前鎖主視窗,開窗失敗自己解鎖(成功時由關窗事件解鎖)。
+    async openFieldPopup(f) {
       if (f && this.isFeature(f)) return;   // 特性詞條為固定欄,不進編輯
-      if (f) {
-        this.fieldPopup = {
-          mode: "edit", field_id: f.field_id, name: f.name, field_type: f.field_type,
-          sort: f.sort, required: !!f.required, active: !!f.cf_active,
-          default_option_id: f.default_option_id, newOption: "",
-        };
-      } else {
-        this.fieldPopup = {
-          mode: "new", field_id: null, name: "", field_type: "select",
-          sort: (this.tplFields.length ? Math.max(...this.tplFields.map(x => x.sort)) + 1 : 1),
-          required: false, active: true, default_option_id: null, newOption: "",
-        };
+      if (f && this.isModelRow(f)) return;  // 手機型號為固定列,點列切換即可
+      if (this.selCatId == null) return;
+      window.PosDesktopLock.lock();
+      try {
+        await API.invoke("desktop.child_window.open", {
+          page: "field_editor",
+          title: f ? "修改規格" : "新增規格",
+          context: {
+            category_id: this.selCatId,
+            field_id: f ? f.field_id : null,
+            cat_has_variant: !!this.catHasVariant,
+          },
+        });
+      } catch (error) {
+        window.PosDesktopLock.unlock();
+        this.showError(error.message);
       }
     },
-    async savePopupField() {
-      const p = this.fieldPopup;
-      const name = (p.name || "").trim();
-      if (!name) { this.showError("請輸入規格欄名稱"); return; }
-      await this.guard(async () => {
-        let fid = p.field_id;
-        if (p.mode === "new") {
-          const r = await API.createField({ name, category_id: this.selCatId, field_type: p.field_type });
-          fid = r.field_id;
-        } else {
-          const cur = this.tplFields.find(f => f.field_id === fid);
-          const patch = {};
-          if (name !== cur.name) patch.name = name;
-          if (p.field_type !== cur.field_type) patch.field_type = p.field_type;
-          if (Object.keys(patch).length) await API.updateField(fid, patch);
-        }
-        const setFields = { sort: parseInt(p.sort, 10) || 0, active: p.active ? 1 : 0 };
-        if (!this.catHasVariant) setFields.required = p.required ? 1 : 0;
-        setFields.default_option_id = p.field_type === "select" ? (p.default_option_id ?? null) : null;
-        await API.setCategoryField(this.selCatId, fid, setFields);
-        this.fieldPopup = null;
-        await this.loadCategoryDetail();
-      });
-    },
-    async addPopupOption() {
-      const p = this.fieldPopup;
-      const v = (p.newOption || "").trim();
-      if (!v || p.field_id == null) return;
-      await this.guard(async () => {
-        await API.createOption({ field_id: p.field_id, value: v, reactivate: true });
-        p.newOption = "";
-        this.tplOptions[p.field_id] = await API.listOptions({ field_id: p.field_id, all: 1 });
-      });
-    },
-    async cleanupFieldOptions() {
-      const p = this.fieldPopup;
-      if (p.field_id == null) return;
-      if (!confirm("將永久刪除此規格欄中未使用且非預設值的選項,無法復原。確定繼續?")) return;
-      await this.guard(async () => {
-        const r = await API.cleanupOptions(p.field_id);
-        this.tplOptions[p.field_id] = await API.listOptions({ field_id: p.field_id, all: 1 });
-        alert(`已清理 ${r.deleted} 個未使用選項。`);
-      });
-    },
-    async deletePopupOption(o) {
-      const p = this.fieldPopup;
-      const message = o.usage_count > 0
-        ? `此選項有 ${o.usage_count} 筆商品規格使用中,刪除後將從新增選單隱藏,既有商品不受影響。確定繼續?`
-        : "此選項目前未使用,刪除後將永久移除且無法復原。確定繼續?";
-      if (!confirm(message)) return;
-      await this.guard(async () => {
-        await API.deleteOption(o.option_id);
-        if (p.default_option_id === o.option_id) p.default_option_id = null;
-        this.tplOptions[p.field_id] = await API.listOptions({ field_id: p.field_id, all: 1 });
-      });
+    async onChildWindowClosed(event) {
+      const saved = !!(event && event.detail && event.detail.saved);
+      if (!saved || this.selCatId == null) return;
+      await this.guard(() => this.loadCategoryDetail());
     },
 
     // ==== 商品設定:大產品 ====

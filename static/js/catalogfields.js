@@ -21,11 +21,20 @@ window.CatalogFields = {
   },
   // 逐欄撈「該種類使用次數排序」候選存入 into(field_id → usage 清單)。
   // 子產品建檔/修改的 select/multi 候選改採此模式(與詞條選取器一致)。
-  async loadFieldUsage(categoryId, fields, into, types) {
+  // scope 可帶 { brand_id, product_id } 決定前排範圍(廠牌→大產品→無),
+  // 由服務層算出每列的 lead／lead_count;不帶則沿用種類次數。
+  async loadFieldUsage(categoryId, fields, into, types, scope) {
     types = types || ["select", "multi"];
     for (const f of (fields || []))
       if (types.includes(f.field_type))
-        into[f.field_id] = await API.fieldUsage(categoryId, f.field_id);
+        into[f.field_id] = await API.fieldUsage(categoryId, f.field_id, scope);
+  },
+  // 由大產品推出前排範圍:兩個都送,服務層依「廠牌→大產品→無」退路決定。
+  // 沒廠牌(如無品牌皮套)或該廠牌尚無紀錄時,前排就用這個大產品自己用過的值。
+  usageScope(product) {
+    if (!product) return null;
+    return { brand_id: product.brand_id != null ? product.brand_id : null,
+             product_id: product.product_id };
   },
   // 手打自增:select/multi 欄輸入不存在的值,存檔前自動入庫(冪等,失敗忽略)。
   // multi 值為陣列、select 為字串;逐值嘗試建立。

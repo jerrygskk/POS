@@ -27,7 +27,9 @@ class VariantEditorTemplateTests(unittest.TestCase):
     def test_template_reuses_complete_shared_editing_components(self):
         html = self._source(HTML)
         self.assertIn('<form class="dialog-shell" @submit.prevent="save">', html)
-        self.assertEqual(html.count('<section class="dialog-section">'), 4)
+        self.assertEqual(html.count('<section class="dialog-section"'), 4)
+        # 適用型號依種類設定顯示(model_mode=required 才出現)
+        self.assertIn('<section class="dialog-section" v-if="usesModel">', html)
         self.assertNotIn("<fieldset", html)
         for title in ("規格", "適用手機型號", "售價", "條碼"):
             self.assertIn(f'<h2>{title}</h2>', html)
@@ -207,6 +209,7 @@ API.invoke = async action => ({
   },
 });
 API.categoryFields = async () => [{field_id:11,name:"顏色",field_type:"select"}];
+API.listCategories = async () => [{category_id:5, model_mode:"required"}];
 API.listModels = async () => [
   {model_id:21,name:"iPhone 17 Pro",alias:"17 Pro",brand_name:"iPhone"},
   {model_id:22,name:"iPhone 17",alias:"17",brand_name:"iPhone"},
@@ -214,6 +217,7 @@ API.listModels = async () => [
 window.CatalogFields = {
   loadFieldsWithOptions: async (fields, into) => { into[11]=[{value:"紅"}]; },
   loadFieldUsage: async (cid, fields, into) => { into[11]=[{value:"紅",active:true}]; },
+  usageScope: product => ({brand_id:product.brand_id ?? null, product_id:product.product_id}),
 };
 window.initFormAttrs = (fields, attrs) => ({...attrs});
 const s = mkState();
@@ -226,6 +230,7 @@ const s = mkState();
   out.price = s.price;
   out.barcodes = s.barcodes;
   out.ready = s.ready;
+  out.usesModel = s.usesModel;
   done();
 })();
 ''')
@@ -237,9 +242,10 @@ const s = mkState();
         self.assertEqual(out["barcodes"], [
             {"barcode": "B1", "source": "factory", "existing": True}])
         self.assertTrue(out["ready"])
+        self.assertTrue(out["usesModel"])
 
     def test_each_load_dependency_failure_keeps_editor_unready_and_save_is_a_noop(self):
-        for failure in ("context", "fields", "models", "options", "usage"):
+        for failure in ("context", "fields", "models", "categories", "options", "usage"):
             with self.subTest(failure=failure):
                 out = self._run(r'''
 const failure = "FAILURE";
@@ -260,6 +266,10 @@ API.listModels = async () => {
   if (failure === "models") throw new Error("models failed");
   return [];
 };
+API.listCategories = async () => {
+  if (failure === "categories") throw new Error("categories failed");
+  return [{category_id:5, model_mode:"required"}];
+};
 API.updateVariantEditor = async payload => calls.push(["write", payload]);
 window.CatalogFields = {
   loadFieldsWithOptions: async () => {
@@ -268,6 +278,7 @@ window.CatalogFields = {
   loadFieldUsage: async () => {
     if (failure === "usage") throw new Error("usage failed");
   },
+  usageScope: () => ({brand_id:null, product_id:3}),
 };
 window.initFormAttrs = (fields, attrs) => ({...attrs});
 window.buildAttrPayload = () => ({});

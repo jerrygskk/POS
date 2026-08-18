@@ -1,11 +1,13 @@
 window.PosPages = window.PosPages || {};
 window.PosComponents = window.PosComponents || {};
 
-// 選項候選選取器(A＋C):該種類使用次數前 8 常用 chip ＋ 搜尋全部 ＋ 新增 ＋ 停用重啟提示。
+// 選項候選選取器(A＋C):前排常用 chip ＋ 更多… ＋ 搜尋全部 ＋ 新增 ＋ 停用重啟提示。
 // 通用於特性詞條(tags)、multi(多選)與 select(單選)。
+// 前排取服務層標記的 lead(該廠牌／該大產品曾出現過的值,含固定次序值);
+// 完全沒有 lead 時才退回種類使用次數前 8。
 // props:
 //   modelValue  multiple=陣列(multi)或逗號字串(tags);single=字串(select)
-//   usage       API.fieldUsage 回傳(依使用次數排序,含停用,帶 model_ids)
+//   usage       API.fieldUsage 回傳(帶 lead／lead_count／usage_count、含停用與 model_ids)
 //   multiple    true=可多選(tags/multi);false=單選(select,再選即取代)
 //   asList      multiple 時 modelValue 型別:true=陣列(multi)、false=逗號字串(tags)
 //   modelIds    目前適用型號(依 OptionModel 過濾特別色候選)
@@ -38,8 +40,21 @@ window.PosComponents["opt-picker"] = {
     available() {
       return this.pool.filter(o => o.active && !this.selectedKeys.has(o.value.toLowerCase()));
     },
-    topChips() { return this.available.slice(0, 8); },
-    moreChips() { return this.available.slice(8); },
+    // 前排:服務層標記 lead 的值(該廠牌／該大產品曾出現過,含固定次序值)全部顯示,
+    // 其餘收進「更多…」。完全沒有 lead(全新大產品第一筆)才退回種類次數前 8。
+    leadChips() { return this.available.filter(o => o.lead); },
+    topChips() {
+      return this.leadChips.length ? this.leadChips : this.available.slice(0, 8);
+    },
+    moreChips() {
+      if (!this.leadChips.length) return this.available.slice(8);
+      return this.available.filter(o => !o.lead);
+    },
+    // chip 上的數字:有前排範圍時顯示該範圍次數,否則顯示種類次數
+    countOf() {
+      const useLead = this.leadChips.length > 0;
+      return (o) => (useLead ? o.lead_count : o.usage_count) || "";
+    },
     matches() {
       const q = this.query.trim().toLowerCase();
       if (!q) return [];
@@ -90,12 +105,12 @@ window.PosComponents["opt-picker"] = {
     </div>
     <div class="chip-wrap" v-if="topChips.length || moreChips.length">
       <button type="button" v-for="o in topChips" :key="o.option_id" class="chip"
-              @click="add(o.value)">{{ o.value }}<span class="tag-count">{{ o.usage_count }}</span></button>
+              @click="add(o.value)">{{ o.value }}<span class="tag-count">{{ countOf(o) }}</span></button>
       <button type="button" v-if="moreChips.length && !showMore" class="chip tag-more"
               @click="showMore=true">更多…</button>
       <template v-if="showMore">
         <button type="button" v-for="o in moreChips" :key="o.option_id" class="chip"
-                @click="add(o.value)">{{ o.value }}<span class="tag-count">{{ o.usage_count }}</span></button>
+                @click="add(o.value)">{{ o.value }}<span class="tag-count">{{ countOf(o) }}</span></button>
       </template>
     </div>
     <div class="tag-search">
@@ -182,9 +197,12 @@ window.PosPages["page-variant-batch"] = {
         this.fields = await API.categoryFields(this.catId);
         await window.CatalogFields.loadFieldsWithOptions(this.formalFields, this.fieldOptions);
         this.fieldUsage = {};
-        await window.CatalogFields.loadFieldUsage(this.catId, this.formalFields, this.fieldUsage);
+        const scope = window.CatalogFields.usageScope(this.product);
+        await window.CatalogFields.loadFieldUsage(
+          this.catId, this.formalFields, this.fieldUsage, null, scope);
         if (this.featureField)
-          this.tagUsage = await API.fieldUsage(this.catId, this.featureField.field_id);
+          this.tagUsage = await API.fieldUsage(
+            this.catId, this.featureField.field_id, scope);
         this.input = this.blankInput();
         this.input.attrs = window.initFormAttrs(this.fields, {});
       });
@@ -301,9 +319,12 @@ window.PosPages["page-variant-batch"] = {
         this.input = this.blankInput();
         this.input.attrs = window.initFormAttrs(this.fields, {});
         this.fieldUsage = {};
-        await window.CatalogFields.loadFieldUsage(this.catId, this.formalFields, this.fieldUsage);
+        const scope = window.CatalogFields.usageScope(this.product);
+        await window.CatalogFields.loadFieldUsage(
+          this.catId, this.formalFields, this.fieldUsage, null, scope);
         if (this.featureField)
-          this.tagUsage = await API.fieldUsage(this.catId, this.featureField.field_id);
+          this.tagUsage = await API.fieldUsage(
+            this.catId, this.featureField.field_id, scope);
       } catch (err) {
         // 失敗保留全部 draft,逐筆標示錯誤
         const map = {};

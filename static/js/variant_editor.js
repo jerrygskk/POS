@@ -16,6 +16,7 @@ window.VariantEditorApp = {
       attrs: {},
       modelIds: [],
       price: null,
+      modelMode: "hidden",
       barcodes: [],
       deletedBarcodes: [],
       factoryBarcode: "",
@@ -30,6 +31,9 @@ window.VariantEditorApp = {
   unmounted() {
     document.removeEventListener("keydown", this._keydown);
   },
+  computed: {
+    usesModel() { return this.modelMode === "required"; },
+  },
   methods: {
     async load() {
       this.loading = true;
@@ -39,16 +43,21 @@ window.VariantEditorApp = {
         const context = await API.invoke("desktop.child_window.context", {});
         const product = context.context.product;
         const variant = context.context.variant;
-        const [fields, models] = await Promise.all([
+        const [fields, models, categories] = await Promise.all([
           API.categoryFields(product.category_id),
           API.listModels({}),
+          API.listCategories({}),
         ]);
+        // 適用型號是否使用由種類設定決定(與新增款式、商品資料庫一致)
+        const cat = categories.find(c => c.category_id === product.category_id);
+        const modelMode = cat ? cat.model_mode : "hidden";
         const fieldOptions = {};
         const fieldUsage = {};
         await window.CatalogFields.loadFieldsWithOptions(
           fields, fieldOptions);
         await window.CatalogFields.loadFieldUsage(
-          product.category_id, fields, fieldUsage, ["select", "multi", "tags"]);
+          product.category_id, fields, fieldUsage, ["select", "multi", "tags"],
+          window.CatalogFields.usageScope(product));
         const attrs = window.initFormAttrs(fields, variant.attributes || {});
         const modelIds = this.modelIdsByNames(variant.models || [], models);
         const barcodes = (variant.barcodes || []).map(barcode => ({
@@ -56,7 +65,7 @@ window.VariantEditorApp = {
         }));
         Object.assign(this, {
           product, variant, fields, models, fieldOptions, fieldUsage, attrs,
-          modelIds, price: variant.price, barcodes,
+          modelIds, price: variant.price, barcodes, modelMode,
         });
         this.ready = true;
       } catch (error) {

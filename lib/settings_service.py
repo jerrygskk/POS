@@ -5,6 +5,7 @@ from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, NotFoundError, ValidationError
 from lib.db import in_clause, next_sort
 from lib.normalize import normalize_key
+from lib import product_rules
 from lib.product_rules import FIELD_TYPES
 
 FEATURE_FIELD_KEY = normalize_key("特性詞條")  # 固定欄位:不可停用/刪除
@@ -31,6 +32,7 @@ _ACTION_RULES = {
     "categories.fields": ({"id": int}, {}),
     "categories.set_common_fields": ({"id": int, "field_ids": "int_list"}, {}),
     "categories.set_field": ({"category_id": int, "field_id": int, "fields": Mapping}, {}),
+    "categories.delete_field": ({"category_id": int, "field_id": int}, {}),
 }
 
 _UPDATE_FIELD_RULES = {
@@ -271,8 +273,15 @@ class SettingsService:
                 "FROM AttributeField f JOIN CategoryField cf ON cf.field_id=f.field_id "
                 "WHERE cf.category_id=? AND f.active=1 ORDER BY cf.sort,f.field_id",
                 (category_id,))
+            # 附上該種類已有多少子產品填過此規格:刪除確認視窗要把影響講明白
+            used = {r["field_id"]: r["c"] for r in self.repo.execute(
+                "SELECT va.field_id, COUNT(DISTINCT va.variant_id) c "
+                "FROM VariantAttribute va JOIN Variant v ON v.variant_id=va.variant_id "
+                "JOIN Product p ON p.product_id=v.product_id "
+                "WHERE p.category_id=? GROUP BY va.field_id", (category_id,))}
             for r in rows:
                 r["category_id"] = category_id
+                r["cat_usage_count"] = used.get(r["field_id"], 0)
             return rows
         # 全域清單:合成 category_id(僅綁一個種類→該種類,否則 None=共用)
         single = {}
@@ -344,7 +353,8 @@ class SettingsService:
             qs=in_clause(model_ids); sql += f" AND (NOT EXISTS(SELECT 1 FROM OptionModel om WHERE om.option_id=o.option_id) OR EXISTS(SELECT 1 FROM OptionModel om WHERE om.option_id=o.option_id AND om.model_id IN ({qs})))"; args += model_ids
         opts=self.repo.rows(sql+" GROUP BY o.option_id ORDER BY usage_count DESC,o.sort,o.option_id",args)
         for o in opts: o["model_ids"]=[r[0] for r in self.repo.execute("SELECT model_id FROM OptionModel WHERE option_id=? ORDER BY model_id",(o["option_id"],))]
-        return opts
+        # 玻璃貼材質等固定次序的值排最前(product_rules.PINNED_OPTION_VALUES)
+        return product_rules.sort_pinned_options(opts)
 
     def create_option(self,p):
         self.repo.require("AttributeField","field_id",p["field_id"],"查無此規格欄")
@@ -477,6 +487,46 @@ class SettingsService:
                  new["default_option_id"], new["active"]))
         return {"ok": True}
 
+    def delete_field(self, category_id, field_id):
+        """把規格欄從此種類移除,並清掉此種類商品填過的值。
+
+        規格欄是全域共用的(同一個「顏色」掛在多個種類),故只解除本種類的掛勾與
+        本種類的值,其他種類不受影響;等到沒有任何種類再用、也沒有任何商品的值,
+        才把欄位本身與其選項一起清掉(沿用零使用自動清理的慣例)。
+        特性詞條為固定欄,不允許移除。
+        """
+        self.repo.require("Category", "category_id", category_id, "查無此種類")
+        self.repo.require("AttributeField", "field_id", field_id, "查無此規格欄")
+        name = self.repo.one("SELECT name FROM AttributeField WHERE field_id=?", (field_id,))[0]
+        if normalize_key(name) == FEATURE_FIELD_KEY:
+            raise ValidationError("特性詞條為固定欄位,不可刪除")
+        if not self.repo.one("SELECT 1 FROM CategoryField WHERE category_id=? AND field_id=?",
+                             (category_id, field_id)):
+            raise NotFoundError("此種類未使用此規格欄")
+        removed = self.repo.one(
+            "SELECT COUNT(DISTINCT va.variant_id) c FROM VariantAttribute va "
+            "JOIN Variant v ON v.variant_id=va.variant_id "
+            "JOIN Product p ON p.product_id=v.product_id "
+            "WHERE p.category_id=? AND va.field_id=?", (category_id, field_id))[0]
+        self.repo.execute(
+            "DELETE FROM VariantAttribute WHERE field_id=? AND variant_id IN ("
+            "SELECT v.variant_id FROM Variant v JOIN Product p ON p.product_id=v.product_id "
+            "WHERE p.category_id=?)", (field_id, category_id))
+        self.repo.execute("DELETE FROM CategoryField WHERE category_id=? AND field_id=?",
+                          (category_id, field_id))
+        field_deleted = False
+        still_linked = self.repo.one("SELECT 1 FROM CategoryField WHERE field_id=?", (field_id,))
+        still_used = self.repo.one("SELECT 1 FROM VariantAttribute WHERE field_id=?", (field_id,))
+        if not still_linked and not still_used:
+            self.repo.execute(
+                "DELETE FROM OptionModel WHERE option_id IN "
+                "(SELECT option_id FROM AttributeOption WHERE field_id=?)", (field_id,))
+            self.repo.execute("DELETE FROM AttributeOption WHERE field_id=?", (field_id,))
+            self.repo.execute("DELETE FROM AttributeField WHERE field_id=?", (field_id,))
+            field_deleted = True
+        return {"ok": True, "removed_variant_count": removed,
+                "field_deleted": field_deleted}
+
 
 class SettingsFacade(BaseFacade):
     ACTIONS = set(_ACTION_RULES)
@@ -498,6 +548,6 @@ class SettingsFacade(BaseFacade):
             if op=="delete": return s.simple_delete(simple[kind],payload["id"])
             return s.resort(simple[kind],payload["ids"])
         handlers={
-                "brands.set_categories":lambda:s.set_brand_categories(payload["id"],payload.get("category_ids",[])),"models.list":lambda:s.list_models(bool(payload.get("all")),payload.get("phone_brand_id")),"models.create":lambda:s.create_model(payload),"models.update":lambda:s.update_model(payload["id"],payload.get("fields",{})),"models.delete":lambda:s.delete_model(payload["id"]),"models.sort":lambda:s.resort("models",payload["ids"]),"fields.list":lambda:s.list_fields(payload.get("category_id"),bool(payload.get("common"))),"fields.create":lambda:s.create_field(payload),"fields.update":lambda:s.update_field(payload["id"],payload.get("fields",{})),"options.list":lambda:s.list_options(payload["field_id"],bool(payload.get("all")),payload.get("model_ids",[])),"options.create":lambda:s.create_option(payload),"options.update":lambda:s.update_option(payload["id"],payload.get("fields",{})),"options.delete":lambda:s.delete_option(payload["id"]),"options.cleanup":lambda:s.cleanup_options(payload.get("field_id")),"options.models":lambda:s.option_models(payload["id"]),"options.set_models":lambda:s.set_option_models(payload["id"],payload.get("model_ids",[])),"categories.fields":lambda:s.category_fields(payload["id"]),"categories.set_common_fields":lambda:s.set_category_common_fields(payload["id"],payload.get("field_ids",[])),"categories.set_field":lambda:s.set_field(payload["category_id"],payload["field_id"],payload.get("fields",{})),}
+                "brands.set_categories":lambda:s.set_brand_categories(payload["id"],payload.get("category_ids",[])),"models.list":lambda:s.list_models(bool(payload.get("all")),payload.get("phone_brand_id")),"models.create":lambda:s.create_model(payload),"models.update":lambda:s.update_model(payload["id"],payload.get("fields",{})),"models.delete":lambda:s.delete_model(payload["id"]),"models.sort":lambda:s.resort("models",payload["ids"]),"fields.list":lambda:s.list_fields(payload.get("category_id"),bool(payload.get("common"))),"fields.create":lambda:s.create_field(payload),"fields.update":lambda:s.update_field(payload["id"],payload.get("fields",{})),"options.list":lambda:s.list_options(payload["field_id"],bool(payload.get("all")),payload.get("model_ids",[])),"options.create":lambda:s.create_option(payload),"options.update":lambda:s.update_option(payload["id"],payload.get("fields",{})),"options.delete":lambda:s.delete_option(payload["id"]),"options.cleanup":lambda:s.cleanup_options(payload.get("field_id")),"options.models":lambda:s.option_models(payload["id"]),"options.set_models":lambda:s.set_option_models(payload["id"],payload.get("model_ids",[])),"categories.fields":lambda:s.category_fields(payload["id"]),"categories.set_common_fields":lambda:s.set_category_common_fields(payload["id"],payload.get("field_ids",[])),"categories.set_field":lambda:s.set_field(payload["category_id"],payload["field_id"],payload.get("fields",{})),"categories.delete_field":lambda:s.delete_field(payload["category_id"],payload["field_id"]),}
         if action not in handlers: raise ValidationError("不支援的設定操作")
         return handlers[action]()

@@ -92,6 +92,7 @@ ACTION_CONTRACTS = {
     "categories.fields": schema([I("id", required=True)]),
     "categories.set_common_fields": schema([I("id", required=True), LI("field_ids", required=True)]),
     "categories.set_field": schema([I("category_id", required=True), I("field_id", required=True), M("fields", required=True), I("fields.sort"), BI("fields.required"), I("fields.default_option_id", nullable=True, default=None), BI("fields.active")]),
+    "categories.delete_field": schema([I("category_id", required=True), I("field_id", required=True)], notes=("把規格欄從此種類移除並清掉此種類的值;欄位零引用時連欄位一起刪。",)),
 
     "brands.list": schema([BI("all", default=0), I("category_id", nullable=True, default=None)]),
     "brands.create": schema([S("name", required=True, blank="accept"), I("sort", nullable=True, default=None)]),
@@ -135,7 +136,7 @@ ACTION_CONTRACTS = {
     "variants.update_editor": schema([I("id", required=True), M("fields", default={}), M("fields.attributes"), I("fields.price", nullable=True), LI("model_ids", default=[]), field("deleted_barcodes", "list[str]", default=[], wrong="x", list_element={"expect":"reject","value":1}), field("factory_barcodes", "list[str]", default=[], wrong="x", list_element={"expect":"reject","value":1}), I("store_barcode_count", default=0, constraint=">=0")], notes=("Desktop-only atomic editor action; factory barcodes are stripped and blank values rejected.",)),
     "variants.delete": schema([I("id", required=True)]),
     "variants.batch_create": schema([I("product_id", required=True), field("drafts", "list[Draft]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), S("drafts[].draft_id", nullable=True), M("drafts[].attributes", normalization="field names normalize_key; display values normalize_display; duplicate values removed"), I("drafts[].price", nullable=True), I("drafts[].active", nullable=True, default=1, normalization="truthy becomes 1, falsy becomes 0"), LI("drafts[].model_ids", default=[], normalization="deduplicate preserving order"), field("drafts[].barcodes", "list[Barcode]", default=[], wrong="x", list_element={"expect":"reject","value":"x"}), S("drafts[].barcodes[].barcode", nullable=True, default=None, normalization="trim; blank becomes None"), S("drafts[].barcodes[].source", default="store", normalization="falsy becomes factory for supplied code, store for generated code")], notes=("Desktop-only action.",)),
-    "variants.field_usage": schema([I("category_id", required=True), I("field_id", required=True)], notes=("Desktop-only action.",)),
+    "variants.field_usage": schema([I("category_id", required=True), I("field_id", required=True), I("brand_id", nullable=True), I("product_id", nullable=True)], notes=("Desktop-only action.", "brand_id/product_id 決定候選前排範圍(廠牌→大產品→無)。")),
     "variants.activate": schema([I("id", required=True)], notes=("Desktop-only action.",)),
     "variants.issues": schema([], notes=("Desktop-only action.",)),
     "barcodes.scan": schema([S("code", required=True, blank="accept")]),
@@ -163,7 +164,7 @@ INTERNAL_ACTION_CONTRACTS = {
 }
 
 SETTINGS_CONTRACT_ACTIONS = {
-    "categories.list","categories.create","categories.update","categories.delete","categories.sort","categories.fields","categories.set_common_fields","categories.set_field",
+    "categories.list","categories.create","categories.update","categories.delete","categories.sort","categories.fields","categories.set_common_fields","categories.set_field","categories.delete_field",
     "brands.list","brands.create","brands.update","brands.delete","brands.sort","brands.set_categories",
     "phone_brands.list","phone_brands.create","phone_brands.update","phone_brands.delete","phone_brands.sort",
     "models.list","models.create","models.update","models.delete","models.sort",
@@ -438,7 +439,7 @@ class ActionContractTests(FacadeTestCase):
 
     def valid_payload(self, action):
         values = {
-            "categories.list": {}, "categories.create": {"name":"新增種類"}, "categories.update":{"id":self.category_id,"fields":{}}, "categories.delete":{"id":self.delete_category_id}, "categories.sort":{"ids":[]}, "categories.fields":{"id":self.category_id}, "categories.set_common_fields":{"id":self.category_id,"field_ids":[]}, "categories.set_field":{"category_id":self.category_id,"field_id":self.field_id,"fields":{}},
+            "categories.list": {}, "categories.create": {"name":"新增種類"}, "categories.update":{"id":self.category_id,"fields":{}}, "categories.delete":{"id":self.delete_category_id}, "categories.sort":{"ids":[]}, "categories.fields":{"id":self.category_id}, "categories.set_common_fields":{"id":self.category_id,"field_ids":[]}, "categories.set_field":{"category_id":self.category_id,"field_id":self.field_id,"fields":{}}, "categories.delete_field":{"category_id":self.category_id,"field_id":self.field_id},
             "brands.list":{}, "brands.create":{"name":"新增廠牌"}, "brands.update":{"id":self.brand_id,"fields":{}}, "brands.delete":{"id":self.delete_brand_id}, "brands.sort":{"ids":[]}, "brands.set_categories":{"id":self.brand_id,"category_ids":[]},
             "phone_brands.list":{}, "phone_brands.create":{"name":"新增手機牌"}, "phone_brands.update":{"id":self.phone_brand_id,"fields":{}}, "phone_brands.delete":{"id":self.delete_phone_brand_id}, "phone_brands.sort":{"ids":[]},
             "models.list":{}, "models.create":{"phone_brand_id":self.phone_brand_id,"name":"新增型號"}, "models.update":{"id":self.model_id,"fields":{}}, "models.delete":{"id":self.delete_model_id}, "models.sort":{"ids":[]},
@@ -469,7 +470,7 @@ class ActionContractTests(FacadeTestCase):
         direct = set().union(self.facade.settings.ACTIONS, self.facade.products.ACTIONS,
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
                              self.facade.stocktake.ACTIONS, self.facade.printing.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 66)
+        self.assertEqual(len(ACTION_CONTRACTS), 67)
         self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})

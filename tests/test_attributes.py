@@ -1,4 +1,5 @@
 import unittest
+from lib import product_rules
 from lib.db import get_conn
 from base import FacadeTestCase
 
@@ -174,6 +175,126 @@ class TestAttributes(FacadeTestCase):
         self.assert_application_error("validation_error", "fields.create", {"name": "不應有預設", "default_option_id": other_oid})
         self.assert_application_error("validation_error", "categories.set_field", {"category_id": self.create_category("預設測試"), "field_id": fid, "fields": {"default_option_id": 999999}})
         self.assert_application_error("validation_error", "categories.set_field", {"category_id": self.create_category("預設測試二"), "field_id": fid, "fields": {"default_option_id": other_oid}})
+
+
+class TestFieldUsageLeadScope(FacadeTestCase):
+    """候選前排範圍:該廠牌用過 → 該大產品用過 → 都沒有則不指定。"""
+
+    def setUp(self):
+        super().setUp()
+        self.make_category_with_field("款式", "select", ("SolidX", "皮套", "透明"))
+        self.brand_id = self.invoke("brands.create", {"name": "DEVILCASE"})["brand_id"]
+        # DEVILCASE 用過 SolidX;無品牌皮套(廠牌欄留空)用過皮套
+        self.invoke("products.create", {
+            "name": "惡魔盾", "category_id": self.cid, "brand_id": self.brand_id,
+            "variants": [{"attributes": {"款式": "SolidX"}, "price": 100,
+                          "barcodes": [{"barcode": "D1", "source": "store"}]}]})
+        self.leather_id = self.invoke("products.create", {
+            "name": "多卡槽牛皮皮套", "category_id": self.cid,
+            "variants": [{"attributes": {"款式": "皮套"}, "price": 100,
+                          "barcodes": [{"barcode": "L1", "source": "store"}]}],
+        })["product_id"]
+
+    def usage(self, **scope):
+        payload = {"category_id": self.cid, "field_id": self.fid}
+        payload.update(scope)
+        return {o["value"]: o for o in self.invoke("variants.field_usage", payload)}
+
+    def test_brand_scope_leads_only_values_that_brand_used(self):
+        got = self.usage(brand_id=self.brand_id, product_id=self.leather_id)
+        self.assertTrue(got["SolidX"]["lead"])
+        self.assertEqual(got["SolidX"]["lead_count"], 1)
+        # 廠牌有紀錄就不退回大產品:皮套與未使用的透明都留在「更多」
+        self.assertFalse(got["皮套"]["lead"])
+        self.assertFalse(got["透明"]["lead"])
+
+    def test_product_scope_is_used_when_brand_is_empty(self):
+        # 無品牌皮套:廠牌欄為空,前排改用該大產品自己用過的值
+        got = self.usage(brand_id=None, product_id=self.leather_id)
+        self.assertTrue(got["皮套"]["lead"])
+        self.assertFalse(got["SolidX"]["lead"])
+
+    def test_no_scope_marks_nothing_as_lead_and_keeps_category_counts(self):
+        got = self.usage()
+        self.assertFalse(any(o["lead"] for o in got.values()))
+        self.assertEqual(got["SolidX"]["usage_count"], 1)
+        self.assertEqual(got["皮套"]["usage_count"], 1)
+        self.assertEqual(got["透明"]["usage_count"], 0)
+
+    def test_brand_without_history_falls_back_to_product(self):
+        other = self.invoke("brands.create", {"name": "新廠牌"})["brand_id"]
+        got = self.usage(brand_id=other, product_id=self.leather_id)
+        self.assertTrue(got["皮套"]["lead"])
+        self.assertFalse(got["SolidX"]["lead"])
+
+
+class TestDeleteCategoryField(FacadeTestCase):
+    """設定頁模板列紅色 ✕:從此種類移除規格欄並清掉此種類的值。"""
+
+    def setUp(self):
+        super().setUp()
+        self.make_category_with_field("版型", "select", ("皮套", "透明"))
+        self.other = self.create_category("鏡頭貼")
+        self.invoke("categories.set_field",
+                    {"category_id": self.other, "field_id": self.fid, "fields": {}})
+        self.create_product({"版型": "皮套"}, name="皮套", barcode="D1")
+
+    def counts(self, category_id, field_id):
+        rows = self.invoke("fields.list", {"category_id": category_id})
+        row = next((r for r in rows if r["field_id"] == field_id), None)
+        return row["cat_usage_count"] if row else None
+
+    def test_usage_count_is_reported_per_category(self):
+        self.assertEqual(self.counts(self.cid, self.fid), 1)
+        self.assertEqual(self.counts(self.other, self.fid), 0)
+
+    def test_remove_clears_only_this_category_values_and_keeps_field(self):
+        result = self.invoke("categories.delete_field",
+                             {"category_id": self.cid, "field_id": self.fid})
+        self.assertEqual(result["removed_variant_count"], 1)
+        self.assertFalse(result["field_deleted"])
+        self.assertIsNone(self.counts(self.cid, self.fid))       # 掛勾已解除
+        self.assertEqual(self.counts(self.other, self.fid), 0)   # 其他種類不受影響
+        variants = self.invoke("catalog.list", {})[0]["variants"]
+        self.assertEqual(variants[0]["attributes"], {})           # 此種類的值已清掉
+
+    def test_field_itself_is_deleted_once_nobody_uses_it(self):
+        self.invoke("categories.delete_field", {"category_id": self.cid, "field_id": self.fid})
+        result = self.invoke("categories.delete_field",
+                             {"category_id": self.other, "field_id": self.fid})
+        self.assertTrue(result["field_deleted"])
+        self.assertNotIn("版型", [f["name"] for f in self.invoke("fields.list", {})])
+        self.assertEqual(self.invoke("options.list", {"field_id": self.fid, "all": 1}), [])
+
+    def test_feature_field_and_unlinked_field_are_rejected(self):
+        feature = self.create_field("特性詞條", self.cid, "tags")
+        self.assert_application_error(
+            "validation_error", "categories.delete_field",
+            {"category_id": self.cid, "field_id": feature})
+        spare = self.create_field("備註", None, "text")
+        self.assert_application_error(
+            "not_found", "categories.delete_field",
+            {"category_id": self.other, "field_id": spare})
+
+
+class TestPinnedOptionOrder(unittest.TestCase):
+    """玻璃貼材質(鍍膜)在候選選單固定次序,不隨使用次數浮動。"""
+
+    def test_pinned_values_go_first_in_fixed_order(self):
+        got = product_rules.sort_pinned_options(
+            [{"value": v} for v in ("防窺", "藍光", "亮面", "霧面")])
+        self.assertEqual([o["value"] for o in got], ["亮面", "霧面", "藍光", "防窺"])
+
+    def test_other_values_keep_incoming_order_after_pinned(self):
+        got = product_rules.sort_pinned_options(
+            [{"value": v} for v in ("康寧", "防窺", "藍寶石", "亮面")])
+        self.assertEqual(
+            [o["value"] for o in got], ["亮面", "防窺", "康寧", "藍寶石"])
+
+    def test_field_without_pinned_values_is_untouched(self):
+        values = ("滿版", "9分滿")
+        got = product_rules.sort_pinned_options([{"value": v} for v in values])
+        self.assertEqual([o["value"] for o in got], list(values))
 
 
 if __name__ == "__main__":

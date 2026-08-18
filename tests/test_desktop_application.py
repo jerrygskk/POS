@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import main
+from lib import child_window
 from lib.desktop_application import DesktopApplication
 from lib.desktop_bridge import DesktopBridge
 from lib.runtime_paths import RuntimePaths
@@ -94,6 +95,8 @@ class DesktopApplicationTest(unittest.TestCase):
         self.assertEqual(args[0], "POS")
         self.assertEqual(args[1], self.paths.static_dir.joinpath("index.html").as_uri())
         self.assertIs(kwargs["js_api"], bridge)
+        self.assertEqual((kwargs["width"], kwargs["height"]), (1024, 768))
+        self.assertEqual(kwargs.get("x", 0), 0)   # 主視窗靠左
         self.assertEqual(webview.start_calls, [((), {"gui": "edgechromium"})])
 
     def test_pywebview_discovers_only_invoke_on_bridge(self):
@@ -326,6 +329,39 @@ class MainDesktopOrchestrationTest(unittest.TestCase):
         log = self.paths.error_log_path.read_text(encoding="utf-8")
         self.assertIn("桌面視窗啟動失敗", log)
         self.assertIn("WebView2 unavailable", log)
+
+
+class ChildWindowFitSizeTests(unittest.TestCase):
+    """子視窗尺寸夾進可視工作區:避免在小螢幕或高縮放環境開出畫面外。"""
+
+    def test_size_kept_when_work_area_is_large_enough(self):
+        self.assertEqual(
+            child_window.fit_size((720, 760), (640, 520), (1920, 1200)),
+            (720, 760))
+
+    def test_size_shrinks_to_work_area_minus_margin(self):
+        # 1920x1080 在 125% 縮放下邏輯可視高度約 816,高度須讓出工作列與標題列
+        self.assertEqual(
+            child_window.fit_size((980, 820), (760, 560), (1536, 816)),
+            (980, 736))
+
+    def test_min_size_wins_over_tiny_work_area(self):
+        self.assertEqual(
+            child_window.fit_size((720, 760), (640, 520), (600, 500)),
+            (640, 520))
+
+    def test_unknown_work_area_keeps_requested_size(self):
+        self.assertEqual(
+            child_window.fit_size((720, 760), (640, 520), None), (720, 760))
+
+    def test_position_centers_horizontally_and_sits_above_middle(self):
+        # 水平置中;垂直取剩餘空間 1/3,比正中央(28)高
+        self.assertEqual(
+            child_window.fit_position((720, 736), (1536, 816)), (408, 26))
+
+    def test_position_never_negative_and_none_without_work_area(self):
+        self.assertEqual(child_window.fit_position((900, 900), (800, 700)), (0, 0))
+        self.assertIsNone(child_window.fit_position((720, 736), None))
 
 
 if __name__ == "__main__":

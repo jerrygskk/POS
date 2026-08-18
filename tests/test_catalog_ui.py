@@ -3,6 +3,7 @@
 import json
 import shutil
 import subprocess
+import re
 import unittest
 from pathlib import Path
 
@@ -460,8 +461,21 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertIn(".catalog-table { min-width: 1240px;", self.css)
         self.assertIn(".catalog-table .catalog-variant-row > td { vertical-align: top; }", self.css)
         self.assertIn(".catalog-table .catalog-product-row > td { vertical-align: middle;", self.css)
-        self.assertIn(".catalog-col-model { width: 180px; }", self.css)
+        self.assertIn(".catalog-col-model { width: 220px; }", self.css)
         self.assertIn(".catalog-col-spec { width: auto; }", self.css)
+        # 型號格一行一個型號:每個型號自己一個 div,分隔號留行尾,單一型號不折行
+        self.assertIn('class="catalog-model-line"', self.catalog)
+        self.assertIn('v-for="(m, mi) in modelLines(p, v)"', self.catalog)
+        self.assertIn("mi === modelLines(p, v).length - 1 ? '' : '、'", self.catalog)
+        self.assertNotIn("v.models.join('、')", self.catalog)
+        # 型號顯示依種類設定:不使用適用型號的種類一律「—」(資料不動)
+        self.assertIn('return this.usesModel(p) ? (v.models || []) : [];', self.catalog_js)
+        self.assertIn('c.model_mode === "required"', self.catalog_js)
+        self.assertIn(
+            ".catalog-model-cell .catalog-model-line"
+            " { white-space: nowrap; line-height: 1.45; }",
+            self.css,
+        )
         self.assertNotIn("table.sub th:nth-child(1)", self.css)
         self.assertIn(".catalog-product-actions { text-align: right; white-space: nowrap; }", self.css)
         self.assertIn('placeholder="搜尋名稱、規格或條碼"', self.catalog)
@@ -507,8 +521,10 @@ class CatalogTemplateContractTests(unittest.TestCase):
 
     def test_catalog_uses_display_products_and_bumped_resource_version(self):
         self.assertIn('v-for="p in displayProducts"', self.catalog)
-        self.assertNotIn("?v=67", self.html)
-        self.assertIn("?v=70", self.html)
+        # 資源版號會持續往上 bump,測固定數字每次都要改;改測「只有一個版號、且不低於 74」
+        versions = set(re.findall(r"\?v=(\d+)", self.html))
+        self.assertEqual(len(versions), 1, f"index.html 版號不一致:{versions}")
+        self.assertGreaterEqual(int(versions.pop()), 74)
 
 
 if __name__ == "__main__":

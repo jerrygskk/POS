@@ -25,23 +25,32 @@
   font-size: 14pt;
   font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
 }
-html, body, #variant-editor, #variant-batch-window {
+/* ⚠️ 每個子視窗的根元素都要列進來:漏一個,該視窗內容區就沒有高度上限,
+   內容一長會往視窗外長 —— 捲軸不出現、底部按鈕列被切掉。 */
+html, body, #variant-editor, #variant-batch-window, #field-editor {
   width: 100%; height: 100%; overflow: hidden;
 }
 body { background: #ffffff; color: #1c1c1e; }
 [v-cloak] { display: none; }
 
 .dialog-shell { height: 100%; display: flex; flex-direction: column; background: #ffffff; }
-.dialog-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px 20px; }
+.dialog-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 22px 20px; }
 .dialog-content h1 { font-size: 18pt; margin: 0 0 6px; }
-.dialog-section { padding: 14px 0; min-width: 0; }
-.dialog-section + .dialog-section { border-top: 1px solid #cccccc; }
-.dialog-section h2 { margin: 0 0 12px; font-size: 14pt; color: #1c1c1e; }
+/* 區塊＝細框方塊(參考維護者另一專案的「歸檔狀態」群組框):相關欄位圈在一起,
+   不再用分隔線。 */
+.dialog-section { position: relative; padding: 20px 16px 14px; min-width: 0;
+  border: 1px solid #e5e5ea; border-radius: 8px; background: #ffffff; }
+.dialog-section + .dialog-section { margin-top: 18px; }
+/* 小標壓在上框線上(fieldset/legend 的外觀):標題絕對定位、以視窗底色蓋掉框線。 */
+.dialog-section h2 { position: absolute; top: -0.62em; left: 12px;
+  margin: 0; padding: 0 8px; background: #ffffff; font-size: 12pt;
+  font-weight: bold; color: #1c1c1e; }
 .dialog-field { display: grid; grid-template-columns: 7em minmax(0, 1fr);
-  gap: 10px; align-items: center; cursor: pointer; }
+  gap: 12px; align-items: center; cursor: pointer; text-align: right; }
+.dialog-field input, .dialog-field select, .dialog-field > * { text-align: left; }
 .dialog-shell input:not([type="checkbox"]), .dialog-shell select {
   width: 100%; min-width: 0; border: 1px solid #cccccc; border-radius: 4px;
-  padding: 4px 8px; background: #ffffff; color: #1c1c1e;
+  padding: 6px 8px; background: #ffffff; color: #1c1c1e;
 }
 .dialog-shell input:focus, .dialog-shell select:focus {
   outline: none; border-color: #8fa8c8; box-shadow: inset 0 0 0 1px #8fa8c8;
@@ -108,8 +117,11 @@ body { background: #ffffff; color: #1c1c1e; }
   gap: 8px; align-items: center; }
 
 .dialog-shell .attr-row { display: grid; grid-template-columns: 7em minmax(0, 1fr);
-  align-items: start; gap: 10px; margin-bottom: 10px; padding: 10px;
-  border: 1px solid #e5e5ea; border-radius: 4px; background: #fafafa; }
+  align-items: start; gap: 12px; margin-bottom: 12px; padding: 12px;
+  border: 1px solid #e5e5ea; border-radius: 6px; background: #fafafa;
+  text-align: right; }
+.dialog-shell .attr-row > * { text-align: left; }
+.dialog-shell .attr-row > .attr-name { text-align: right; }
 .dialog-shell .attr-row:last-child { margin-bottom: 0; }
 .dialog-shell .attr-row > .attr-name { grid-column: 1; padding-top: 5px; }
 .dialog-shell .attr-row > .chip-box { grid-column: 2; min-width: 0; }
@@ -146,7 +158,7 @@ body { background: #ffffff; color: #1c1c1e; }
 /* ── 新增款式視窗:預覽表、行內操作與單層修改 popup ── */
 .dialog-check { display: flex; align-items: center; cursor: pointer; margin-top: 10px; }
 .dialog-inline-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
-.dialog-field + .dialog-field { margin-top: 10px; }
+.dialog-field + .dialog-field { margin-top: 14px; }
 
 .dialog-table { width: 100%; border-collapse: collapse; font-size: 12pt; }
 .dialog-table th, .dialog-table td {

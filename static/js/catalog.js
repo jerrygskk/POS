@@ -122,6 +122,15 @@ window.PosPages["page-catalog"] = {
         category_id: this.fCategory, brand_id: this.fBrand,
         model_id: this.fModel, pending: this.pending};
     },
+    // 型號顯示依種類設定:設為不使用適用型號的種類一律顯示「—」,
+    // 既有 VariantModel 關聯保留不動,重新開啟就會再顯示。
+    usesModel(p) {
+      const c = this.categories.find(x => x.category_id === p.category_id);
+      return !!c && c.model_mode === "required";
+    },
+    modelLines(p, v) {
+      return this.usesModel(p) ? (v.models || []) : [];
+    },
     variantCount(products) {
       return (products || []).reduce(
         (total, product) => total + (product.variants || []).length, 0);
