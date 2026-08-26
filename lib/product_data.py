@@ -4,7 +4,7 @@ from lib.normalize import normalize_key
 from lib import product_rules
 from lib.product_rules import FIELD_TYPES
 
-FEATURE_FIELD_KEY = normalize_key("特性詞條")  # 固定欄位:不需綁定即可使用
+FEATURE_FIELD_KEY = normalize_key("特性詞條")  # 每個種類各自一份的詞條欄
 
 # 有效啟用(規格 §8.2):Category.active AND Product.active AND Variant.active
 #   AND 沒有未解決的 VariantIssue。以下常數以 c/p/v 別名表示三表;
@@ -57,19 +57,16 @@ def _empty(v):
 
 
 def _resolve_field(conn, name, category_id):
-    """依欄名解析欄位:須為該種類已綁定且啟用的模板欄位;特性詞條為全域固定例外。"""
+    """依欄名解析欄位:須為該種類已綁定且啟用的模板欄位。
+
+    特性詞條每個種類各自一份(同名不同 field_id),故不做跨種類的名稱退路——
+    退路會把詞條寫進別的種類那一份。"""
     field = conn.execute(
         "SELECT f.field_id,f.field_type FROM AttributeField f "
         "JOIN CategoryField cf ON cf.field_id=f.field_id "
         "WHERE f.name=? AND f.active=1 AND cf.category_id=? AND cf.active=1 LIMIT 1",
         (name, category_id)).fetchone()
-    if field is not None:
-        return field
-    if normalize_key(name) == FEATURE_FIELD_KEY:
-        return conn.execute(
-            "SELECT field_id,field_type FROM AttributeField WHERE name=? AND active=1 "
-            "ORDER BY field_id LIMIT 1", (name,)).fetchone()
-    return None
+    return field
 
 
 def cleanup_unused_options(conn, option_ids):

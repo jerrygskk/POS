@@ -74,16 +74,13 @@ class TestTemplateFields(FacadeTestCase):
             })
         self.assertEqual(raised.exception.code, "validation_error")
 
-    def test_feature_field_cannot_be_disabled(self):
+    def test_feature_field_can_be_disabled(self):
+        """特性詞條不再是不可停用的固定欄：每個種類自己一份，可自行啟用停用。"""
         feature_id = self.create_field("特性詞條", self.cid, field_type="tags")
-        for action, payload in (
-            ("categories.set_field", {"category_id": self.cid, "field_id": feature_id, "fields": {"active": 0}}),
-            ("fields.update", {"id": feature_id, "fields": {"active": 0}}),
-        ):
-            with self.subTest(action=action):
-                with self.assertRaises(ValidationError) as raised:
-                    self.invoke(action, payload)
-                self.assertEqual(raised.exception.code, "validation_error")
+        self.assertEqual(self.invoke("categories.set_field", {
+            "category_id": self.cid, "field_id": feature_id, "fields": {"active": 0}}), {"ok": True})
+        self.assertEqual(self.invoke("fields.update", {
+            "id": feature_id, "fields": {"active": 0}}), {"ok": True})
 
     def test_required_is_locked_when_category_has_variant(self):
         self.invoke("categories.set_field", {"category_id": self.cid, "field_id": self.fid, "fields": {"required": 1}})
@@ -262,18 +259,42 @@ class TestDeleteEmptyCategoryCascade(FacadeTestCase):
             self.assertIsNotNone(conn.execute("SELECT 1 FROM Brand WHERE brand_id=?", (brand_id,)).fetchone())
 
 
-class TestFeatureFieldBindingPreserved(FacadeTestCase):
-    def test_set_common_fields_keeps_feature_binding(self):
+class TestFeatureFieldPerCategory(FacadeTestCase):
+    """特性詞條每個種類各自一份，選項不互通，也可從種類移除。"""
+
+    def test_delete_field_removes_feature_field(self):
+        category_id = self.create_category("template")
+        feature_id = self.create_field("特性詞條", category_id, field_type="tags")
+        result = self.invoke("categories.delete_field", {
+            "category_id": category_id, "field_id": feature_id})
+        self.assertTrue(result["field_deleted"])
+        with get_conn(self.db) as conn:
+            self.assertIsNone(conn.execute(
+                "SELECT 1 FROM AttributeField WHERE field_id=?", (feature_id,)).fetchone())
+        names = [item["name"] for item in self.invoke("categories.fields", {"id": category_id})]
+        self.assertNotIn("特性詞條", names)
+
+    def test_set_common_fields_can_unbind_feature_field(self):
         category_id = self.create_category("template")
         feature_id = self.create_field("特性詞條", category_id, field_type="tags")
         other_category_id = self.create_category("other")
-        self.invoke("categories.set_field", {"category_id": other_category_id, "field_id": feature_id, "fields": {"active": 1}})
-        self.invoke("categories.set_field", {"category_id": other_category_id, "field_id": feature_id, "fields": {"sort": 0}})
-        self.assertEqual(self.invoke("categories.set_common_fields", {"id": category_id, "field_ids": []}), {"ok": True})
-        with get_conn(self.db) as conn:
-            self.assertIsNotNone(conn.execute("SELECT 1 FROM CategoryField WHERE category_id=? AND field_id=?", (category_id, feature_id)).fetchone())
+        self.invoke("categories.set_field", {"category_id": other_category_id,
+                                             "field_id": feature_id, "fields": {"active": 1}})
+        self.invoke("categories.set_common_fields", {"id": category_id, "field_ids": []})
         names = [item["name"] for item in self.invoke("categories.fields", {"id": category_id})]
-        self.assertIn("特性詞條", names)
+        self.assertNotIn("特性詞條", names)
+
+    def test_each_category_owns_its_feature_field(self):
+        cat_a = self.create_category("a")
+        cat_b = self.create_category("b")
+        fid_a = self.create_field("特性詞條", cat_a, field_type="tags")
+        fid_b = self.create_field("特性詞條", cat_b, field_type="tags")
+        self.assertNotEqual(fid_a, fid_b)
+        self.invoke("products.create", {"name": "p", "category_id": cat_b, "variants": [
+            {"attributes": {"特性詞條": ["磁吸"]}, "barcodes": []}]})
+        with get_conn(self.db) as conn:
+            rows = conn.execute("SELECT DISTINCT field_id FROM VariantAttribute").fetchall()
+        self.assertEqual([r[0] for r in rows], [fid_b])
 
 
 if __name__ == "__main__":

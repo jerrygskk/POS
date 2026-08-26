@@ -110,6 +110,10 @@ body { background: #ffffff; color: #1c1c1e; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .dialog-error { color: #c0392b; margin-bottom: 8px; white-space: pre-wrap; }
 .dialog-loading, .dialog-hint { color: #636366; }
+/* 必填勾選方塊右側直接接鎖定說明,不另起一列 */
+.req-cell { display: flex; align-items: center; gap: 8px; }
+.req-cell .dialog-hint { font-size: 13px; }
+
 .dialog-barcode-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .dialog-barcode-row { display: flex; align-items: center; gap: 10px; min-height: 32px; }
 .dialog-barcode-row > :first-child { flex: 1; }

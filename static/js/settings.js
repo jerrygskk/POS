@@ -13,6 +13,7 @@ const _TYPE_LABEL = { select: "下拉選單", text: "文字", multi: "複選", t
 // (讀寫 Category.model_mode)。型號實際存於 VariantModel 關聯表,不是規格欄,
 // 故以固定列呈現而非真的建 AttributeField。
 const MODEL_ROW_ID = "__model__";
+const FEATURE_ROW_ID = "__feature__";   // 該種類尚未啟用特性詞條時的佔位列
 // 新種類預設帶入的規格欄(既有全域欄位,不新建);與 lib/db_seed.NEW_CATEGORY_FIELDS 對齊
 const DEFAULT_CATEGORY_FIELDS = ["顏色", "款式"];
 
@@ -49,11 +50,19 @@ window.PosPages["page-settings"] = {
       const rows = this.tplFields.slice().sort((a, b) =>
         (a.sort - b.sort) || (a.field_id - b.field_id));
       if (!this.selectedCat) return rows;
-      // 固定列排最前:手機型號(使用與否由 model_mode 決定)
+      // 固定列排最前:手機型號與特性詞條,兩者都是「這個種類要不要用」的開關。
+      // 特性詞條每個種類各自一份,沒有就補一列佔位(顯示未使用)。
+      const rest = rows.filter(f => !this.isFeature(f));
+      const feat = rows.find(f => this.isFeature(f)) ||
+        { field_id: FEATURE_ROW_ID, name: "特性詞條", field_type: "tags",
+          required: 0, cf_active: 0, default_option_id: null, sort: -1 };
       const on = this.selectedCat.model_mode === "required";
-      rows.unshift({ field_id: MODEL_ROW_ID, name: "手機型號", field_type: "model",
-                     required: on, cf_active: on, default_option_id: null, sort: -1 });
-      return rows;
+      return [
+        { field_id: MODEL_ROW_ID, name: "手機型號", field_type: "model",
+          required: on, cf_active: on, default_option_id: null, sort: -1 },
+        feat,
+        ...rest,
+      ];
     },
     filteredBrands() {
       const q = ((this.prodPopup && this.prodPopup.brandQuery) || "").trim().toLowerCase();
@@ -173,10 +182,25 @@ window.PosPages["page-settings"] = {
     fieldTypeLabel(t) { return _TYPE_LABEL[t] || t; },
     isFeature(f) { return f.field_type === "tags"; },
     isModelRow(f) { return f.field_id === MODEL_ROW_ID; },
+    // 尚未啟用特性詞條的佔位列(還沒有真的 AttributeField)
+    isFeaturePlaceholder(f) { return f.field_id === FEATURE_ROW_ID; },
     // 型號固定列顯示使用狀態,其餘欄位維持必填／選填
     templateRowState(f) {
       if (this.isModelRow(f)) return f.cf_active ? "使用" : "不使用";
       return f.required && !this.isFeature(f) ? "必填" : "選填";
+    },
+    // 列的第二行:型別、必填與否、預設值、狀態串成一句,沒有的項目不佔位
+    rowSubtitle(f) {
+      if (this.isModelRow(f)) return "";
+      if (this.isFeature(f)) {
+        if (this.isFeaturePlaceholder(f)) return "";
+        return (this.tplOptions[f.field_id] || []).length + " 個詞條";
+      }
+      const parts = [this.fieldTypeLabel(f.field_type), this.templateRowState(f)];
+      const def = this.defaultValueName(f);
+      if (def) parts.push("預設 " + def);
+      if (!f.cf_active) parts.push("已停用");
+      return parts.join(" · ");
     },
     // 點列:型號列切換使用與否,其餘照原本開規格編輯
     toggleModelMode() {
@@ -184,13 +208,34 @@ window.PosPages["page-settings"] = {
       if (!cat) return;
       this.setModelMode(cat, cat.model_mode === "required" ? "hidden" : "required");
     },
+    // 特性詞條開關:沒有就替本種類建一份(每個種類各自一份,選項不互通),
+    // 已有就照一般規格欄的移除語意處理(先問影響筆數)。
+    // 固定列的開關:手機型號改 model_mode,特性詞條建立/移除本種類那一份
+    toggleFixedRow(f) {
+      if (this.isModelRow(f)) return this.toggleModelMode();
+      return this.toggleFeatureField(f);
+    },
+    async toggleFeatureField(f) {
+      if (this.selCatId == null) return;
+      if (this.isFeaturePlaceholder(f)) {
+        await this.guard(async () => {
+          await API.createField({ name: "特性詞條", category_id: this.selCatId,
+                                  field_type: "tags" });
+          await this.loadCategoryDetail();
+        });
+        return;
+      }
+      await this.deleteTemplateField(f);
+    },
     // 紅色 ✕:把規格欄從此種類移除,並清掉此種類商品填過的值(欄位本身若沒人再用才一起刪)
     async deleteTemplateField(f) {
       const used = f.cat_usage_count || 0;
       const impact = used
         ? `此種類有 ${used} 筆商品填過此規格,一併刪除後無法復原。`
         : "此種類尚無商品使用此規格。";
-      if (!confirm(`刪除規格「${f.name}」?\n${impact}`)) return;
+      const title = this.isFeature(f) ? "停用特性詞條?" : `刪除規格「${f.name}」?`;
+      if (!confirm(`${title}
+${impact}`)) return;
       await this.guard(async () => {
         await API.deleteCategoryField(this.selCatId, f.field_id);
         await this.loadCategoryDetail();

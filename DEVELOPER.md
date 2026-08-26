@@ -61,7 +61,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 - **盤點結案防重**:結案先以 `status='open'` 條件原子更新盤點單;不存在回 404,已結案回 409,避免重複產生 `adjust` 庫存異動。
 - **有效售價**:`Variant.price` 不為 NULL 時採用,否則退回 `Product.default_price`,兩者皆 NULL 則售價為 `null`。
 - **共用欄 NULL 去重提醒**:`AttributeField` 的共用欄 `category_id` 為 NULL;SQLite 的 `UNIQUE` 對 NULL 不視為相等,故去重不能單靠資料庫唯一鍵,需靠應用層先查再插。
-- **設定頁模板列與型號**:見下方「適用型號的使用與否」「規格欄的移除」「新種類的預設模板」三節。
+- **設定頁模板列與型號**:見下方「固定列：適用型號與特性詞條」「規格欄的移除」「新種類的預設模板」三節。
 - **商品資料庫搜尋**:關鍵字以空白切成多個詞,採 **AND**(每個詞都要命中才算符合),大小寫與全半形以 `casefold` 正規化。比對範圍為商品名稱、種類、廠牌、款式的規格值(含 multi/tags 的每個值)、適用型號與條碼,命中時只保留符合的款式列。查無啟用中資料時另查一次停用資料,回報筆數並提供「顯示已停用」入口,不直接把停用商品混進結果。條碼只針對當頁款式查詢(`variant_id IN (...)`),不整表撈。
 - **Schema 與 migration**:`lib/db_schema.py` 是現行 schema DDL 的唯一來源；`lib/legacy_migrations.py` 封存 v1–v13 的歷史 migration DDL。未來修改現行 schema 時，仍須依 migration 規則新增升級步驟，讓既有資料庫可安全演進。
 
@@ -108,17 +108,28 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 錯誤訊息回子視窗且視窗保留讓店員修正。新出現的 select/multi/tags 值會自動
 補進 `AttributeOption`(比照建檔流程,不重新啟用已停用選項)。
 
-### 適用型號的使用與否(種類設定)
+### 固定列：適用型號與特性詞條(種類設定)
 
 `Category.model_mode` 只有 `required`／`hidden` 兩種:`required`＝該種類的款式**必填**適用型號,
-`hidden`＝該種類不使用型號。設定入口只有一個——設定頁「子產品規格模板」清單最上面的
-**固定列「手機型號」**,點列或列上按鈕切換(`static/js/settings.js` 的 `MODEL_ROW_ID`)。
+`hidden`＝該種類不使用型號。設定入口只有一個——設定頁「規格項目列表」清單最上面的
+**固定列「手機型號」**,右側開關切換(`static/js/settings.js` 的 `MODEL_ROW_ID`)。
 型號實際存於 `VariantModel` 關聯表,不是規格欄,故以固定列呈現而非真的建 `AttributeField`
 (真的建成規格欄要重做既有型號關聯與型號排序)。
 
 三處畫面一律照這個設定走:新增款式子視窗、款式修改子視窗、商品資料庫的型號欄。
 設為 `hidden` 時型號欄顯示「—」,**既有 VariantModel 關聯保留不刪**,重新開啟就會再顯示;
 款式修改視窗也不清空既有型號(送出時照原值送回),避免「關掉顯示」變成「刪掉資料」。
+
+特性詞條(`field_type=tags`)**每個種類各自一份同名欄**,選項不互通。
+同樣以固定列呼叫,右側開關啟用／停用:啟用就是替本種類建一份
+`AttributeField`+`CategoryField`(`fields.create` 帶 `category_id`),停用走一般規格欄的
+`categories.delete_field`(先問影響筆數)。理由:各種類的詞條完全不同,
+合成共用欄會讓建檔下拉混進別種類的詞條。
+
+⚠️ 因為同名欄有多份,**不可以欄名跨種類找詞條欄**。
+`product_data._resolve_field`、`variant_batch_service._feature_field_id`、
+`variant_issue_service._feature_id` 一律只認本種類 `CategoryField` 綁定的那一份;
+舊版的「按名稱取 field_id 最小的一筆」退路會把詞條寫進別的種類那一份。
 
 ### 規格候選的前排範圍(廠牌→大產品→種類)
 
@@ -137,7 +148,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 規格欄是全域共用的(同一個「顏色」掛在多個種類),故 ✕ 的語意是
 **從此種類移除掛勾＋清掉此種類商品填過的值**(`categories.delete_field`);
 其他種類不受影響。等到沒有任何種類再用、也沒有任何商品的值,才把欄位本身與其選項
-一起清掉(沿用零使用自動清理的慣例)。特性詞條與手機型號為固定列,不給 ✕。
+一起清掉(沿用零使用自動清理的慣例)。手機型號與特性詞條為固定列,不給 ✕,改走右側開關。
 確認視窗必須顯示影響筆數(`fields.list` 回傳的 `cat_usage_count`),
 只寫「無法復原」店員無從判斷。
 

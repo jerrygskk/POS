@@ -266,11 +266,13 @@ class TestDeleteCategoryField(FacadeTestCase):
         self.assertNotIn("版型", [f["name"] for f in self.invoke("fields.list", {})])
         self.assertEqual(self.invoke("options.list", {"field_id": self.fid, "all": 1}), [])
 
-    def test_feature_field_and_unlinked_field_are_rejected(self):
+    def test_feature_field_removable_and_unlinked_field_rejected(self):
+        """特性詞條每個種類各自一份,可從本種類移除;
+        未掛在本種類的欄位仍回 not_found。"""
         feature = self.create_field("特性詞條", self.cid, "tags")
-        self.assert_application_error(
-            "validation_error", "categories.delete_field",
-            {"category_id": self.cid, "field_id": feature})
+        result = self.invoke("categories.delete_field",
+                             {"category_id": self.cid, "field_id": feature})
+        self.assertTrue(result["field_deleted"])
         spare = self.create_field("備註", None, "text")
         self.assert_application_error(
             "not_found", "categories.delete_field",

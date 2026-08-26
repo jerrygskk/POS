@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=80">
+<link rel="stylesheet" href="css/pos.css?v=86">
 </head>
 <body>
 <div id="app">
   <nav>
-    <img class="nav-logo" src="img/logo.png?v=80" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=86" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="page=key">{{ label }}</button>
   </nav>
@@ -313,21 +313,24 @@
         <button class="btn-sm danger" @click="deleteCategory(selectedCat)">刪除</button>
       </div>
 
-      <div class="grp-title">子產品規格模板</div>
-      <small class="hint">以右側按鈕編輯必填、預設值與選項;手機型號與特性詞條為固定欄。</small>
+      <div class="grp-title">規格項目列表</div>
+      <small class="hint">以下是本商品的規格項目，可在下方新增、修改、刪除規格</small>
       <div class="tpl-list">
         <div v-for="f in templateRows" :key="f.field_id" class="tpl-row"
-             :class="{inactive: !f.cf_active, feature: isFeature(f), fixed: isModelRow(f)}">
-          <span class="tpl-name">{{ f.name }}</span>
-          <span class="tag" v-if="!isModelRow(f)">{{ fieldTypeLabel(f.field_type) }}</span>
-          <span class="tpl-req">{{ templateRowState(f) }}</span>
-          <span class="tpl-def hint" v-if="defaultValueName(f)">預設 {{ defaultValueName(f) }}</span>
-          <span class="tag" v-if="isFeature(f)">固定欄</span>
-          <span class="tag" v-else-if="!isModelRow(f) && !f.cf_active">已停用</span>
+             :class="{inactive: !f.cf_active, feature: isFeature(f), fixed: isModelRow(f) || isFeature(f)}">
+          <span class="tpl-main">
+            <span class="tpl-name">{{ f.name }}</span>
+            <span class="tpl-sub" v-if="rowSubtitle(f)">{{ rowSubtitle(f) }}</span>
+          </span>
           <span class="tpl-actions">
-            <button v-if="isModelRow(f)" class="btn-sm"
-                    @click.stop="toggleModelMode()">{{ f.cf_active ? '停用手機型號' : '啟用手機型號' }}</button>
-            <template v-else-if="!isFeature(f)">
+            <template v-if="isModelRow(f) || isFeature(f)">
+              <span class="switch-label" :class="{on: !f.cf_active}">不使用</span>
+              <button class="switch" type="button" role="switch"
+                      :class="{on: !!f.cf_active}" :aria-checked="!!f.cf_active"
+                      @click.stop="toggleFixedRow(f)"><span class="knob"></span></button>
+              <span class="switch-label" :class="{on: !!f.cf_active}">使用</span>
+            </template>
+            <template v-else>
               <button class="btn-sm" @click.stop="openFieldPopup(f)">✎ 修改</button>
               <button class="btn-sm danger" @click.stop="deleteTemplateField(f)">✕</button>
             </template>
@@ -475,20 +478,20 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=80"></script>
-<script src="js/api.js?v=80"></script>
-<script src="js/pos_shared.js?v=80"></script>
-<script src="js/catalogfields.js?v=80"></script>
-<script src="js/checkout.js?v=80"></script>
-<script src="js/receive.js?v=80"></script>
-<script src="js/stocktake.js?v=80"></script>
-<script src="js/records.js?v=80"></script>
-<script src="js/catalog.js?v=80"></script>
-<script src="js/sortable.js?v=80"></script>
-<script src="js/modelpicker.js?v=80"></script>
-<script src="js/attrfields.js?v=80"></script>
-<script src="js/settings.js?v=80"></script>
-<script src="js/labels.js?v=80"></script>
-<script src="js/app.js?v=80"></script>
+<script src="js/vue.global.prod.js?v=86"></script>
+<script src="js/api.js?v=86"></script>
+<script src="js/pos_shared.js?v=86"></script>
+<script src="js/catalogfields.js?v=86"></script>
+<script src="js/checkout.js?v=86"></script>
+<script src="js/receive.js?v=86"></script>
+<script src="js/stocktake.js?v=86"></script>
+<script src="js/records.js?v=86"></script>
+<script src="js/catalog.js?v=86"></script>
+<script src="js/sortable.js?v=86"></script>
+<script src="js/modelpicker.js?v=86"></script>
+<script src="js/attrfields.js?v=86"></script>
+<script src="js/settings.js?v=86"></script>
+<script src="js/labels.js?v=86"></script>
+<script src="js/app.js?v=86"></script>
 </body>
 </html>

@@ -4,11 +4,8 @@ from collections.abc import Mapping
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, NotFoundError, ValidationError
 from lib.db import in_clause, next_sort
-from lib.normalize import normalize_key
 from lib import product_rules
 from lib.product_rules import FIELD_TYPES
-
-FEATURE_FIELD_KEY = normalize_key("特性詞條")  # 固定欄位:不可停用/刪除
 
 
 _ACTION_RULES = {
@@ -320,9 +317,6 @@ class SettingsService:
             # 欄位已被使用鎖型態(規格 §10.2)
             if self.repo.one("SELECT 1 FROM VariantAttribute WHERE field_id=? LIMIT 1", (item_id,)):
                 raise ValidationError("欄位已被使用,不可變更型態")
-        name_row = self.repo.one("SELECT name FROM AttributeField WHERE field_id=?", (item_id,))
-        if fields.get("active") == 0 and normalize_key(name_row[0]) == FEATURE_FIELD_KEY:
-            raise ValidationError("特性詞條為固定欄位,不可停用")
         # 過渡轉接:default_option_id / sort 落到 CategoryField(前端改版後移除)
         if "default_option_id" in fields:
             dv = fields.pop("default_option_id")
@@ -433,9 +427,6 @@ class SettingsService:
         current = [r["field_id"] for r in self.repo.execute(
             "SELECT field_id FROM CategoryField WHERE category_id=?", (cid,))]
         keep = {fid for fid in current if counts.get(fid, 0) == 1}
-        # 特性詞條為固定欄位(規格 §11.2):綁定不得被解除,一律保留不受傳入清單影響
-        keep |= {r["field_id"] for r in self.repo.execute("SELECT field_id,name FROM AttributeField")
-                 if normalize_key(r["name"]) == FEATURE_FIELD_KEY}
         desired = set(ids) - keep
         for fid in current:
             if fid in keep or fid in desired:
@@ -455,16 +446,12 @@ class SettingsService:
         existing = self.repo.one(
             "SELECT sort,required,default_option_id,active FROM CategoryField "
             "WHERE category_id=? AND field_id=?", (category_id, field_id))
-        name = self.repo.one("SELECT name FROM AttributeField WHERE field_id=?", (field_id,))[0]
-        is_feature = normalize_key(name) == FEATURE_FIELD_KEY
         cur = (dict(existing) if existing
                else {"sort": 0, "required": 0, "default_option_id": None, "active": 1})
         new = dict(cur)
         for k in ("sort", "required", "default_option_id", "active"):
             if k in fields and fields[k] is not None:
                 new[k] = int(fields[k]) if k in ("sort", "required", "active") else fields[k]
-        if is_feature and int(new["active"]) == 0:
-            raise ValidationError("特性詞條為固定欄位,不可停用")
         if "required" in fields and int(new["required"]) != int(cur["required"]):
             if self._category_has_variant(category_id):
                 raise ValidationError("此種類已有子產品,暫不可變更必填設定")
@@ -493,13 +480,9 @@ class SettingsService:
         規格欄是全域共用的(同一個「顏色」掛在多個種類),故只解除本種類的掛勾與
         本種類的值,其他種類不受影響;等到沒有任何種類再用、也沒有任何商品的值,
         才把欄位本身與其選項一起清掉(沿用零使用自動清理的慣例)。
-        特性詞條為固定欄,不允許移除。
         """
         self.repo.require("Category", "category_id", category_id, "查無此種類")
         self.repo.require("AttributeField", "field_id", field_id, "查無此規格欄")
-        name = self.repo.one("SELECT name FROM AttributeField WHERE field_id=?", (field_id,))[0]
-        if normalize_key(name) == FEATURE_FIELD_KEY:
-            raise ValidationError("特性詞條為固定欄位,不可刪除")
         if not self.repo.one("SELECT 1 FROM CategoryField WHERE category_id=? AND field_id=?",
                              (category_id, field_id)):
             raise NotFoundError("此種類未使用此規格欄")

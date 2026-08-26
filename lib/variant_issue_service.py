@@ -31,9 +31,13 @@ class VariantIssueService:
             raise NotFoundError("找不到子產品")
         return row
 
-    def _feature_id(self):
+    def _feature_id(self, category_id):
+        """本種類的特性詞條欄(每個種類各自一份同名欄)。"""
         for row in self.conn.execute(
-                "SELECT field_id, name FROM AttributeField WHERE active=1 ORDER BY field_id"):
+                "SELECT f.field_id, f.name FROM CategoryField cf "
+                "JOIN AttributeField f ON f.field_id=cf.field_id "
+                "WHERE cf.category_id=? AND cf.active=1 AND f.active=1 ORDER BY f.field_id",
+                (category_id,)):
             if normalize_key(row["name"]) == FEATURE_FIELD_KEY:
                 return row["field_id"]
         return None
@@ -74,7 +78,7 @@ class VariantIssueService:
         {issues: [issue_dict,...], resolvable_barcodes: [code,...]}
         resolvable_barcodes 為原重複、現已無衝突可寫入正式欄位的條碼。"""
         ctx = self._context(variant_id)
-        feature_id = self._feature_id()
+        feature_id = self._feature_id(ctx["category_id"])
         issues = []
         # 1. 缺必填
         provided = self._provided_fields(variant_id)

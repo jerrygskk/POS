@@ -43,9 +43,13 @@ class VariantBatchService:
             out[normalize_key(r["name"])] = r
         return out
 
-    def _feature_field_id(self):
+    def _feature_field_id(self, category_id):
+        """本種類的特性詞條欄。每個種類各自一份同名欄,不可跨種類取用。"""
         for row in self.conn.execute(
-                "SELECT field_id, name FROM AttributeField WHERE active=1 ORDER BY field_id"):
+                "SELECT f.field_id, f.name FROM CategoryField cf "
+                "JOIN AttributeField f ON f.field_id=cf.field_id "
+                "WHERE cf.category_id=? AND cf.active=1 AND f.active=1 ORDER BY f.field_id",
+                (category_id,)):
             if normalize_key(row["name"]) == FEATURE_FIELD_KEY:
                 return row["field_id"]
         return None
@@ -181,7 +185,7 @@ class VariantBatchService:
             raise ValidationError("尚未加入任何子產品")
         category_id = self._require_product(product_id)
         writable = self._writable_fields(category_id)
-        feature_id = self._feature_field_id()
+        feature_id = self._feature_field_id(category_id)
         model_mode = self.conn.execute(
             "SELECT model_mode FROM Category WHERE category_id=?",
             (category_id,)).fetchone()["model_mode"]
@@ -270,7 +274,7 @@ class VariantBatchService:
             raise ValidationError("尚未加入任何子產品")
         category_id = self._require_product(product_id)
         writable = self._writable_fields(category_id)
-        feature_id = self._feature_field_id()
+        feature_id = self._feature_field_id(category_id)
         model_mode = self.conn.execute(
             "SELECT model_mode FROM Category WHERE category_id=?",
             (category_id,)).fetchone()["model_mode"]
