@@ -46,6 +46,10 @@ class VariantBatchTests(ConnTestCase):
     def _variant_count(self, conn):
         return conn.execute("SELECT COUNT(*) c FROM Variant").fetchone()["c"]
 
+    def _table_counts(self, conn):
+        return [conn.execute(f"SELECT COUNT(*) c FROM {table}").fetchone()["c"]
+                for table in ("Variant", "AttributeOption", "Barcode", "VariantAttribute")]
+
     # ---- 驗證段 / 結構化錯誤 ----
 
     def test_validate_batch_dry_creates_nothing(self):
@@ -85,6 +89,36 @@ class VariantBatchTests(ConnTestCase):
                     if e["code"] == "duplicate_signature"]
             self.assertEqual(errs[0]["related_draft_id"], "a")
             self.assertIsNone(errs[0]["related_variant_id"])
+
+    def test_precheck_reports_without_writing(self):
+        self.facade.invoke("variants.batch_create", {"product_id": self.pid, "drafts": [
+            {"draft_id": "base", "attributes": {"顏色": "紅"}}]})
+        conn = self._fresh()
+        before = self._table_counts(conn)
+        res = self.facade.invoke("variants.batch_precheck", {"product_id": self.pid, "drafts": [
+            {"draft_id": "d1", "attributes": {"顏色": "紅"}},
+            {"draft_id": "d2", "attributes": {"顏色": "全新色值Y"}}]})
+        self.assertEqual(self._table_counts(conn), before)
+        conn.close()
+        self.assertTrue(res["results"][0]["existing_duplicate"])
+        self.assertIsNotNone(res["results"][0]["related_variant_id"])
+        self.assertFalse(res["results"][1]["existing_duplicate"])
+        self.assertEqual(res["results"][1]["errors"], [])
+        self.assertEqual(res["summary"],
+                         {"total": 2, "invalid": 1, "existing_duplicates": 1})
+
+    def test_precheck_matches_batch_create_verdict(self):
+        ok_payload = {"product_id": self.pid, "drafts": [
+            {"draft_id": "d1", "attributes": {"顏色": "紅"}, "price": 100}]}
+        bad_payload = {"product_id": self.pid, "drafts": [
+            {"draft_id": "d1", "attributes": {"長度": "1m"}}]}
+        self.assertEqual(self.facade.invoke(
+            "variants.batch_precheck", ok_payload)["summary"]["invalid"], 0)
+        self.assertTrue(self.facade.invoke(
+            "variants.batch_precheck", bad_payload)["summary"]["invalid"])
+        self.facade.invoke("variants.batch_create", ok_payload)
+        with self.assertRaises(Exception):
+            self.facade.invoke("variants.batch_create", bad_payload)
 
     # ---- 成功流程 ----
 

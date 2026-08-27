@@ -252,6 +252,23 @@ class VariantBatchService:
 
     # ---- 主流程 ----
 
+    def precheck(self, payload):
+        resolved, _ = self._validate_batch(payload, dry=True)
+        results = []
+        for i, r in enumerate(resolved):
+            duplicate = next((error for error in r["errors"]
+                              if error["code"] == "duplicate_signature"
+                              and error.get("related_variant_id") is not None), None)
+            results.append({"index": i, "draft_id": r["draft_id"],
+                            "errors": r["errors"],
+                            "existing_duplicate": duplicate is not None,
+                            "related_variant_id": duplicate and duplicate["related_variant_id"]})
+        return {"product_id": payload["product_id"], "results": results,
+                "summary": {"total": len(results),
+                            "invalid": sum(1 for result in results if result["errors"]),
+                            "existing_duplicates": sum(
+                                1 for result in results if result["existing_duplicate"])}}
+
     def batch_create(self, payload):
         product_id = payload["product_id"]
         resolved, ctx = self._validate_batch(payload, dry=False)

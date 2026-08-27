@@ -75,7 +75,7 @@ def _validate_action_payload(action, payload):
     if action=="variants.issues":
         _allow(payload,set())
         return
-    if action=="variants.batch_create":
+    if action in ("variants.batch_create", "variants.batch_precheck"):
         _allow(payload,{"product_id","drafts"})
         if not _is_int(payload.get("product_id")):raise ValidationError("商品識別碼格式不正確")
         if not isinstance(payload.get("drafts"),list) or not payload["drafts"]:raise ValidationError("尚未加入任何子產品")
@@ -424,7 +424,7 @@ class ProductService:
 class ProductFacade(BaseFacade):
     ACTIONS = {"products.create", "products.list", "catalog.list", "products.update", "products.delete",
                "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.update_editor", "variants.delete",
-               "variants.batch_create", "variants.field_usage", "variants.activate", "variants.issues",
+               "variants.batch_create", "variants.batch_precheck", "variants.field_usage", "variants.activate", "variants.issues",
                "barcodes.scan", "barcodes.add", "barcodes.delete"}
 
     ERROR_MESSAGE = "不支援的商品操作"
@@ -454,6 +454,9 @@ class ProductFacade(BaseFacade):
         if action == "variants.batch_create":
             from lib.variant_batch_service import VariantBatchService
             return VariantBatchService(connection).batch_create(payload)
+        if action == "variants.batch_precheck":
+            from lib.variant_batch_service import VariantBatchService
+            return VariantBatchService(connection).precheck(payload)
         if action == "variants.field_usage":
             return product_data.option_usage_in_category(
                 connection, payload["field_id"], payload["category_id"],
