@@ -134,7 +134,7 @@ def set_variant_attributes(conn, vid, category_id, attributes):
             oid = row["option_id"]
             # §12.3:停用選項僅允許沿用既有值,不得新增
             if not row["active"] and oid not in original:
-                raise ValidationError(f"規格欄「{name}」的選項「{val}」已停用,不可指定")
+                raise ValidationError(f"規格欄「{name}」的選項「{val}」已停用，不可指定")
             conn.execute("INSERT INTO VariantAttribute(variant_id,field_id,option_id) VALUES(?,?,?)", (vid, fid, oid))
     # 覆寫後清理:舊引用中已無任何子產品使用者硬刪(default 引用除外)
     cleanup_unused_options(conn, prev_option_ids)
@@ -143,7 +143,7 @@ def set_variant_attributes(conn, vid, category_id, attributes):
 def attr_rows(conn, ids):
     if not ids: return []
     qs=in_clause(ids)
-    return conn.execute(f"SELECT va.variant_id,f.name field_name,f.field_type,o.value option_value,va.text_value,(va.option_id IS NOT NULL AND va.option_id=cf.default_option_id) is_default FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id JOIN Variant v ON va.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id LEFT JOIN CategoryField cf ON cf.field_id=va.field_id AND cf.category_id=p.category_id LEFT JOIN AttributeOption o ON va.option_id=o.option_id WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,cf.sort,f.field_id,o.sort,o.option_id", ids).fetchall()
+    return conn.execute(f"SELECT va.variant_id,f.name field_name,f.field_type,o.value option_value,va.text_value FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id JOIN Variant v ON va.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id LEFT JOIN CategoryField cf ON cf.field_id=va.field_id AND cf.category_id=p.category_id LEFT JOIN AttributeOption o ON va.option_id=o.option_id WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,cf.sort,f.field_id,o.sort,o.option_id", ids).fetchall()
 
 
 def attrs_by_variant(conn, ids):
@@ -162,7 +162,7 @@ def display_attrs(conn, ids):
         if kind in ("multi","tags"):
             if fields and fields[-1][0]==r["field_name"]: fields[-1][2].append(r["option_value"])
             else: fields.append([r["field_name"],kind,[r["option_value"]]])
-        elif not r["is_default"]: fields.append([r["field_name"],kind,r["option_value"] if r["option_value"] is not None else r["text_value"]])
+        else: fields.append([r["field_name"],kind,r["option_value"] if r["option_value"] is not None else r["text_value"]])
     return {vid:"｜".join(("+" if k=="multi" else ", ").join(v) if k in ("multi","tags") else str(v) for _,k,v in fields) for vid,fields in acc.items()}
 
 
@@ -182,7 +182,7 @@ def variant_sort_keys(conn, ids):
 
 
 def _option_scope_counts(conn, field_id, column, value):
-    """回傳 {option_id: 次數}:該欄位選項在指定範圍(廠牌或大產品)內的使用子產品數。"""
+    """回傳 {option_id: 次數}:該欄位選項在指定範圍(廠牌或產品)內的使用子產品數。"""
     rows = conn.execute(
         "SELECT va.option_id, COUNT(DISTINCT va.variant_id) c "
         "FROM VariantAttribute va "
@@ -200,9 +200,9 @@ def option_usage_in_category(conn, field_id, category_id, brand_id=None,
     使用次數=該種類內以此選項為值的子產品數。
     排序:使用次數多→少、既有 sort、選項值、option_id(穩定)。含停用選項(帶 active)。
 
-    前排範圍(lead)採三層退路:該廠牌用過 → 該大產品用過 → 都沒有則不指定,
+    前排範圍(lead)採三層退路:該廠牌用過 → 該產品用過 → 都沒有則不指定,
     由前端沿用種類次數前幾名。理由:廠牌能區隔各家專屬款式(如 SolidX 只有一家有);
-    廠牌欄為空的商品(無品牌皮套)退回大產品仍能收斂;全新大產品第一筆才無歷史可用。
+    廠牌欄為空的商品(無品牌皮套)退回產品仍能收斂;全新產品第一筆才無歷史可用。
     固定次序的值(PINNED_OPTION_VALUES)一律列入前排且次序寫死。"""
     rows = conn.execute(
         "SELECT o.option_id, o.value, o.active, o.sort, "
@@ -224,7 +224,7 @@ def option_usage_in_category(conn, field_id, category_id, brand_id=None,
     out = [{"option_id": r["option_id"], "value": r["value"],
             "active": bool(r["active"]), "usage_count": r["usage_count"],
             "model_ids": om.get(r["option_id"], [])} for r in rows]
-    # 前排範圍:廠牌優先,廠牌欄為空(或該廠牌無紀錄)退回大產品,再無則不指定
+    # 前排範圍:廠牌優先,廠牌欄為空(或該廠牌無紀錄)退回產品,再無則不指定
     lead = {}
     if brand_id is not None:
         lead = _option_scope_counts(conn, field_id, "brand_id", brand_id)
@@ -257,7 +257,7 @@ def has_records(conn, ids):
 def variant_issues(conn, ids):
     """回傳 {variant_id: [issue_dict,...]}。issue_dict 含 issue_type、field_id、
     field_name(缺必填欄名)、source_value、related_variant_id 與 related_label
-    (對照子產品的「大產品名 規格 條碼」摘要),供前端一次列出全部問題。"""
+    (對照子產品的「產品名 規格 條碼」摘要),供前端一次列出全部問題。"""
     out = {}
     if not ids:
         return out
@@ -279,7 +279,7 @@ def variant_issues(conn, ids):
 
 
 def _variant_labels(conn, ids):
-    """對照子產品摘要:{variant_id: '大產品名｜規格｜條碼'}。"""
+    """對照子產品摘要:{variant_id: '產品名｜規格｜條碼'}。"""
     out = {}
     ids = [i for i in dict.fromkeys(ids) if i is not None]
     if not ids:

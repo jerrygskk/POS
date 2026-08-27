@@ -3,8 +3,10 @@ window.PosComponents = window.PosComponents || {};
 // 拖拉排序清單:⠿ 把手整列拖、序號格打數字+Enter 搬位;
 // 改動只動記憶體,亮「儲存排序」按下才 emit save(ids)。
 window.PosComponents["sortable-list"] = {
+  // activeKey:判斷列要不要轉灰的欄位名(規格模板用 cf_active,其餘用 active)
   props: { items: { type: Array, required: true },
-           itemKey: { type: String, required: true } },
+           itemKey: { type: String, required: true },
+           activeKey: { type: String, default: "active" } },
   emits: ["save"],
   data() { return { rows: [], dirty: false, dragIdx: null, overIdx: null }; },
   watch: {
@@ -58,7 +60,7 @@ window.PosComponents["sortable-list"] = {
     </div>
     <template v-for="(it, i) in rows" :key="it[itemKey]">
       <div class="maint-row"
-           :class="{ inactive: !it.active, 'drop-before': overIdx === i,
+           :class="{ inactive: !it[activeKey], 'drop-before': overIdx === i,
                      'drop-after': overIdx === i + 1 && i === rows.length - 1 }"
            @dragover.prevent="onDragOver(i, $event)"
            @dragleave="(overIdx === i || overIdx === i + 1) && (overIdx = null)"

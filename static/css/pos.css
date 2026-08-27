@@ -157,7 +157,37 @@ tr.inactive > td { opacity: 0.55; }
 .inline-add { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .add-before-list { margin-top: 0; margin-bottom: 10px; flex-wrap: nowrap; }
 .sort-actions { margin: 0 0 6px; padding: 6px 0; flex-wrap: nowrap; }
+/* 自訂規格列:名稱吃剩餘寬,其餘控制項固定寬不換行 */
+.maint-row select { min-width: 92px; }
+.maint-row .switch-label { font-size: 12px; }
 .drag-handle { color: var(--text-3); cursor: grab; padding: 0 4px; user-select: none; }
+/* 固定項目列:沒有輸入框與序號,名稱與型態直接以文字呈現 */
+.maint-row.fixed-row { padding-left: 4px; }
+.fixed-name { flex: 1; min-width: 140px; font-weight: 600; font-size: 14px;
+  color: var(--text); }
+/* 佔位隱藏:留住寬度只是不顯示,避免同列其他欄位跟著位移 */
+.invisible { visibility: hidden; }
+/* 切換式標籤:開啟填主色、關閉留灰框,狀態直接寫在標籤上(必填／選填) */
+.chip-toggle { font-size: 13px; padding: 4px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
+  cursor: pointer; font-family: inherit; min-width: 0; white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s; }
+.chip-toggle:hover:not(:disabled) { background: var(--hover); }
+.chip-toggle.on { background: var(--accent-soft); border-color: var(--accent);
+  color: var(--primary-active); font-weight: 600; }
+.chip-toggle.on:hover:not(:disabled) { background: var(--accent); color: #fff; }
+/* 鎖定時不轉灰:外觀與可按時相同,只是點不動(滑鼠提示說明原因) */
+.chip-toggle:disabled { cursor: default; }
+.chip-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* 群組標題→說明→新增列拉開距離,三段黏在一起看起來很擠 */
+.cat-detail .grp-title { margin: 16px 0 4px; font-size: 16px; color: var(--text); }
+.cat-detail .grp-title + .hint { display: block; margin-bottom: 12px; }
+/* 啟用開關固定貼齊列尾,固定項目列與自訂規格列的開關才會對在同一直線 */
+.maint-row .switch { margin-left: auto; }
+.maint-row .switch + .switch-label { width: 28px; color: var(--text); }
+/* 規格項目清單:名稱吸收多餘寬度,操作鈕與開關之間才不會空一大塊 */
+.cat-detail .maint-row input.name { flex: 1 1 220px; min-width: 120px; }
+.cat-detail .maint-row select { flex: 0 0 auto; }
 .drag-handle:active { cursor: grabbing; }
 .seq-cell { width: 48px; text-align: center; border: 1px dashed var(--accent);
   border-radius: 6px; padding: 4px 2px; }
@@ -282,30 +312,12 @@ table.sub td:last-child { white-space: nowrap; }
   border-top: 1px solid var(--hover); }
 .cat-add input { flex: 1; min-width: 0; }
 .cat-detail { flex: 1; background: var(--surface); border-radius: 8px; padding: 16px;
-  min-width: 0; max-width: 720px; }
+  min-width: 0; max-width: 770px; }
 .detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   margin-bottom: 14px; }
 .detail-head .cat-title { flex: 1; min-width: 160px; font-size: 18px; font-weight: 600; }
 .detail-line { color: var(--text-2); font-size: 14px; margin-top: 8px; }
-.tpl-list { border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
-  margin: 6px 0 8px; }
-/* 整列不再是點擊區:一切動作走右側按鈕,避免誤觸 */
-/* 一列兩行:名稱在上,型別／必填／預設值／狀態串成灰色副標在下。
-   不切欄——半數欄位沒有值,表格式欄位會把空白畫出來。 */
-.tpl-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px;
-  position: relative; cursor: default; }
-/* 分隔線內縮,對齊文字起始處(Apple 清單慣例) */
-.tpl-row::after { content: ""; position: absolute; left: 12px; right: 0; bottom: 0;
-  height: 1px; background: var(--hover); }
-.tpl-row:last-child::after { display: none; }
-.tpl-row.inactive .tpl-name { color: var(--text-3); }
-/* 固定列(手機型號、特性詞條)名稱不隨使用與否轉灰 */
-.tpl-row.fixed .tpl-name { color: var(--text); }
-.tpl-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.tpl-name { font-weight: 600; }
-.tpl-name, .tpl-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tpl-sub { color: var(--text-2); font-size: 13px; }
-/* 固定列的開關:左右兩側寫不使用／使用,目前狀態轉黑字 */
+/* 列上的啟用開關:左右兩側寫停用／啟用,目前狀態轉黑字 */
 .switch-label { font-size: 13px; color: var(--text-3); }
 .switch-label.on { color: var(--text); }
 .switch { position: relative; width: 44px; height: 26px; min-width: 0; padding: 0;
@@ -322,22 +334,54 @@ table.sub td:last-child { white-space: nowrap; }
   align-items: center; }
 table.big-prod { margin: 6px 0 8px; }
 table.big-prod td:last-child { white-space: nowrap; }
+/* 子產品／狀態欄不換行:標題兩字要塞在同一橫行 */
+table.big-prod th:nth-child(3), table.big-prod th:nth-child(4),
+table.big-prod td:nth-child(3), table.big-prod td:nth-child(4) {
+  white-space: nowrap; width: 1%; }
 
 /* ── 單層 popup(不巢狀) ── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35);
   display: flex; align-items: flex-start; justify-content: center;
   padding: 40px 16px; overflow-y: auto; z-index: 100; }
-.modal { --label-w: 6em; background: var(--surface); border-radius: 10px; padding: 20px;
-  width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 12px;
+.modal { --label-w: 52px; background: var(--surface); border-radius: 10px; padding: 20px 24px;
+  width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 12px;
   box-shadow: 0 12px 40px rgba(0,0,0,0.25); }
+/* 欄位標籤靠右貼著輸入框,中間不留一大段空白 */
 .modal > label { display: grid; grid-template-columns: var(--label-w) 1fr;
-  align-items: center; gap: 8px; }
+  align-items: center; gap: 8px; text-align: right; }
+/* 只有標籤那段純文字靠右;所有元素子節點(輸入框、下拉、清單)一律靠左,
+   否則 text-align 會一路繼承進候選清單裡。 */
+.modal > label > * { text-align: left; }
 .modal > label input[type="checkbox"] { justify-self: start; }
-.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
+/* 欄位下方的一句提示:與輸入框左緣對齊,不占欄位標籤那一格 */
+/* 提示對齊輸入框左緣:label-w 為 px,不受這行較小的字級影響 */
+.field-note { margin: -6px 0 0 calc(var(--label-w) + 8px); color: var(--text-2);
+  font-size: 13px; text-align: left; }
+.field-note .link { color: var(--primary-hover); cursor: pointer; }
+.field-note .link:hover { text-decoration: underline; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px;
+  align-items: center; }
+/* 送出前的警告:與按鈕同一列,占滿左側空白 */
+.modal-warn { flex: 1; min-width: 0; color: var(--danger); font-size: 13px;
+  text-align: left; line-height: 1.4; }
+/* 確認／通知視窗公版:白底黑字、置中於視窗 */
+.modal-overlay.modal-centered { align-items: center; padding: 16px; }
+.confirm-box { max-width: 400px; gap: 14px; }
+.confirm-title { font-size: 16px; font-weight: 600; }
+.confirm-text { white-space: pre-wrap; line-height: 1.6; }
+/* 破壞性操作的確定鈕用危險色,與一般確認區隔 */
+button.primary.danger { background: var(--danger); }
+button.primary.danger:hover { filter: brightness(0.92); }
 
 /* 廠牌可搜尋下拉(popup 內,非第二層 popup) */
 .combo { position: relative; display: block; }
-.combo input { width: 100%; }
+.combo input { width: 100%; padding-right: 32px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1.5 L6 6.5 L11 1.5' fill='none' stroke='%233c3c43' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat; background-position: right 10px center; }
+/* 箭頭畫在輸入框上(與 select 同一個外框);這裡只是箭頭大小的透明點擊區,
+   不可用 <button>——全域 button 有 min-width 80px 與 hover 底色,會冒出一塊灰。 */
+.combo-caret { position: absolute; top: 50%; right: 6px; width: 20px; height: 20px;
+  transform: translateY(-50%); cursor: pointer; }
 .combo-menu { position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
   margin-top: 2px; max-height: 220px; overflow-y: auto;

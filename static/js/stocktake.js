@@ -40,7 +40,7 @@ window.PosPages["page-stocktake"] = {
     },
     async close() {
       const diffs = this.detail.items.filter(i => i.diff !== 0);
-      if (!confirm(`共 ${diffs.length} 項有差異,結案後將調整庫存。確定結案?`)) return;
+      if (!await PosConfirm.ask(`共 ${diffs.length} 項有差異，結案後將調整庫存。確定結案?`)) return;
       await API.closeStocktake(this.current);
       this.current = null; this.detail = null;
       await this.reload();

@@ -179,9 +179,9 @@ class SettingsService:
         table, id_col, _, message = self.SIMPLE[kind]
         self.repo.require(table, id_col, item_id, message)
         refs = {
-            "categories": [("Product", "category_id", "仍有商品屬於此種類,無法刪除,請改用停用")],
-            "brands": [("Product", "brand_id", "仍有商品屬於此廠牌,無法刪除,請改用停用")],
-            "phone_brands": [("PhoneModel", "phone_brand_id", "仍有型號屬於此手機品牌,無法刪除,請改用停用")],
+            "categories": [("Product", "category_id", "仍有商品屬於此種類，無法刪除，請改用停用")],
+            "brands": [("Product", "brand_id", "仍有商品屬於此廠牌，無法刪除，請改用停用")],
+            "phone_brands": [("PhoneModel", "phone_brand_id", "仍有型號屬於此手機品牌，無法刪除，請改用停用")],
         }[kind]
         for ref_table, ref_col, ref_message in refs:
             if self.repo.one(f"SELECT 1 FROM {ref_table} WHERE {ref_col}=? LIMIT 1", (item_id,)):
@@ -252,7 +252,7 @@ class SettingsService:
 
     def delete_model(self, item_id):
         self.repo.require("PhoneModel", "model_id", item_id, "查無此型號")
-        for table, msg in (("VariantModel", "仍有商品掛此型號,無法刪除,請改用停用"), ("OptionModel", "仍有選項限定此型號,無法刪除,請改用停用")):
+        for table, msg in (("VariantModel", "仍有商品掛此型號，無法刪除，請改用停用"), ("OptionModel", "仍有選項限定此型號，無法刪除，請改用停用")):
             if self.repo.one(f"SELECT 1 FROM {table} WHERE model_id=?", (item_id,)): raise ConflictError(msg)
         self.repo.execute("DELETE FROM PhoneModel WHERE model_id=?", (item_id,)); return {"ok": True}
 
@@ -316,13 +316,13 @@ class SettingsService:
             if fields["field_type"] not in FIELD_TYPES: raise ValidationError("不支援的規格欄類型")
             # 欄位已被使用鎖型態(規格 §10.2)
             if self.repo.one("SELECT 1 FROM VariantAttribute WHERE field_id=? LIMIT 1", (item_id,)):
-                raise ValidationError("欄位已被使用,不可變更型態")
+                raise ValidationError("欄位已被使用，不可變更型態")
         # 過渡轉接:default_option_id / sort 落到 CategoryField(前端改版後移除)
         if "default_option_id" in fields:
             dv = fields.pop("default_option_id")
             cats = self._field_categories(item_id)
             if len(cats) != 1:
-                raise ValidationError("此欄位未綁定或綁定多個種類,請以種類模板設定預設選項")
+                raise ValidationError("此欄位未綁定或綁定多個種類，請以種類模板設定預設選項")
             if dv is not None:
                 row = self.repo.one("SELECT field_id FROM AttributeOption WHERE option_id=?", (dv,))
                 if row is None or row[0] != item_id: raise ValidationError("預設選項不屬於此規格欄")
@@ -449,12 +449,12 @@ class SettingsService:
         cur = (dict(existing) if existing
                else {"sort": 0, "required": 0, "default_option_id": None, "active": 1})
         new = dict(cur)
-        for k in ("sort", "required", "default_option_id", "active"):
+        for k in ("sort", "required", "active"):
             if k in fields and fields[k] is not None:
-                new[k] = int(fields[k]) if k in ("sort", "required", "active") else fields[k]
-        if "required" in fields and int(new["required"]) != int(cur["required"]):
-            if self._category_has_variant(category_id):
-                raise ValidationError("此種類已有子產品,暫不可變更必填設定")
+                new[k] = int(fields[k])
+        # 預設帶入值允許送 None 清除(其餘欄位 None＝不動)
+        if "default_option_id" in fields:
+            new["default_option_id"] = fields["default_option_id"]
         if new["default_option_id"] is not None:
             row = self.repo.one("SELECT field_id FROM AttributeOption WHERE option_id=?",
                                 (new["default_option_id"],))
@@ -472,7 +472,33 @@ class SettingsService:
                 "VALUES(?,?,?,?,?,?)",
                 (category_id, field_id, new["sort"], new["required"],
                  new["default_option_id"], new["active"]))
+        if int(new["required"]) != int(cur["required"]):
+            self._sync_required_issues(category_id, field_id, int(new["required"]))
         return {"ok": True}
+
+    def _sync_required_issues(self, category_id, field_id, required):
+        """必填切換只往前生效:既有子產品不停用、不強制補值,改列入待補清單。
+
+        改成必填→該種類目前缺此欄值的子產品補一筆 missing_required;
+        改回選填→把此欄的 missing_required 清掉。缺值定義同 VariantIssue:
+        沒有該欄的值,或文字欄只填空白。"""
+        if not required:
+            self.repo.execute(
+                "DELETE FROM VariantIssue WHERE issue_type='missing_required' AND field_id=? "
+                "AND variant_id IN (SELECT v.variant_id FROM Variant v "
+                "JOIN Product p ON v.product_id=p.product_id WHERE p.category_id=?)",
+                (field_id, category_id))
+            return
+        self.repo.execute(
+            "INSERT INTO VariantIssue(variant_id,issue_type,field_id) "
+            "SELECT v.variant_id,'missing_required',? FROM Variant v "
+            "JOIN Product p ON v.product_id=p.product_id "
+            "WHERE p.category_id=? "
+            "AND NOT EXISTS (SELECT 1 FROM VariantAttribute va WHERE va.variant_id=v.variant_id "
+            "  AND va.field_id=? AND (va.option_id IS NOT NULL OR TRIM(COALESCE(va.text_value,''))<>'')) "
+            "AND NOT EXISTS (SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id "
+            "  AND vi.issue_type='missing_required' AND vi.field_id=?)",
+            (field_id, category_id, field_id, field_id))
 
     def delete_field(self, category_id, field_id):
         """把規格欄從此種類移除,並清掉此種類商品填過的值。

@@ -165,7 +165,7 @@ class TestMigrationV7toV13(unittest.TestCase):
           INSERT INTO CategoryField(category_id,field_id) VALUES
             (1,5),(1,7),(3,7),(2,5);          -- (2,5) 與 v8 補建的 (2,6)→v9→(2,5) 撞,測去重
 
-          -- 大產品/子產品
+          -- 產品/子產品
           INSERT INTO Product(product_id,name,category_id,brand_id,default_price) VALUES
             (1,'A牌手機殼',2,1,NULL),
             (2,'HODA鋼化玻璃',1,2,590),

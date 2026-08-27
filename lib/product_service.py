@@ -199,7 +199,7 @@ class ProductService:
         brand_id = self._resolve_brand(payload["category_id"], payload.get("brand_id"),
                                        payload.get("brand_name"))
         if self._same_category_name_exists(payload["category_id"], payload["name"]):
-            raise ConflictError("此種類已有同名大產品")
+            raise ConflictError("此種類已有同名產品")
         cur = self.repo.execute(
             "INSERT INTO Product(name,category_id,brand_id,note) VALUES(?,?,?,?)",
             (payload["name"], payload["category_id"], brand_id, payload.get("note")))
@@ -228,7 +228,7 @@ class ProductService:
             raise NotFoundError("找不到商品")
         # 子產品建立要求 Category 與 Product 皆 active(規格 §8.2)
         if not row["active"]:
-            raise ValidationError("大產品已停用,不可新增子產品")
+            raise ValidationError("產品已停用，不可新增子產品")
         self.repo.require_active_category(row["category_id"])
         vid, codes = self._create_variant(product_id, row["category_id"], payload)
         return {"variant_id": vid, "barcodes": codes}
@@ -319,7 +319,7 @@ class ProductService:
         fields.pop("brand_name", None)
         if fields.get("name") is not None and category_id is not None:
             if self._same_category_name_exists(category_id, fields["name"], exclude_pid=pid):
-                raise ConflictError("此種類已有同名大產品")
+                raise ConflictError("此種類已有同名產品")
         _update_by_id(self.repo.connection, "Product", "product_id", pid, fields)
         return {"ok": True}
 
@@ -338,7 +338,7 @@ class ProductService:
             state = VariantIssueService(self.repo.connection).revalidate(vid)
             # 待處理筆改由完整驗證把關啟用:仍有問題不得啟用(繞過雙擊/行內編輯亦擋)
             if activating and state["issues"]:
-                raise ValidationError("子產品仍有待處理問題,無法啟用", details=state["issues"])
+                raise ValidationError("子產品仍有待處理問題，無法啟用", details=state["issues"])
         return {"ok": True}
 
     def update_variant_editor(self, payload):

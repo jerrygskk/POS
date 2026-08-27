@@ -41,8 +41,12 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `static/` | `index.html` + `css/pos.css` + `js/*.js`（Vue 3、DesktopBridge 包裝、各頁邏輯） |
 | `static/variant_editor.html` | 款式修改子視窗頁面（獨立 Vue app，共用 `attrfields`／`modelpicker`／`optpicker` 元件） |
 | `static/variant_batch.html` | 新增款式子視窗頁面（`variant_batch_window.js` 外殼＋既有建檔頁元件與樣板） |
-| `static/field_editor.html` | 規格設定子視窗頁面（`field_editor.js`；設定頁「新增規格／✎ 修改」由此開窗） |
+| `static/field_editor.html` | 規格選項子視窗頁面（`field_editor.js`；設定頁自訂規格列的「✎ 選項」由此開窗，只管選項清單與建檔預設帶入值） |
 | `static/js/pos_shared.js` | 主視窗與子視窗共用的全域 mixin（`guard`／`guardReload`／`attrText`） |
+| `static/js/optpicker.js` | 規格值候選選取器 `opt-picker`／`tag-selector`（前排常用值＋搜尋＋當場新增；檔頭寫明三種輸入公版的分工） |
+| `static/js/combobox.js` | 可搜尋下拉 `combo-box`（從既有主檔挑一筆，可新增未收錄的值） |
+| `static/js/sortable.js` | 拖拉排序清單 `sortable-list`（⠿ 拖曳＋序號格搬位，改動後才亮「儲存排序」） |
+| `static/js/confirm.js` | 確認／通知視窗公版 `PosConfirm.ask()`／`notify()`（取代瀏覽器內建 confirm／alert） |
 | `static/css/dialog-theme.css` | 子視窗對話框外觀（`.dialog-*` 公版，沿用 §2 UI 風格色票） |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
 | `tests/` | 單元測試（`tests/base.py` 共用 `ConnTestCase`／`FacadeTestCase` 與 fixture helper） |
@@ -86,7 +90,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 (`copy.deepcopy`,子視窗改不到主視窗資料)。子視窗有自己的 `DesktopBridge` 實例,
 共用同一個 Facade。
 
-**新增款式的入口與脈絡**:工具列的「新增款式」開空脈絡(子視窗內自己選種類與大產品);
+**新增款式的入口與脈絡**:工具列的「新增款式」開空脈絡(子視窗內自己選種類與產品);
 商品列的「新增款式」帶 `category_id`／`product_id`,子視窗直接鎖定該款。
 ⚠️ 建檔頁在 `mounted` 讀 props 決定預選,外殼必須**先取到脈絡再掛載**
 (`v-if="ready"`),否則預選永遠是空的(PITFALLS VUE-9)。
@@ -111,7 +115,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 ### 固定列：適用型號與特性詞條(種類設定)
 
 `Category.model_mode` 只有 `required`／`hidden` 兩種:`required`＝該種類的款式**必填**適用型號,
-`hidden`＝該種類不使用型號。設定入口只有一個——設定頁「規格項目列表」清單最上面的
+`hidden`＝該種類不使用型號。設定入口只有一個——設定頁「規格項目」清單最上面的
 **固定列「手機型號」**,右側開關切換(`static/js/settings.js` 的 `MODEL_ROW_ID`)。
 型號實際存於 `VariantModel` 關聯表,不是規格欄,故以固定列呈現而非真的建 `AttributeField`
 (真的建成規格欄要重做既有型號關聯與型號排序)。
@@ -131,13 +135,40 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 `variant_issue_service._feature_id` 一律只認本種類 `CategoryField` 綁定的那一份;
 舊版的「按名稱取 field_id 最小的一筆」退路會把詞條寫進別的種類那一份。
 
-### 規格候選的前排範圍(廠牌→大產品→種類)
+### 必填切換只往前生效(既有資料不動)
+
+改必填**不再因為種類已有子產品而鎖住**。規則只約束之後寫入的資料,既有子產品
+不停用、不強制補值——零售現場停售等於當下賣不了東西,沒有系統敢這樣做。
+
+`settings_service.set_field` 在 `required` 改變時同步待補清單
+(`_sync_required_issues`):改成必填→該種類目前缺此欄值的子產品各補一筆
+`VariantIssue.missing_required`(重複不疊加);改回選填→把此欄的該類問題筆刪掉。
+建檔仍硬擋必填,修改既有子產品維持軟性(可存,只有原本就是待處理筆才重驗)。
+(舊規則「已有子產品的種類暫時鎖住必填切換」已作廢。)
+
+### 產品名稱自動組裝
+
+新增產品的欄位順序是**廠牌→名稱→備註**,焦點落在廠牌;選了廠牌就把
+「廠牌 種類」(中間一個半形空格,與既有資料寫法一致)填進名稱。使用者一動手打過名稱
+就不再接管(`nameDirty`),此時名稱欄下方改出現「重新自動命名」把控制權還回去。
+自動名稱與此種類既有產品撞名時(同廠牌多條產品線),在儲存那一列即時顯示紅字提示,
+不等按了儲存才由後端擋。
+
+### 建檔預設帶入值(原「預設值」)
+
+`CategoryField.default_option_id` 的用途是**建檔時自動帶入**(`static/js/api.js`
+的 `initFormAttrs`),只對 select 欄有效,入口在規格選項子視窗。
+⚠️ 它一度還兼「顯示時省略等於預設值的規格值」,已移除:商品名稱一律完整顯示,
+省略會讓店員以為那筆沒填。`categories.set_field` 允許送 `default_option_id: null`
+清除(其餘欄位的 `null` 一律視為不動)。
+
+### 規格候選的前排範圍(廠牌→產品→種類)
 
 建檔／修改的規格候選 chip 前排不看種類總次數,改採三層退路(`variants.field_usage` 帶
-`brand_id`／`product_id`):**該廠牌用過 → 該大產品用過 → 都沒有才退回種類次數前 8**。
+`brand_id`／`product_id`):**該廠牌用過 → 該產品用過 → 都沒有才退回種類次數前 8**。
 服務層在每個選項上標 `lead`／`lead_count`,前端把 `lead` 的值全放前排、其餘收進「更多…」。
 理由:規格值常是某廠牌專屬(如 SolidX 只有一家有),用種類次數排會把別家的款式推到最前;
-廠牌欄為空的商品(無品牌皮套之類)退回大產品仍能收斂。全新大產品的第一筆無歷史可用,
+廠牌欄為空的商品(無品牌皮套之類)退回產品仍能收斂。全新產品的第一筆無歷史可用,
 只能退回種類次數。
 
 `product_rules.PINNED_OPTION_VALUES`(亮面／霧面／藍光／防窺)為固定次序,一律排最前且
@@ -201,6 +232,16 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 - **圓角 8px**(chip/tag 圓膠囊除外);一般鈕 `min-width: 80px` 保持等寬,小型鈕(`.btn-sm`/chip/表格操作鈕)歸零。
 - **表單對齊**:「標籤(固定寬 `--label-w`,預設 9em)＋輸入框」兩欄 grid,同表單內全部欄位對齊同一垂直線,列距 10px;label 內文字+輸入框靠 grid 匿名項對齊,html 不需加 span。巢狀框(如 `.spec-box`)在框內覆寫 `--label-w` 扣掉 padding+border,維持框內外同線。新表單一律照此規則。
 - **設定頁結構**:單一左欄分群選單(`.cat-list`:「商品種類」清單＋「基礎資料」群組的廠牌/手機品牌與型號)＋右側單一內容區,由 `settings.js` 的 `section` 狀態(`category`/`brands`/`models`)切換;新增設定分區時在左欄基礎資料群組加一項、右側加一段 `v-else-if`,不另開大分頁。
+- **設定頁「規格項目」清單**：所有欄位就地編輯，一列一行——序號、名稱、型態、✎ 選項、必填／選填、✕、啟用開關。手機型號與特性詞條為固定列，排在最前面、只有啟用開關，其餘控制項不顯示（不要用停用態的灰欄位表達「不可改」，看起來像壞掉）。自訂規格套拖拉排序公版 `sortable-list`（`active-key="cf_active"`），存檔時逐欄寫回 `CategoryField.sort`。列上改動一律即時存檔，成敗都重讀該種類模板，失敗時控制項才不會停在沒存進去的狀態。
+- **開關公版**（`.switch`，`pos.css`）：左右兩側寫「不使用／使用」（`.switch-label`，目前狀態加 `.on` 轉黑字）；關閉 `--pressed`、開啟 `--accent`，圓鈕白底。要用 `<button role="switch">` 並給 `aria-checked`，不用 `<div>`（鍵盤不能操作）。新的開關一律套這一組。
+- **必填／選填用切換式標籤**（`.chip-toggle`）：關閉＝白底灰框寫「選填」，開啟＝淡藍底主色字寫「必填」，文字隨狀態切換。不可用勾選框（太小、看不出狀態），鎖定時**不轉灰**，只是點不動並以 title 說明原因。
+- **輸入控制項三選一，不要再造第四種**：
+  - `opt-picker`（`static/js/optpicker.js`）：值域會長大、需要排出常用值的欄位（規格值、特性詞條）。前排該範圍用過的值＋次數、可搜尋、可當場新增；需要 `variants.field_usage`。
+  - `combo-box`（`static/js/combobox.js`）：從既有主檔挑一筆（廠牌之類），只有搜尋與「新增○○」。右側箭頭畫在輸入框的 `background-image`（與 select 同一個外框）；⚠️ 點擊區不可用 `<button>`——全域 `button` 有 `min-width: 80px` 與 hover 底色，會在框內冒出一塊灰。取得焦點不自動展開清單（會蓋住下面的欄位），點箭頭或開始打字才展開。
+  - 原生 `<select>`：選項固定且少（型態、狀態）。
+  原本 select/multi/tags 還有一條「候選未載入就退回 datalist／勾選框」的退路，已移除：它會靜默換成外觀完全不同的介面，出事看不出來，現在改顯示「候選載入中…」。
+- **確認／通知視窗一律用 `PosConfirm`**（`static/js/confirm.js`）：`PosConfirm.ask()`／`PosConfirm.notify()`，白底置中、Enter＝確定、Esc／點遮罩＝取消，破壞性操作的確定鈕用危險色。⚠️ 不可用瀏覽器內建的 `confirm()`／`alert()`——pywebview 會畫成深色系統對話框、貼在視窗上緣，與程式外觀完全不同。
+- **對話框欄位列**（`.modal > label`）：標籤欄固定 `--label-w`（px，不用 em——em 會跟著較小的提示字級縮水而對不齊），標籤靠右貼著輸入框；⚠️ `text-align: right` 只給標籤那段純文字，所有元素子節點要覆寫回靠左，否則會一路繼承進候選清單裡。欄位下方的一句提示用 `.field-note`（縮排對齊輸入框左緣），送出前的警告用 `.modal-warn`（與按鈕同列、靠左、危險色）。
 - **子視窗外觀**:`static/css/dialog-theme.css` 是子視窗公版。細捲軸(8px、`#c7c7cc`)、
   文字選取反白(`#8fa8c8`)與按鈕 hover/pressed 灰階(`#e5e5ea`／`#d1d1d6`)取自維護者
   另一個專案已調校過的彈窗公版(`PoliceDocSys/lib/theme.py`);該專案的 checkbox 色塊

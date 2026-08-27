@@ -1,7 +1,7 @@
-// 規格設定子視窗:設定頁「新增規格／✎ 修改」開此視窗(原本是網頁遮罩對話框)。
-// 內容量與款式修改同級(名稱、型態、排序、必填、預設值、選項清單),留在網頁對話框
-// 會被迫巢狀捲動,故比照款式修改改開 pywebview 子視窗(可拖、可縮)。
-// 脈絡由主視窗傳入:{ category_id, field_id, cat_has_variant }。field_id 為 null＝新增。
+// 規格選項子視窗:設定頁自訂規格列的「✎ 選項」開此視窗。
+// 名稱／型態／必填／啟用／排序都在清單列上就地設定,此視窗只管選項清單與
+// 建檔預設帶入值;選項數量可觀,留在網頁對話框會被迫巢狀捲動,故走 pywebview 子視窗。
+// 脈絡由主視窗傳入:{ category_id, field_id }。
 window.FieldEditorApp = {
   data() {
     return {
@@ -11,12 +11,8 @@ window.FieldEditorApp = {
       error: "",
       categoryId: null,
       fieldId: null,
-      catHasVariant: false,
       name: "",
       fieldType: "select",
-      sort: 1,
-      required: false,
-      active: true,
       defaultOptionId: null,
       options: [],
       newOption: "",
@@ -31,7 +27,6 @@ window.FieldEditorApp = {
     document.removeEventListener("keydown", this._keydown);
   },
   computed: {
-    isNew() { return this.fieldId == null; },
     hasOptions() { return ["select", "multi", "tags"].includes(this.fieldType); },
     activeOptions() { return this.options.filter(o => o.active); },
   },
@@ -44,21 +39,13 @@ window.FieldEditorApp = {
         const context = envelope.context || {};
         this.categoryId = context.category_id ?? null;
         this.fieldId = context.field_id ?? null;
-        this.catHasVariant = !!context.cat_has_variant;
         const fields = await API.listFields({ category_id: this.categoryId });
-        if (this.fieldId == null) {
-          this.sort = fields.length ? Math.max(...fields.map(f => f.sort)) + 1 : 1;
-        } else {
-          const field = fields.find(f => f.field_id === this.fieldId);
-          if (!field) throw new Error("查無此規格欄");
-          this.name = field.name;
-          this.fieldType = field.field_type;
-          this.sort = field.sort;
-          this.required = !!field.required;
-          this.active = !!field.cf_active;
-          this.defaultOptionId = field.default_option_id ?? null;
-          await this.reloadOptions();
-        }
+        const field = fields.find(f => f.field_id === this.fieldId);
+        if (!field) throw new Error("查無此規格欄");
+        this.name = field.name;
+        this.fieldType = field.field_type;
+        this.defaultOptionId = field.default_option_id ?? null;
+        await this.reloadOptions();
       } catch (error) {
         this.error = error.message;
       } finally {
@@ -66,12 +53,11 @@ window.FieldEditorApp = {
       }
     },
     async reloadOptions() {
-      if (this.fieldId == null) { this.options = []; return; }
       this.options = await API.listOptions({ field_id: this.fieldId, all: 1 });
     },
     async addOption() {
       const value = (this.newOption || "").trim();
-      if (!value || this.fieldId == null) return;
+      if (!value) return;
       await this.withError(async () => {
         await API.createOption({ field_id: this.fieldId, value, reactivate: true });
         this.newOption = "";
@@ -84,7 +70,8 @@ window.FieldEditorApp = {
       this.addOption();
     },
     async deleteOption(option) {
-      if (!confirm(`刪除選項「${option.value}」?已有商品使用時會改為停用。`)) return;
+      if (!await PosConfirm.ask(`刪除選項「${option.value}」?已有商品使用時會改為停用。`,
+                                { danger: true })) return;
       await this.withError(async () => {
         await API.deleteOption(option.option_id);
         if (this.defaultOptionId === option.option_id) this.defaultOptionId = null;
@@ -92,12 +79,12 @@ window.FieldEditorApp = {
       });
     },
     async cleanupOptions() {
-      if (this.fieldId == null) return;
-      if (!confirm("將永久刪除此規格欄中未使用且非預設值的選項,無法復原。確定繼續?")) return;
+      if (!await PosConfirm.ask("將永久刪除此規格欄中未使用且非建檔預設帶入值的選項，無法復原。確定繼續?",
+                                { danger: true })) return;
       await this.withError(async () => {
         const result = await API.cleanupOptions(this.fieldId);
         await this.reloadOptions();
-        alert(`已清理 ${result.deleted} 個未使用選項。`);
+        await PosConfirm.notify(`已清理 ${result.deleted} 個未使用選項。`);
       });
     },
     // 子視窗自己的錯誤呈現:失敗留在視窗上讓店員修正,不關窗
@@ -108,33 +95,12 @@ window.FieldEditorApp = {
     },
     async save() {
       if (this.saving || this.loading) return;
-      const name = (this.name || "").trim();
-      if (!name) { this.error = "請輸入規格欄名稱"; return; }
       this.saving = true;
       this.error = "";
       try {
-        let fieldId = this.fieldId;
-        if (fieldId == null) {
-          const created = await API.createField({
-            name, category_id: this.categoryId, field_type: this.fieldType });
-          fieldId = created.field_id;
-        } else {
-          const patch = {};
-          const fields = await API.listFields({ category_id: this.categoryId });
-          const current = fields.find(f => f.field_id === fieldId);
-          if (current) {
-            if (name !== current.name) patch.name = name;
-            if (this.fieldType !== current.field_type) patch.field_type = this.fieldType;
-          }
-          if (Object.keys(patch).length) await API.updateField(fieldId, patch);
-        }
-        const setFields = {
-          sort: parseInt(this.sort, 10) || 0,
-          active: this.active ? 1 : 0,
+        await API.setCategoryField(this.categoryId, this.fieldId, {
           default_option_id: this.fieldType === "select" ? (this.defaultOptionId ?? null) : null,
-        };
-        if (!this.catHasVariant) setFields.required = this.required ? 1 : 0;
-        await API.setCategoryField(this.categoryId, fieldId, setFields);
+        });
         this.committed = true;
         await API.invoke("desktop.child_window.close", { saved: true });
       } catch (error) {

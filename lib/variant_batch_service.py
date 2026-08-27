@@ -27,7 +27,7 @@ class VariantBatchService:
         if row is None:
             raise NotFoundError("找不到商品")
         if not row["p_active"]:
-            raise ValidationError("大產品已停用,不可新增子產品")
+            raise ValidationError("產品已停用，不可新增子產品")
         if row["category_id"] is None or not row["c_active"]:
             raise ValidationError("商品種類不存在或已停用")
         return row["category_id"]
@@ -226,7 +226,7 @@ class VariantBatchService:
         errors = [{"index": i, "draft_id": r["draft_id"], "errors": r["errors"]}
                   for i, r in enumerate(resolved) if r["errors"]]
         if errors:
-            raise ValidationError("部分子產品資料有誤,請修正後再送出", details=errors)
+            raise ValidationError("部分子產品資料有誤，請修正後再送出", details=errors)
 
         # 全數通過:寫入
         results = []
@@ -286,7 +286,7 @@ class VariantBatchService:
         hard = [{"index": i, "draft_id": r["draft_id"], "errors": r["structural_errors"]}
                 for i, r in enumerate(resolved) if r["structural_errors"]]
         if hard:
-            raise ValidationError("部分資料結構有誤,無法建立", details=hard)
+            raise ValidationError("部分資料結構有誤，無法建立", details=hard)
 
         sig_owner = dict(self._existing_signatures(product_id, feature_id))
         code_owner = {r["barcode"]: r["variant_id"]

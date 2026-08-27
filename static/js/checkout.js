@@ -30,7 +30,7 @@ window.PosPages["page-checkout"] = {
     addItem(r) {
       let price = r.price;
       if (price === null) {
-        const s = prompt(`「${r.name}」尚未定價,請輸入成交單價:`);
+        const s = prompt(`「${r.name}」尚未定價，請輸入成交單價:`);
         if (s === null) return;
         price = parseInt(s, 10);
         if (isNaN(price) || price < 0) { this.showError("價格輸入不正確"); return; }
@@ -62,7 +62,7 @@ window.PosPages["page-checkout"] = {
           paid: this.paid,
           items: this.cart.map(i => ({ variant_id: i.variant_id, qty: i.qty,
             unit_price: i.unit_price, discount: i.discount })) });
-        this.doneMsg = `結帳完成,找零 ${r.change} 元(交易編號 ${r.sale_id})`;
+        this.doneMsg = `結帳完成，找零 ${r.change} 元(交易編號 ${r.sale_id})`;
         this.cart = []; this.orderDiscount = 0; this.paid = 0;
         setTimeout(() => this.doneMsg = "", 5000);
       });

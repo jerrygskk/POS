@@ -32,7 +32,7 @@ class OptionCleanupTests(ConnTestCase):
         for v in ("1m", "2m"):
             c.execute("INSERT INTO AttributeOption(field_id,value,sort) VALUES(?,?,0)",
                       (self.len_fid, v))
-        self.pid = c.execute("INSERT INTO Product(name,category_id) VALUES('大產品',?)",
+        self.pid = c.execute("INSERT INTO Product(name,category_id) VALUES('產品',?)",
                              (self.cid,)).lastrowid
         c.commit()
         self.conn.close()

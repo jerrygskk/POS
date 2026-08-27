@@ -82,14 +82,29 @@ class TestTemplateFields(FacadeTestCase):
         self.assertEqual(self.invoke("fields.update", {
             "id": feature_id, "fields": {"active": 0}}), {"ok": True})
 
-    def test_required_is_locked_when_category_has_variant(self):
-        self.invoke("categories.set_field", {"category_id": self.cid, "field_id": self.fid, "fields": {"required": 1}})
+    def test_required_toggle_allowed_with_existing_variants(self):
+        """必填切換只往前生效:已有子產品也能改,既有資料不動、不停用。"""
         self.invoke("products.create", {"name": "product", "category_id": self.cid,
                                          "variants": [{"attributes": {"size": "full"}, "barcodes": []}]})
-        with self.assertRaises(ValidationError) as raised:
-            self.invoke("categories.set_field", {"category_id": self.cid, "field_id": self.fid, "fields": {"required": 0}})
-        self.assertEqual(raised.exception.code, "validation_error")
-        self.assertEqual(self.invoke("categories.set_field", {"category_id": self.cid, "field_id": self.fid, "fields": {"required": 1}}), {"ok": True})
+        self.assertEqual(self.invoke("categories.set_field", {
+            "category_id": self.cid, "field_id": self.fid, "fields": {"required": 1}}), {"ok": True})
+        self.assertEqual(self.invoke("categories.set_field", {
+            "category_id": self.cid, "field_id": self.fid, "fields": {"required": 0}}), {"ok": True})
+
+    def test_turning_required_lists_missing_variants_as_pending(self):
+        """改成必填時,缺值的既有子產品列入待補清單(不停用);改回選填就清掉。"""
+        other = self.create_field("note", self.cid, field_type="text")
+        self.invoke("products.create", {"name": "product", "category_id": self.cid,
+                                         "variants": [{"attributes": {"size": "full"}, "barcodes": []}]})
+        self.invoke("categories.set_field", {"category_id": self.cid, "field_id": other,
+                                             "fields": {"required": 1}})
+        summary = self.invoke("variants.issues", {})
+        self.assertEqual(summary["by_type"].get("missing_required"), 1)
+        with get_conn(self.db) as conn:
+            self.assertEqual(conn.execute("SELECT active FROM Variant").fetchone()[0], 1)
+        self.invoke("categories.set_field", {"category_id": self.cid, "field_id": other,
+                                             "fields": {"required": 0}})
+        self.assertEqual(self.invoke("variants.issues", {})["by_type"], {})
 
     def test_field_type_is_locked_when_used(self):
         self.invoke("products.create", {"name": "product", "category_id": self.cid,

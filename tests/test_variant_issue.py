@@ -27,7 +27,7 @@ class VariantIssueTests(ConnTestCase):
         self.blue = c.execute("INSERT INTO AttributeOption(field_id,value,sort) VALUES(?,?,2)",
                               (self.color_fid, "藍")).lastrowid
         self.pid = c.execute("INSERT INTO Product(name,category_id) VALUES(?,?)",
-                             ("大產品", self.cid)).lastrowid
+                             ("產品", self.cid)).lastrowid
         c.commit(); c.close()
         self.facade = ProductFacade(self.db)
 

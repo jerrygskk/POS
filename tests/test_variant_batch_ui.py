@@ -30,7 +30,8 @@ const context = {
 context.window.CatalogFields = { filterOptions: (list) => list || [] };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);  // api.js
-vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);  // variant_batch.js
+vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);  // optpicker.js
+vm.runInContext(fs.readFileSync(process.argv[3], "utf8"), context);  // variant_batch.js
 const window = context.window;
 const page = window.PosPages["page-variant-batch"];
 const optPicker = window.PosComponents["opt-picker"];
@@ -48,6 +49,7 @@ BODY
 '''.replace("BODY", body)
         result = subprocess.run(
             ["node", "-e", script, str(STATIC / "js" / "api.js"),
+             str(STATIC / "js" / "optpicker.js"),
              str(STATIC / "js" / "variant_batch.js")],
             cwd=ROOT, text=True, capture_output=True, encoding="utf-8")
         if result.returncode != 0:
@@ -231,7 +233,7 @@ done();
         self.assertEqual(out["query"], "")
 
     def test_opt_picker_front_row_uses_lead_values_and_hides_rest_in_more(self):
-        # 前排＝服務層標記 lead 的值(該廠牌/大產品曾出現過);其餘一律收進「更多…」,
+        # 前排＝服務層標記 lead 的值(該廠牌/產品曾出現過);其餘一律收進「更多…」,
         # 完全沒有 lead 時才退回種類次數前 8。
         out = self._run(r'''
 function mkPick(usage) {

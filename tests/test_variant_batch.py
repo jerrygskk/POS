@@ -31,7 +31,7 @@ class VariantBatchTests(ConnTestCase):
         self.blue = c.execute("INSERT INTO AttributeOption(field_id,value,sort) VALUES(?,?,2)",
                               (self.color_fid, "藍")).lastrowid
         self.pid = c.execute("INSERT INTO Product(name,category_id) VALUES(?,?)",
-                             ("大產品", self.cid)).lastrowid
+                             ("產品", self.cid)).lastrowid
         c.commit()
         self.conn.close()
         self.facade = ProductFacade(self.db)
@@ -238,7 +238,7 @@ class VariantBatchTests(ConnTestCase):
         except Exception as exc:
             self.assertTrue(getattr(exc, "details", None))
 
-    # ---- 前置:停用大產品/種類 ----
+    # ---- 前置:停用產品/種類 ----
 
     def test_inactive_product_rejected(self):
         conn = self._fresh()

@@ -10,7 +10,6 @@ window.VariantEditorApp = {
       product: null,
       variant: null,
       fields: [],
-      fieldOptions: {},
       fieldUsage: {},
       models: [],
       attrs: {},
@@ -51,10 +50,7 @@ window.VariantEditorApp = {
         // 適用型號是否使用由種類設定決定(與新增款式、商品資料庫一致)
         const cat = categories.find(c => c.category_id === product.category_id);
         const modelMode = cat ? cat.model_mode : "hidden";
-        const fieldOptions = {};
         const fieldUsage = {};
-        await window.CatalogFields.loadFieldsWithOptions(
-          fields, fieldOptions);
         await window.CatalogFields.loadFieldUsage(
           product.category_id, fields, fieldUsage, ["select", "multi", "tags"],
           window.CatalogFields.usageScope(product));
@@ -64,7 +60,7 @@ window.VariantEditorApp = {
           ...barcode, existing: true,
         }));
         Object.assign(this, {
-          product, variant, fields, models, fieldOptions, fieldUsage, attrs,
+          product, variant, fields, models, fieldUsage, attrs,
           modelIds, price: variant.price, barcodes, modelMode,
         });
         this.ready = true;

@@ -45,7 +45,7 @@ class VariantEditorTemplateTests(unittest.TestCase):
         self.assertIn('class="dialog-error"', html)
         self.assertIn(':disabled="saving || !ready"', html)
         self.assertIn('@keydown.enter="handleFactoryBarcodeEnter"', html)
-        for shared in ("catalogfields.js", "variant_batch.js", "modelpicker.js",
+        for shared in ("catalogfields.js", "optpicker.js", "modelpicker.js",
                        "attrfields.js"):
             self.assertIn(shared, html)
 
@@ -91,8 +91,8 @@ class VariantEditorTemplateTests(unittest.TestCase):
         self.assertIn('.dialog-shell .attr-row > .chip-box {', css)
 
         attrs = self._source(ATTR_JS)
-        tags_branch = attrs.split("f.field_type === 'tags' && tagsStyle === 'chips'", 1)[1]
-        tags_branch = tags_branch.split("v-else-if=\"f.field_type === 'tags'\"", 1)[0]
+        tags_branch = attrs.split("f.field_type === 'tags'", 1)[1]
+        tags_branch = tags_branch.split("f.field_type === 'select'", 1)[0]
         self.assertIn("<opt-picker", tags_branch)
         self.assertIn(':multiple="true"', tags_branch)
         self.assertIn(':as-list="false"', tags_branch)
@@ -245,7 +245,7 @@ const s = mkState();
         self.assertTrue(out["usesModel"])
 
     def test_each_load_dependency_failure_keeps_editor_unready_and_save_is_a_noop(self):
-        for failure in ("context", "fields", "models", "categories", "options", "usage"):
+        for failure in ("context", "fields", "models", "categories", "usage"):
             with self.subTest(failure=failure):
                 out = self._run(r'''
 const failure = "FAILURE";
@@ -272,9 +272,6 @@ API.listCategories = async () => {
 };
 API.updateVariantEditor = async payload => calls.push(["write", payload]);
 window.CatalogFields = {
-  loadFieldsWithOptions: async () => {
-    if (failure === "options") throw new Error("options failed");
-  },
   loadFieldUsage: async () => {
     if (failure === "usage") throw new Error("usage failed");
   },

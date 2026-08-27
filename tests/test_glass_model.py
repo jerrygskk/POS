@@ -76,11 +76,11 @@ class TestMultiTagsApi(FacadeTestCase):
 
     def test_display_order_base_tag_layout(self):
         # 不論寫入順序,顯示遵守 基礎→詞條→版型(欄 sort);
-        # 值=預設選項(版型=滿版)不顯示,非預設(9分滿)才顯示
+        # 預設選項(版型=滿版)一樣要顯示,不省略
         self._create({"版型": "滿版", "特性詞條": ["低藍光"],
                       "規格": ["藍光", "防窺"]})
         self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attr_display"],
-                         "藍光+防窺｜低藍光")
+                         "藍光+防窺｜低藍光｜滿版")
 
     def test_display_non_default_layout_shown(self):
         self._create({"版型": "9分滿", "規格": ["亮面"]})

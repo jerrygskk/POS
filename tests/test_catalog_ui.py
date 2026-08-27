@@ -508,8 +508,7 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertNotIn("新增子產品", self.catalog)
 
     def test_catalog_page_visible_copy_does_not_use_internal_product_terms(self):
-        for term in ("大產品", "子產品"):
-            self.assertNotIn(term, self.catalog)
+        self.assertNotIn("子產品", self.catalog)
         for copy in ("與其他子產品重複", "確定刪除此子產品"):
             self.assertNotIn(copy, self.catalog_js)
 

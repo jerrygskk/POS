@@ -3,7 +3,7 @@
 處理既有子產品的重新驗證、啟用前完整驗證,以及待處理彙總查詢。
 支援的問題種類(規格 §11.2 / 商品設定核心規格 §8.2):
   missing_required   - 缺少必填模板欄位值(field_id 指出欄位)
-  duplicate_signature- 與同大產品的另一子產品規格簽章重複(related_variant_id 對照)
+  duplicate_signature- 與同產品的另一子產品規格簽章重複(related_variant_id 對照)
   duplicate_barcode  - 來源條碼與既有條碼衝突,暫存於 source_value
 
 三種問題任一存在即視為未解決;全部排除後方可手動啟用。
@@ -86,7 +86,7 @@ class VariantIssueService:
             if fid not in provided:
                 issues.append({"issue_type": "missing_required", "field_id": fid,
                                "source_value": None, "related_variant_id": None})
-        # 2. 規格簽章重複(對同大產品其他子產品)
+        # 2. 規格簽章重複(對同產品其他子產品)
         sig = self._signature(variant_id, feature_id)
         related = None
         for r in self.conn.execute(
@@ -136,7 +136,7 @@ class VariantIssueService:
         """手動啟用:先跑完整重驗,仍有問題則拒絕;否則清問題並啟用。"""
         state = self.revalidate(variant_id)
         if state["issues"]:
-            raise ValidationError("子產品仍有待處理問題,無法啟用", details=state["issues"])
+            raise ValidationError("子產品仍有待處理問題，無法啟用", details=state["issues"])
         self.conn.execute("UPDATE Variant SET active=1 WHERE variant_id=?", (variant_id,))
         return {"variant_id": variant_id, "active": 1}
 

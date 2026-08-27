@@ -29,7 +29,7 @@ window.PosPages["page-labels"] = {
       if (!this.selected) return;
       await this.guard(async () => {
         const copies = Math.max(1, Math.floor(this.copies) || 1);
-        if (!confirm(`確定列印 ${copies} 張標籤？`)) return;
+        if (!await PosConfirm.ask(`確定列印 ${copies} 張標籤？`)) return;
         await API.printBarcode(this.selected.variant_id, copies);
         this.doneMsg = "標籤列印指令已送出。";
       });

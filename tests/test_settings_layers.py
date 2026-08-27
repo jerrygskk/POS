@@ -158,10 +158,15 @@ class SettingsLayersTests(unittest.TestCase):
         source = (Path(__file__).parents[1] / "static/js/settings.js").read_text(encoding="utf-8")
         self.assertIn("const seq = ++this._loadSeq", source)
         self.assertIn("if (seq !== this._loadSeq) return", source)
-        # 規格欄的儲存已搬到規格設定子視窗(field_editor.js)
+        # 名稱／型態／必填／啟用／排序在清單列上就地儲存
+        self.assertIn("API.updateField(f.field_id, { name })", source)
+        self.assertIn("API.updateField(f.field_id, { field_type: fieldType })", source)
+        self.assertIn("{ required: required ? 1 : 0 }", source)
+        self.assertIn("{ active: active ? 1 : 0 }", source)
+        # 子視窗只負責選項與建檔預設帶入值
         editor = (Path(__file__).parents[1] / "static/js/field_editor.js").read_text(encoding="utf-8")
-        self.assertIn("await API.updateField(fieldId, patch)", editor)
-        self.assertIn("await API.setCategoryField(this.categoryId, fieldId, setFields)", editor)
+        self.assertIn("API.setCategoryField(this.categoryId, this.fieldId, {", editor)
+        self.assertNotIn("API.createField(", editor)
 
     def test_settings_template_list_has_model_row_and_row_actions(self):
         source = (Path(__file__).parents[1] / "static/js/settings.js").read_text(encoding="utf-8")
@@ -170,15 +175,18 @@ class SettingsLayersTests(unittest.TestCase):
         self.assertIn('const MODEL_ROW_ID = "__model__"', source)
         self.assertIn('name: "手機型號", field_type: "model"', source)
         self.assertIn('cat.model_mode === "required" ? "hidden" : "required"', source)
-        self.assertIn('isModelRow(f)', html)
+        self.assertIn('v-for="f in fixedRows"', html)
+        self.assertIn('@click.stop="toggleFixedRow(f)"', html)
         # 新種類預設帶顏色與款式(選填)
         self.assertIn('const DEFAULT_CATEGORY_FIELDS = ["顏色", "款式"]', source)
         self.assertIn("await this.attachDefaultFields(r.category_id)", source)
         self.assertIn("{ sort: sort++, required: 0, active: 1 }", source)
-        # 模板列操作鈕:✎ 修改與紅色 ✕(刪除前顯示影響筆數)
-        self.assertIn('@click.stop="openFieldPopup(f)"', html)
+        # 自訂規格列的操作鈕:✎ 選項與紅色 ✕(刪除前顯示影響筆數)
+        self.assertIn('@click.stop="hasOptions(f) && openFieldPopup(f)"', html)
         self.assertIn('class="btn-sm danger" @click.stop="deleteTemplateField(f)"', html)
-        self.assertIn("此種類有 ${used} 筆商品填過此規格", source)
+        self.assertIn("筆商品已填${subject}", source)
+        # 自訂規格改用拖拉排序公版,固定列不參與
+        self.assertIn('<sortable-list :items="customRows" item-key="field_id"', html)
         self.assertIn("await API.deleteCategoryField(this.selCatId, f.field_id)", source)
         # 規格編輯改開子視窗:原本的網頁遮罩對話框已移除
         self.assertIn('page: "field_editor"', source)

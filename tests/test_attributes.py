@@ -176,9 +176,26 @@ class TestAttributes(FacadeTestCase):
         self.assert_application_error("validation_error", "categories.set_field", {"category_id": self.create_category("預設測試"), "field_id": fid, "fields": {"default_option_id": 999999}})
         self.assert_application_error("validation_error", "categories.set_field", {"category_id": self.create_category("預設測試二"), "field_id": fid, "fields": {"default_option_id": other_oid}})
 
+    def test_default_option_can_be_cleared(self):
+        """建檔預設帶入值改回「(無)」要真的清掉,不是被當成未帶參數略過。"""
+        cid = self.create_category("清除預設")
+        fid = self.create_field("版型", cid)
+        oid = self._opt(fid, "滿版")
+        self.invoke("categories.set_field",
+                    {"category_id": cid, "field_id": fid, "fields": {"default_option_id": oid}})
+        self.assertEqual(
+            [f for f in self.invoke("categories.fields", {"id": cid})
+             if f["name"] == "版型"][0]["default_value"], "滿版")
+        self.invoke("categories.set_field",
+                    {"category_id": cid, "field_id": fid, "fields": {"default_option_id": None}})
+        self.assertIsNone(
+            [f for f in self.invoke("categories.fields", {"id": cid})
+             if f["name"] == "版型"][0]["default_value"])
+
+
 
 class TestFieldUsageLeadScope(FacadeTestCase):
-    """候選前排範圍:該廠牌用過 → 該大產品用過 → 都沒有則不指定。"""
+    """候選前排範圍:該廠牌用過 → 該產品用過 → 都沒有則不指定。"""
 
     def setUp(self):
         super().setUp()
@@ -204,12 +221,12 @@ class TestFieldUsageLeadScope(FacadeTestCase):
         got = self.usage(brand_id=self.brand_id, product_id=self.leather_id)
         self.assertTrue(got["SolidX"]["lead"])
         self.assertEqual(got["SolidX"]["lead_count"], 1)
-        # 廠牌有紀錄就不退回大產品:皮套與未使用的透明都留在「更多」
+        # 廠牌有紀錄就不退回產品:皮套與未使用的透明都留在「更多」
         self.assertFalse(got["皮套"]["lead"])
         self.assertFalse(got["透明"]["lead"])
 
     def test_product_scope_is_used_when_brand_is_empty(self):
-        # 無品牌皮套:廠牌欄為空,前排改用該大產品自己用過的值
+        # 無品牌皮套:廠牌欄為空,前排改用該產品自己用過的值
         got = self.usage(brand_id=None, product_id=self.leather_id)
         self.assertTrue(got["皮套"]["lead"])
         self.assertFalse(got["SolidX"]["lead"])

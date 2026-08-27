@@ -54,7 +54,7 @@ window.PosPages["page-catalog"] = {
       q: "", appliedQ: "", includeInactive: false, pending: false, pendingCount: 0,
       fCategory: null, fBrand: null, fModel: null,
       categories: [], brands: [], models: [],
-      products: [], fieldsByCat: {}, fieldOptions: {}, fieldUsageByCat: {},
+      products: [],
       inactiveMatchCount: null, inactiveLookupFailed: false, _refreshToken: 0,
     };
   },
@@ -173,7 +173,7 @@ window.PosPages["page-catalog"] = {
     async openVariantEditor(product, variant) {
       await this.openChildWindow("variant_editor", {product, variant});
     },
-    // product 為 null=不指定大產品(由子視窗自己選)
+    // product 為 null=不指定產品(由子視窗自己選)
     async openAddVariant(product) {
       await this.openChildWindow("variant_batch", product ? {
         category_id: product.category_id, product_id: product.product_id,
@@ -183,31 +183,13 @@ window.PosPages["page-catalog"] = {
       if (event && event.detail && event.detail.saved) await this.reload();
     },
 
-    async ensureFields(cid) {
-      if (cid == null || this.fieldsByCat[cid]) return;
-      await this.guard(async () => {
-        const fields = await API.categoryFields(cid);
-        this.fieldsByCat[cid] = fields;
-        // select/multi 欄選項(供自增比對與型號過濾)
-        await window.CatalogFields.loadFieldsWithOptions(fields, this.fieldOptions);
-        // 該種類使用次數排序候選(select/multi 改用候選選取器)
-        const usage = {};
-        await window.CatalogFields.loadFieldUsage(cid, fields, usage);
-        this.fieldUsageByCat[cid] = usage;
-      });
-    },
-    async reloadFieldUsage(cid) {
-      if (cid == null || !this.fieldsByCat[cid]) return;
-      const usage = {};
-      await window.CatalogFields.loadFieldUsage(cid, this.fieldsByCat[cid], usage);
-      this.fieldUsageByCat[cid] = usage;
-    },
     async toggleProductActive(p) {
       await this.guardReload(() =>
         API.updateProduct(p.product_id, { active: p.active ? 0 : 1 }));
     },
     async deleteProduct(p) {
-      if (!confirm(`確定刪除商品「${p.name}」?刪除後無法復原。`)) return;
+      if (!await PosConfirm.ask(`確定刪除商品「${p.name}」?刪除後無法復原。`,
+                                { danger: true })) return;
       await this.guardReload(() => API.deleteProduct(p.product_id));
     },
 
@@ -216,7 +198,7 @@ window.PosPages["page-catalog"] = {
         API.updateVariant(v.variant_id, { active: v.active ? 0 : 1 }));
     },
     async deleteVariant(p, v) {
-      if (!confirm("確定刪除此款式?刪除後無法復原。")) return;
+      if (!await PosConfirm.ask("確定刪除此款式?刪除後無法復原。", { danger: true })) return;
       await this.guardReload(() => API.deleteVariant(v.variant_id));
     },
 

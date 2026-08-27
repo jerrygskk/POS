@@ -21,7 +21,7 @@ window.PosPages["page-receive"] = {
         this.notFound = null;
         this.scanCode = "";
       } catch (e) {
-        // 進貨不建立大產品(規格 §6.1):查無條碼一律引導至商品設定
+        // 進貨不建立產品(規格 §6.1):查無條碼一律引導至商品設定
         if (e.status === 404) { this.hit = null; this.notFound = code; this.scanCode = ""; }
         else this.showError(e.message);
       }

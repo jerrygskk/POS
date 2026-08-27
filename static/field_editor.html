@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>規格設定</title>
-<link rel="stylesheet" href="css/pos.css?v=86">
-<link rel="stylesheet" href="css/dialog-theme.css?v=86">
+<title>規格選項</title>
+<link rel="stylesheet" href="css/pos.css?v=125">
+<link rel="stylesheet" href="css/dialog-theme.css?v=125">
 </head>
 <body>
 <div id="field-editor" v-cloak>
@@ -14,40 +14,18 @@
       <div v-if="loading" class="dialog-loading">正在載入規格資料…</div>
       <template v-else>
         <section class="dialog-section">
-          <h2>基本設定</h2>
-          <label class="dialog-field">名稱 <input v-model="name"></label>
-          <label class="dialog-field">欄位型態
-            <select v-model="fieldType">
-              <option value="select">下拉選單</option>
-              <option value="text">文字</option>
-              <option value="multi">複選</option>
-            </select>
-          </label>
-          <label class="dialog-field">排序
-            <input type="number" min="0" v-model.number="sort" class="w80">
-          </label>
-          <label class="dialog-field">必填
-            <span class="req-cell">
-              <input type="checkbox" v-model="required" :disabled="catHasVariant">
-              <span v-if="catHasVariant" class="dialog-hint">(此種類已有子產品，必填設定暫時鎖定)</span>
-            </span>
-          </label>
-          <label class="dialog-field">規格狀態
-            <select v-model="active">
-              <option :value="true">啟用</option>
-              <option :value="false">停用</option>
-            </select>
-          </label>
-          <label class="dialog-field" v-if="fieldType==='select'">預設值
+          <h2>{{ name }}</h2>
+          <label class="dialog-field" v-if="fieldType==='select'">建檔預設帶入
             <select v-model="defaultOptionId">
               <option :value="null">(無)</option>
               <option v-for="o in activeOptions" :key="o.option_id"
                       :value="o.option_id">{{ o.value }}</option>
             </select>
           </label>
+          <div class="dialog-hint">名稱、欄位型態、必填與啟用狀態於規格清單列上設定。</div>
         </section>
 
-        <section class="dialog-section" v-if="!isNew && hasOptions">
+        <section class="dialog-section" v-if="hasOptions">
           <h2>選項</h2>
           <div class="dialog-barcode-add">
             <input v-model="newOption" placeholder="新增選項"
@@ -66,7 +44,6 @@
             <div v-if="!options.length" class="dialog-hint">尚無選項</div>
           </div>
         </section>
-        <div v-else-if="isNew && hasOptions" class="dialog-hint">建立後即可加入選項。</div>
       </template>
     </div>
 
@@ -81,8 +58,9 @@
     </footer>
   </form>
 </div>
-<script src="js/vue.global.prod.js?v=86"></script>
-<script src="js/api.js?v=86"></script>
-<script src="js/field_editor.js?v=86"></script>
+<script src="js/vue.global.prod.js?v=125"></script>
+<script src="js/api.js?v=125"></script>
+<script src="js/confirm.js?v=125"></script>
+<script src="js/field_editor.js?v=125"></script>
 </body>
 </html>
