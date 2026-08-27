@@ -20,9 +20,11 @@
   --accent: #8fa8c8;          /* 強調(焦點/選中) */
   --accent-hover: #6e8fac;    /* 選中 chip 的 hover */
   --accent-soft: #e8eef5;     /* 淡藍灰底(opt-chip/編輯列) */
-  --primary: #a1b4cb;         /* 主要鈕 */
-  --primary-hover: #4977b1;   /* 主要鈕 hover / 連結字 */
-  --primary-active: #39649a;  /* 主要鈕 pressed / opt-chip 字 */
+  /* 主要鈕:平常就用飽和色,hover 壓深一階。原本平常是淡藍灰、hover 才變飽和,
+     淡的那階明度接近停用色,看起來像不能按(意境相反)。 */
+  --primary: #4977b1;         /* 主要鈕 */
+  --primary-hover: #39649a;   /* 主要鈕 hover / 連結字 */
+  --primary-active: #2f5583;  /* 主要鈕 pressed / opt-chip 字 */
   --primary-disabled: #d1d9e3;/* 主要鈕停用底 */
   --danger: #e74c3c;          /* 危險/負值 */
   --success: #16a34a;         /* 成功訊息 */
@@ -42,7 +44,11 @@ nav button:active { background: var(--primary-active); }
 nav button.active, nav button.active:hover, nav button.active:active {
   background: var(--surface); color: var(--primary-hover); font-weight: 600; }
 
-.error-bar { background: var(--danger); color: #fff; padding: 10px 16px; }
+/* 錯誤條與提醒條同一種外觀(圓角方塊＋左側粗線),只有顏色不同;
+   原本錯誤是整條滿版紅底白字,與頁內提醒完全兩種語言。 */
+.error-bar { display: flex; align-items: center; gap: 6px; margin: 10px 16px 0;
+  padding: 8px 12px; border-radius: 8px; border-left: 3px solid var(--danger);
+  background: #fdecea; color: #a1291c; font-size: 14px; }
 .page { padding: 16px; }
 
 /* ── 表格 ── */
@@ -148,15 +154,43 @@ tr.inactive > td { opacity: 0.55; }
 .card-head { display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 12px; }
 .card-head h3, .card-head .step-title { margin-bottom: 0; }
+/* 標題列右側放兩顆以上按鈕時要收成一組,否則 space-between 會把中間那顆丟到中央 */
+.card-actions { display: flex; align-items: center; gap: 8px; }
 .maint-row { display: flex; align-items: center; gap: 8px; padding: 6px 0;
   border-bottom: 1px solid var(--hover); flex-wrap: wrap; }
 .maint-row input.name { flex: 1; min-width: 140px; }
 .maint-row.inactive { opacity: 0.55; }
 .maint-row .tag, .tag { background: var(--hover); color: var(--text-2); font-size: 13px;
   padding: 2px 8px; border-radius: 10px; }
+/* 區塊內的錯誤條:與提醒條同一個位置與外距(整頁最上面那條留給跨頁錯誤) */
+.error-bar.section-bar { margin: 0 0 10px; }
+/* 型號分組標題:收合鈕緊接在品牌名右邊 */
+.model-group-head { display: flex; align-items: center; gap: 8px; }
+/* 搜尋列與上面的新增列拉開,並以細線分隔——兩者長得像,靠太近會誤按 */
+.model-search { margin-top: 26px; padding-top: 18px;
+  border-top: 1px solid var(--hover); }
+.model-search { align-items: center; }
+.search-label { color: var(--text-2); white-space: nowrap; font-size: 16px;
+  display: flex; align-items: center; }
+.model-search > input { flex: 0 1 260px; }
+/* 展開收合:高度與淡入淡出一起做,不要瞬間跳掉整段清單 */
+.collapse-enter-active, .collapse-leave-active {
+  transition: max-height 0.22s ease, opacity 0.18s ease; overflow: hidden; }
+.collapse-enter-from, .collapse-leave-to { max-height: 0; opacity: 0; }
+.collapse-enter-to, .collapse-leave-from { max-height: 2000px; opacity: 1; }
+/* 提醒條:有未儲存的修改時出現(淡黃底、左側橘線),不擋操作只提醒。
+   與 .error-bar 同一種外觀,新的提示一律照這組做,不要再自創滿版色條。 */
+.notice-bar { display: flex; align-items: center; gap: 6px; margin: 0 0 10px;
+  padding: 8px 12px; border-radius: 8px; border-left: 3px solid #d99a2b;
+  background: #fdf6e3; color: #8a6116; font-size: 14px; }
 .inline-add { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .add-before-list { margin-top: 0; margin-bottom: 10px; flex-wrap: nowrap; }
-.sort-actions { margin: 0 0 6px; padding: 6px 0; flex-wrap: nowrap; }
+/* 新增列與下方清單列對齊:前面補一格,寬度等於「拖拉把手＋序號格」,
+   主要輸入框吃剩餘寬度(提示字才不會被截掉),排序格寬度比照按鈕。 */
+/* 新增列靠左排:排序在前,名稱只佔一半寬度,按鈕跟著左邊走 */
+.add-before-list { justify-content: flex-start; }
+.add-before-list > input:not(.w60):not(.w120) { flex: 0 1 220px; }
+.add-before-list > input.w60 { flex: 0 0 58px; width: 58px; }
 /* 自訂規格列:名稱吃剩餘寬,其餘控制項固定寬不換行 */
 .maint-row select { min-width: 92px; }
 .maint-row .switch-label { font-size: 12px; }
@@ -189,6 +223,7 @@ tr.inactive > td { opacity: 0.55; }
 .cat-detail .maint-row input.name { flex: 1 1 220px; min-width: 120px; }
 .cat-detail .maint-row select { flex: 0 0 auto; }
 .drag-handle:active { cursor: grabbing; }
+.drag-handle.disabled { cursor: default; opacity: 0.35; }
 .seq-cell { width: 48px; text-align: center; border: 1px dashed var(--accent);
   border-radius: 6px; padding: 4px 2px; }
 .maint-row.drop-before { border-top: 2px solid var(--accent); }

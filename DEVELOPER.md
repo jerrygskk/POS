@@ -45,7 +45,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `static/js/pos_shared.js` | 主視窗與子視窗共用的全域 mixin（`guard`／`guardReload`／`attrText`） |
 | `static/js/optpicker.js` | 規格值候選選取器 `opt-picker`／`tag-selector`（前排常用值＋搜尋＋當場新增；檔頭寫明三種輸入公版的分工） |
 | `static/js/combobox.js` | 可搜尋下拉 `combo-box`（從既有主檔挑一筆，可新增未收錄的值） |
-| `static/js/sortable.js` | 拖拉排序清單 `sortable-list`（⠿ 拖曳＋序號格搬位，改動後才亮「儲存排序」） |
+| `static/js/sortable.js` | 拖拉排序清單 `sortable-list`（⠿ 拖曳＋序號格搬位；`auto-save` 決定拖完直接寫入或交給該區塊的儲存鈕，`disabled` 供清單被過濾時停用排序） |
 | `static/js/confirm.js` | 確認／通知視窗公版 `PosConfirm.ask()`／`notify()`（取代瀏覽器內建 confirm／alert） |
 | `static/css/dialog-theme.css` | 子視窗對話框外觀（`.dialog-*` 公版，沿用 §2 UI 風格色票） |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
@@ -240,6 +240,9 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
   - `combo-box`（`static/js/combobox.js`）：從既有主檔挑一筆（廠牌之類），只有搜尋與「新增○○」。右側箭頭畫在輸入框的 `background-image`（與 select 同一個外框）；⚠️ 點擊區不可用 `<button>`——全域 `button` 有 `min-width: 80px` 與 hover 底色，會在框內冒出一塊灰。取得焦點不自動展開清單（會蓋住下面的欄位），點箭頭或開始打字才展開。
   - 原生 `<select>`：選項固定且少（型態、狀態）。
   原本 select/multi/tags 還有一條「候選未載入就退回 datalist／勾選框」的退路，已移除：它會靜默換成外觀完全不同的介面，出事看不出來，現在改顯示「候選載入中…」。
+- **提醒條與錯誤條同一種外觀**（`.notice-bar`／`.error-bar`）：圓角方塊＋左側粗線＋淡底深字，前綴 ⚠。未儲存提醒用黃系、錯誤用紅系。⚠️ 錯誤訊息顯示在**觸發它的那個區塊內**（設定頁以 `errorScope` 分辨 category／brands／phoneBrands／models），不要丟到整頁最上面——訊息離發生的地方太遠，店員看不到自己剛按的那顆鈕出了什麼事。不要再自創滿版色條。
+- **清單維護的儲存規則**：名稱可即時寫入的區塊（手機品牌、規格項目）連拖拉排序也即時寫入，不放儲存鈕；仍需批次儲存的區塊（廠牌、手機型號）則「名稱修改＋拖過的順序」一起等按鈕，標題列用 `.card-actions` 收「復原／儲存修改」兩顆，並在有未儲存內容時顯示提醒條。⚠️ 會重新載入清單的動作（新增、刪除）必須先把未儲存的修改收起來、做完再貼回（`keepEdits`／`_collectEdits`／`_restoreEdits`），只有被刪掉的那筆會消失；**不可以代替使用者先儲存**，寫入資料庫永遠是使用者按下儲存的事。
+- **長清單分組**：手機型號依品牌分組，每組標題右側一顆收合／展開鈕（狀態各組獨立），另有「快速搜尋」比對名稱／別名／系列；有搜尋字串時符合的組自動展開、不符的整組隱藏。⚠️ **過濾狀態下必須關閉排序**（`sortable-list` 的 `disabled`）：排序 API 是把送進來的 id 依序重編 1..N，只送畫面上那幾筆會把其餘項目的號碼全打亂。展開收合套 `.collapse-*` 過場。
 - **確認／通知視窗一律用 `PosConfirm`**（`static/js/confirm.js`）：`PosConfirm.ask()`／`PosConfirm.notify()`，白底置中、Enter＝確定、Esc／點遮罩＝取消，破壞性操作的確定鈕用危險色。⚠️ 不可用瀏覽器內建的 `confirm()`／`alert()`——pywebview 會畫成深色系統對話框、貼在視窗上緣，與程式外觀完全不同。
 - **對話框欄位列**（`.modal > label`）：標籤欄固定 `--label-w`（px，不用 em——em 會跟著較小的提示字級縮水而對不齊），標籤靠右貼著輸入框；⚠️ `text-align: right` 只給標籤那段純文字，所有元素子節點要覆寫回靠左，否則會一路繼承進候選清單裡。欄位下方的一句提示用 `.field-note`（縮排對齊輸入框左緣），送出前的警告用 `.modal-warn`（與按鈕同列、靠左、危險色）。
 - **子視窗外觀**:`static/css/dialog-theme.css` 是子視窗公版。細捲軸(8px、`#c7c7cc`)、

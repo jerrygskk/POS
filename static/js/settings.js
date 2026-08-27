@@ -17,7 +17,8 @@ const DEFAULT_CATEGORY_FIELDS = ["顏色", "款式"];
 
 window.PosPages["page-settings"] = {
   template: "#tpl-settings",
-  inject: ["showError"],
+  // 錯誤訊息顯示在目前這一區塊內(與未儲存提醒條同一個位置),不再跳到整頁最上面
+  // ——訊息離發生的地方太遠,店員看不到自己剛剛按的那顆鈕出了什麼事。
   data() {
     return {
       categories: [], brands: [], phoneBrands: [], models: [],
@@ -34,12 +35,24 @@ window.PosPages["page-settings"] = {
       prodPopup: null,
       // 廠牌經營種類
       openBrand: null, openBrandName: "", brandCatChecked: {},
+      snap: {},   // 載入時的名稱快照,用來判斷哪幾筆被改過(提醒條與批次儲存共用)
+      pendingSort: {},       // kind → 拖過但還沒儲存的新順序(廠牌、手機品牌)
+      pendingModelSort: {},  // 品牌 → 該品牌型號拖過但還沒儲存的新順序
+      pageError: "", errorScope: "category",  // 錯誤訊息與它屬於哪個區塊
+      modelQuery: "",        // 型號搜尋字串
+      collapsedBrands: {},   // 手動收合的品牌(brand → true)
     };
   },
   computed: {
+    // 型號依品牌分組;有搜尋字串時只留符合的型號(比對名稱、別名、系列),
+    // 沒有任何符合的品牌整組不顯示。
     modelGroups() {
+      const q = this.modelQuery.trim().toLowerCase();
+      const match = (m) => !q || [m.name, m.alias, m.series]
+        .some(v => String(v || "").toLowerCase().includes(q));
       const g = {};
-      for (const m of this.models) (g[m.brand_name] = g[m.brand_name] || []).push(m);
+      for (const m of this.models)
+        if (match(m)) (g[m.brand_name] = g[m.brand_name] || []).push(m);
       return Object.keys(g).map(brand => ({ brand, items: g[brand] }));
     },
     // 名稱正由廠牌自動帶入(還沒被手動改過)
@@ -102,6 +115,14 @@ window.PosPages["page-settings"] = {
     window.removeEventListener("pos-child-window-closed", this._childWindowClosed);
   },
   methods: {
+    // scope 決定訊息出現在哪一段(category／brands／phoneBrands／models),
+    // 不指定就歸商品種類那段;沒有歸屬會四個區塊同時亮。
+    showError(message, scope) {
+      this.errorScope = scope || this.errorScope || "category";
+      this.pageError = message;
+      clearTimeout(this._errorTimer);
+      this._errorTimer = setTimeout(() => { this.pageError = ""; }, 5000);
+    },
     async reloadAll() {
       await this.guard(async () => {
         this.categories = await API.listCategories({ all: 1 });
@@ -139,6 +160,7 @@ window.PosPages["page-settings"] = {
       this.bigProducts = products;
     },
     async addCategory() {
+      this.errorScope = "category";
       const name = (this.newCatName || "").trim();
       if (!name) { this.showError("請輸入商品種類名稱"); return; }
       await this.guard(async () => {
@@ -245,6 +267,7 @@ window.PosPages["page-settings"] = {
     hasOptions(f) { return f.field_type === "select" || f.field_type === "multi"; },
     // 自訂規格新增:名稱＋型態直接在清單上方新增,排序接在最後
     async addTemplateField() {
+      this.errorScope = "category";
       const name = (this.newField.name || "").trim();
       if (!name) { this.showError("請輸入規格名稱"); return; }
       if (this.selCatId == null) return;
@@ -417,13 +440,33 @@ window.PosPages["page-settings"] = {
     },
     _takeSnap() {
       this._snap = {};
+      this.snap = this._snap;
       for (const kind of Object.keys(_MAINT)) {
         const m = _MAINT[kind];
         for (const it of (this[kind] || []))
           this._snap[kind + ":" + it[m.id]] = JSON.stringify(this._itemBody(kind, it));
+      this.snap = Object.assign({}, this._snap);
       }
     },
+    // 單筆即時儲存名稱:離開欄位或按 Enter 就寫入,沒改動不送。
+    async saveItemName(kind, item) {
+      this.errorScope = kind;
+      const m = _MAINT[kind];
+      const body = this._itemBody(kind, item);
+      if (!body.name) { this.showError("名稱不可空白"); await this.reloadAll(); return; }
+      if (this.snap[kind + ":" + item[m.id]] === JSON.stringify(body)) return;
+      await this.guardReload(() => API[m.update](item[m.id], body));
+    },
+    // 尚未儲存的名稱修改筆數(提醒條用)
+    dirtyCount(kind) {
+      const m = _MAINT[kind];
+      return (this[kind] || []).filter(
+        it => this.snap[kind + ":" + it[m.id]] !== JSON.stringify(this._itemBody(kind, it))
+      ).length;
+    },
+    // 區塊的儲存:名稱修改與拖過的順序一起送出
     async saveAll(kind) {
+      this.errorScope = kind;
       const m = _MAINT[kind];
       await this.guard(async () => {
         for (const it of (this[kind] || [])) {
@@ -432,29 +475,100 @@ window.PosPages["page-settings"] = {
           if (this._snap[kind + ":" + it[m.id]] === JSON.stringify(body)) continue;
           await API[m.update](it[m.id], body);
         }
+        if (this.pendingSort[kind]) {
+          await API[m.sort](this.pendingSort[kind]);
+          delete this.pendingSort[kind];
+        }
+        if (kind === "models") {
+          for (const ids of Object.values(this.pendingModelSort)) await API[m.sort](ids);
+          this.pendingModelSort = {};
+        }
         await this.reloadAll();
       });
     },
     async toggleActive(kind, item) {
+      this.errorScope = kind;
       const m = _MAINT[kind];
       await this.guard(async () => {
         await API[m.update](item[m.id], { active: item.active ? 0 : 1 });
         item.active = item.active ? 0 : 1;
       });
     },
+    // 重新載入會拿回資料庫的內容,把使用者還沒儲存的名稱修改與拖過的順序蓋掉。
+    // 這裡先把未儲存的部分收起來,動作做完再貼回去(被刪掉的項目自然貼不回去,
+    // 其餘一筆都不會消失)。
+    _collectEdits(kind) {
+      const m = _MAINT[kind];
+      const edits = {};
+      for (const it of (this[kind] || [])) {
+        const body = this._itemBody(kind, it);
+        if (this.snap[kind + ":" + it[m.id]] !== JSON.stringify(body))
+          edits[it[m.id]] = body;
+      }
+      return edits;
+    },
+    _restoreEdits(kind, edits) {
+      const m = _MAINT[kind];
+      for (const it of (this[kind] || [])) {
+        const body = edits[it[m.id]];
+        if (!body) continue;
+        for (const key of Object.keys(body)) it[key] = body[key];
+      }
+      // 拖過但沒儲存的順序:剔除已不存在的 id(剛被刪掉的那筆)
+      const alive = new Set((this[kind] || []).map(it => it[m.id]));
+      if (this.pendingSort[kind])
+        this.pendingSort[kind] = this.pendingSort[kind].filter(id => alive.has(id));
+      if (kind === "models")
+        for (const brand of Object.keys(this.pendingModelSort))
+          this.pendingModelSort[brand] =
+            this.pendingModelSort[brand].filter(id => alive.has(id));
+    },
+    // 包住「會重新載入」的動作:動作前收起未儲存的修改,動作後貼回去
+    async keepEdits(kind, operation) {
+      const edits = this._collectEdits(kind);
+      await operation();
+      this._restoreEdits(kind, edits);
+    },
     async deleteItem(kind, item) {
+      this.errorScope = kind;
       const m = _MAINT[kind];
       if (!await PosConfirm.ask(`確定刪除${m.label}「${item.name}」?刪除後無法復原。`,
                                 { danger: true })) return;
-      await this.guard(async () => {
+      await this.keepEdits(kind, () => this.guard(async () => {
         await API[m.delete](item[m.id]);
         if (this.openBrand === item[m.id]) this.openBrand = null;
         await this.reloadAll();
-      });
+      }));
     },
     async saveSort(kind, ids) {
+      this.errorScope = kind;
       const m = _MAINT[kind];
       await this.guardReload(() => API[m.sort](ids));
+    },
+    // 拖過但還沒按儲存的順序:先記著,和名稱修改一起送出
+    onSortPending(kind, ids) { this.pendingSort[kind] = ids; },
+    // 型號分品牌記錄(搜尋中排序已停用,收到的一定是該品牌的完整順序)
+    onModelSortPending(brand, ids) { this.pendingModelSort[brand] = ids; },
+    // 提醒條:名稱改過或順序拖過都算未儲存
+    hasUnsaved(kind) {
+      if (kind === "models" && Object.keys(this.pendingModelSort).length) return true;
+      return !!this.pendingSort[kind] || this.dirtyCount(kind) > 0;
+    },
+    // 搜尋中一律展開(要看到結果);沒搜尋才看手動收合的狀態
+    isBrandOpen(brand) {
+      if (this.modelQuery.trim()) return true;
+      return !this.collapsedBrands[brand];
+    },
+    toggleBrand(brand) {
+      if (this.modelQuery.trim()) return;   // 搜尋結果不收合
+      this.collapsedBrands[brand] = !this.collapsedBrands[brand];
+    },
+    // 復原:丟掉未儲存的名稱修改與拖過的順序,重新讀回資料庫的內容
+    async revertAll(kind) {
+      this.errorScope = kind;
+      delete this.pendingSort[kind];
+      if (kind === "models") this.pendingModelSort = {};
+      await this.guard(() => this.reloadAll());
     },
     async _applyNewSeq(kind, list, newId) {
       const t = (this.newSeq[kind] || "").trim();
@@ -468,27 +582,29 @@ window.PosPages["page-settings"] = {
       await this.reloadAll();
     },
     async addItem(kind) {
+      this.errorScope = kind;
       const m = _MAINT[kind];
       const name = (this.newItem[kind] || "").trim();
-      if (!name) return;
-      await this.guard(async () => {
+      if (!name) { this.showError(`請輸入${m.label}名稱`, kind); return; }
+      await this.keepEdits(kind, () => this.guard(async () => {
         const r = await API[m.create]({ name });
         this.newItem[kind] = "";
         await this.reloadAll();
         await this._applyNewSeq(kind, this[kind], r[m.id]);
-      });
+      }));
     },
     async addModel() {
+      this.errorScope = "models";
       const pbid = this.newModel.phone_brand_id, name = this.newModel.name.trim();
       if (!pbid || !name) { this.showError("請選擇手機品牌並輸入型號名稱"); return; }
       const series = (this.newModel.series || "").trim() || null;
-      await this.guard(async () => {
+      await this.keepEdits("models", () => this.guard(async () => {
         const r = await API.createModel({ phone_brand_id: pbid, name, series });
         this.newModel = { phone_brand_id: null, name: "", series: "" };
         await this.reloadAll();
         const grp = this.models.filter(m => m.phone_brand_id === pbid);
         await this._applyNewSeq("models", grp, r.model_id);
-      });
+      }));
     },
 
     // ==== 廠牌經營種類 ====

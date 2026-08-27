@@ -11,7 +11,7 @@ from lib.application_errors import ValidationError
 from lib.child_window import (ChildWindowCoordinator, fit_position,
                               screen_work_size)
 
-MAIN_WINDOW_SIZE = (1074, 768)
+MAIN_WINDOW_SIZE = (1124, 768)
 
 
 class DesktopFacade:

@@ -95,7 +95,7 @@ class DesktopApplicationTest(unittest.TestCase):
         self.assertEqual(args[0], "POS")
         self.assertEqual(args[1], self.paths.static_dir.joinpath("index.html").as_uri())
         self.assertIs(kwargs["js_api"], bridge)
-        self.assertEqual((kwargs["width"], kwargs["height"]), (1074, 768))
+        self.assertEqual((kwargs["width"], kwargs["height"]), (1124, 768))
         self.assertEqual(kwargs.get("x", 0), 0)   # 主視窗靠左
         self.assertEqual(webview.start_calls, [((), {"gui": "edgechromium"})])
 
