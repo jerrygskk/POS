@@ -13,6 +13,16 @@ from lib.product_data import FEATURE_FIELD_KEY, variant_signature
 from lib.product_rules import has_store_barcode_prefix, next_store_barcode
 
 
+def _err(code, message, field_id=None, related_variant_id=None, related_draft_id=None):
+    return {
+        "code": code,
+        "field_id": field_id,
+        "message": message,
+        "related_variant_id": related_variant_id,
+        "related_draft_id": related_draft_id,
+    }
+
+
 class VariantBatchService:
     def __init__(self, connection):
         self.conn = connection
@@ -62,16 +72,18 @@ class VariantBatchService:
 
     # ---- 選項解析(新建 / 重新啟用停用同名) ----
 
-    def _resolve_option(self, field_id, value, created, reactivated):
+    def _resolve_option(self, field_id, value, created, reactivated, dry=False):
         key = normalize_key(value)
         for o in self._options_of(field_id):
             if normalize_key(o["value"]) == key:
-                if not o["active"]:
+                if not o["active"] and not dry:
                     self.conn.execute(
                         "UPDATE AttributeOption SET active=1 WHERE option_id=?",
                         (o["option_id"],))
                     reactivated.add(o["option_id"])
                 return o["option_id"]
+        if dry:
+            return ("new", key)
         sort = next_sort(self.conn, "AttributeOption", "field_id=?", (field_id,))
         cur = self.conn.execute(
             "INSERT INTO AttributeOption(field_id,value,sort) VALUES(?,?,?)",
@@ -82,7 +94,7 @@ class VariantBatchService:
     # ---- 單筆 draft 解析 ----
 
     def _resolve_draft(self, draft, category_id, writable, feature_id,
-                       model_mode, created, reactivated):
+                       model_mode, created, reactivated, dry=False):
         errors = []             # 全部錯誤(嚴格批次用)
         hard = []               # 結構性錯誤(容錯建立仍須拒絕,非 VariantIssue 可表達)
         attrs_out = []          # [(field_id, "option"/"text", value)]
@@ -91,8 +103,10 @@ class VariantBatchService:
         missing_field_ids = []  # 缺必填欄位 field_id(容錯建立寫 missing_required)
         attributes = draft.get("attributes") or {}
 
-        def fail_hard(msg):
-            errors.append(msg); hard.append(msg)
+        def fail_hard(code, message, field_id=None):
+            error = _err(code, message, field_id=field_id)
+            errors.append(error)
+            hard.append(error)
 
         for name, raw in attributes.items():
             key = normalize_key(name)
@@ -102,7 +116,7 @@ class VariantBatchService:
                 f = writable[key]
                 fid, ftype, is_feature = f["field_id"], f["field_type"], False
             else:
-                fail_hard(f"規格欄「{name}」不存在或未套用於此種類")
+                fail_hard("unknown_field", f"規格欄「{name}」不存在或未套用於此種類")
                 continue
             if ftype == "text":
                 text = normalize_display(str(raw)) if raw is not None else ""
@@ -119,28 +133,29 @@ class VariantBatchService:
             if not values:
                 continue
             if ftype == "select" and len(values) != 1:
-                fail_hard(f"規格欄「{name}」僅能選一個值")
+                fail_hard("select_multi_value", f"規格欄「{name}」僅能選一個值", fid)
                 continue
             provided.add(fid)
             for v in values:
-                oid = self._resolve_option(fid, v, created, reactivated)
+                oid = self._resolve_option(fid, v, created, reactivated, dry=dry)
                 attrs_out.append((fid, "option", oid))
                 if not is_feature:
                     sig.add((fid, "o", oid))
         # 必填檢查(cf.required=1 的可輸入欄)——軟性:容錯建立以 missing_required 記錄
         for f in writable.values():
             if f["required"] and f["field_id"] not in provided:
-                errors.append(f"必填規格「{f['name']}」未填")
+                errors.append(_err("missing_required", f"必填規格「{f['name']}」未填",
+                                   field_id=f["field_id"]))
                 missing_field_ids.append(f["field_id"])
         # 適用型號
         model_ids = list(dict.fromkeys(draft.get("model_ids") or []))
         for mid in model_ids:
             if self.conn.execute("SELECT 1 FROM PhoneModel WHERE model_id=?",
                                  (mid,)).fetchone() is None:
-                fail_hard(f"型號(id={mid})不存在")
+                fail_hard("model_not_found", f"型號(id={mid})不存在")
         model_required_missing = model_mode == "required" and not model_ids
         if model_required_missing:
-            errors.append("此種類須指定適用型號")
+            errors.append(_err("missing_models", "此種類須指定適用型號"))
         for mid in model_ids:
             sig.add(("m", mid))
         # 條碼
@@ -150,7 +165,7 @@ class VariantBatchService:
             code = code.strip() if isinstance(code, str) else code
             source = bc.get("source") or ("factory" if code else "store")
             if has_store_barcode_prefix(code):
-                fail_hard("TL 開頭條碼僅供系統自動產生")
+                fail_hard("store_prefix_barcode", "TL 開頭條碼僅供系統自動產生")
                 continue
             barcodes.append({"barcode": code or None, "source": source})
         price = draft.get("price")
@@ -176,9 +191,9 @@ class VariantBatchService:
             out[variant_signature(self.conn, vid, feature_id)] = vid
         return out
 
-    # ---- 主流程 ----
+    # ---- 共用驗證 / 解析 ----
 
-    def batch_create(self, payload):
+    def _validate_batch(self, payload, dry):
         product_id = payload["product_id"]
         drafts = payload["drafts"]
         if not drafts:
@@ -189,39 +204,57 @@ class VariantBatchService:
         model_mode = self.conn.execute(
             "SELECT model_mode FROM Category WHERE category_id=?",
             (category_id,)).fetchone()["model_mode"]
-
         created, reactivated = set(), set()
         resolved = [self._resolve_draft(d, category_id, writable, feature_id,
-                                        model_mode, created, reactivated)
+                                        model_mode, created, reactivated, dry=dry)
                     for d in drafts]
 
-        # C 規則重複判定:批內互查
         first_seen = {}
         for idx, r in enumerate(resolved):
             sig = r["signature"]
             if sig in first_seen:
-                r["errors"].append(f"與第 {first_seen[sig] + 1} 筆子產品規格重複")
+                first_idx, first_draft_id = first_seen[sig]
+                r["errors"].append(_err(
+                    "duplicate_signature", f"與第 {first_idx + 1} 筆子產品規格重複",
+                    related_draft_id=first_draft_id))
             else:
-                first_seen[sig] = idx
-        # C 規則:對 DB 既有子產品
+                first_seen[sig] = (idx, r["draft_id"])
+
         existing = self._existing_signatures(product_id, feature_id)
         for r in resolved:
-            if r["signature"] in existing:
-                r["errors"].append("與既有子產品規格重複")
+            variant_id = existing.get(r["signature"])
+            if variant_id is not None:
+                r["errors"].append(_err(
+                    "duplicate_signature", "與既有子產品規格重複",
+                    related_variant_id=variant_id))
 
-        # 條碼重複:批內互查 + 對 DB
         seen_codes = {}
         for idx, r in enumerate(resolved):
             for bc in r["barcodes"]:
                 code = bc["barcode"]
                 if not code:
                     continue
-                if code in seen_codes and seen_codes[code] != idx:
-                    r["errors"].append(f"條碼「{code}」與第 {seen_codes[code] + 1} 筆重複")
-                elif self.conn.execute(
-                        "SELECT 1 FROM Barcode WHERE barcode=?", (code,)).fetchone():
-                    r["errors"].append(f"條碼「{code}」已存在")
-                seen_codes.setdefault(code, idx)
+                if code in seen_codes and seen_codes[code][0] != idx:
+                    first_idx, first_draft_id = seen_codes[code]
+                    r["errors"].append(_err(
+                        "duplicate_barcode", f"條碼「{code}」與第 {first_idx + 1} 筆重複",
+                        related_draft_id=first_draft_id))
+                else:
+                    row = self.conn.execute(
+                        "SELECT variant_id FROM Barcode WHERE barcode=?", (code,)).fetchone()
+                    if row:
+                        r["errors"].append(_err(
+                            "duplicate_barcode", f"條碼「{code}」已存在",
+                            related_variant_id=row["variant_id"]))
+                seen_codes.setdefault(code, (idx, r["draft_id"]))
+        return resolved, {"created": created, "reactivated": reactivated,
+                          "category_id": category_id, "feature_id": feature_id}
+
+    # ---- 主流程 ----
+
+    def batch_create(self, payload):
+        product_id = payload["product_id"]
+        resolved, ctx = self._validate_batch(payload, dry=False)
 
         errors = [{"index": i, "draft_id": r["draft_id"], "errors": r["errors"]}
                   for i, r in enumerate(resolved) if r["errors"]]
@@ -259,8 +292,8 @@ class VariantBatchService:
                             "barcodes": codes})
 
         return {"product_id": product_id, "results": results,
-                "created_option_ids": sorted(created),
-                "reactivated_option_ids": sorted(reactivated)}
+                "created_option_ids": sorted(ctx["created"]),
+                "reactivated_option_ids": sorted(ctx["reactivated"])}
 
     # ---- 容錯建立(供未來匯入等入口;批次建立維持嚴格全有全無) ----
 
@@ -269,26 +302,13 @@ class VariantBatchService:
         僅容忍三種業務問題(missing_required/duplicate_signature/duplicate_barcode);
         結構性錯誤(未知欄、select 多值、型號不存在、TL 條碼)仍整批拒絕。"""
         product_id = payload["product_id"]
-        drafts = payload["drafts"]
-        if not drafts:
-            raise ValidationError("尚未加入任何子產品")
-        category_id = self._require_product(product_id)
-        writable = self._writable_fields(category_id)
-        feature_id = self._feature_field_id(category_id)
-        model_mode = self.conn.execute(
-            "SELECT model_mode FROM Category WHERE category_id=?",
-            (category_id,)).fetchone()["model_mode"]
-
-        created, reactivated = set(), set()
-        resolved = [self._resolve_draft(d, category_id, writable, feature_id,
-                                        model_mode, created, reactivated)
-                    for d in drafts]
+        resolved, ctx = self._validate_batch(payload, dry=False)
         hard = [{"index": i, "draft_id": r["draft_id"], "errors": r["structural_errors"]}
                 for i, r in enumerate(resolved) if r["structural_errors"]]
         if hard:
             raise ValidationError("部分資料結構有誤，無法建立", details=hard)
 
-        sig_owner = dict(self._existing_signatures(product_id, feature_id))
+        sig_owner = dict(self._existing_signatures(product_id, ctx["feature_id"]))
         code_owner = {r["barcode"]: r["variant_id"]
                       for r in self.conn.execute("SELECT barcode, variant_id FROM Barcode")}
         results = []
@@ -341,5 +361,5 @@ class VariantBatchService:
             results.append({"draft_id": r["draft_id"], "variant_id": vid,
                             "issue_count": len(issues), "barcodes": codes})
         return {"product_id": product_id, "results": results,
-                "created_option_ids": sorted(created),
-                "reactivated_option_ids": sorted(reactivated)}
+                "created_option_ids": sorted(ctx["created"]),
+                "reactivated_option_ids": sorted(ctx["reactivated"])}
