@@ -438,8 +438,8 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .tag-search input { flex: 1; }
 
 /* ── 新增款式：組合輸入＋批次工作表 ── */
-.batch-content { display: flex; flex-direction: column; gap: 12px; overflow: hidden;
-  padding-bottom: 12px; }
+.dialog-content.batch-content { display: flex; flex-direction: column; gap: 12px;
+  overflow: hidden; overflow-y: hidden; padding-bottom: 12px; }
 .batch-content > .dialog-section { flex: 0 0 auto; margin-top: 0; }
 .batch-product-summary { display: flex; align-items: center; gap: 12px; min-height: 46px;
   padding: 10px 12px; white-space: nowrap; }

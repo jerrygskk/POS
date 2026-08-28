@@ -1,6 +1,7 @@
 """新增款式工作表前端邏輯的 Node 測試。"""
 
 import json
+import re
 import shutil
 import subprocess
 import unittest
@@ -308,6 +309,30 @@ const s = mkState({productId:5,fields:[{field_id:7,name:"顏色",field_type:"sel
         self.assertIn('js/variant_batch_logic.js?v=156', html)
         self.assertNotIn("openEdit", html)
         self.assertNotIn("dialog-overlay", html)
+
+    def test_batch_workspace_has_only_table_as_outer_scroller(self):
+        css = (STATIC / "css" / "pos.css").read_text(encoding="utf-8")
+
+        def declarations(selector):
+            match = re.search(
+                rf"{re.escape(selector)}\s*\{{([^}}]*)\}}",
+                css,
+                re.DOTALL,
+            )
+            self.assertIsNotNone(match, f"missing CSS rule for {selector}")
+            return {
+                name.strip(): value.strip()
+                for item in match.group(1).split(";")
+                if ":" in item
+                for name, value in [item.split(":", 1)]
+            }
+
+        outer = declarations(".dialog-content.batch-content")
+        table = declarations(".batch-table")
+
+        self.assertEqual(outer.get("overflow"), "hidden")
+        self.assertEqual(outer.get("overflow-y"), "hidden")
+        self.assertEqual(table.get("overflow"), "auto")
 
 
 if __name__ == "__main__":
