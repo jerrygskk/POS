@@ -29,9 +29,10 @@ const context = {
 };
 context.window.CatalogFields = { filterOptions: (list) => list || [] };
 vm.createContext(context);
-vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);  // api.js
-vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);  // optpicker.js
-vm.runInContext(fs.readFileSync(process.argv[3], "utf8"), context);  // variant_batch.js
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);  // variant_batch_logic.js
+vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);  // api.js
+vm.runInContext(fs.readFileSync(process.argv[3], "utf8"), context);  // optpicker.js
+vm.runInContext(fs.readFileSync(process.argv[4], "utf8"), context);  // variant_batch.js
 const window = context.window;
 const page = window.PosPages["page-variant-batch"];
 const optPicker = window.PosComponents["opt-picker"];
@@ -48,13 +49,121 @@ function done() { process.stdout.write(JSON.stringify(out)); }
 BODY
 '''.replace("BODY", body)
         result = subprocess.run(
-            ["node", "-e", script, str(STATIC / "js" / "api.js"),
+            ["node", "-e", script, str(STATIC / "js" / "variant_batch_logic.js"),
+             str(STATIC / "js" / "api.js"),
              str(STATIC / "js" / "optpicker.js"),
              str(STATIC / "js" / "variant_batch.js")],
             cwd=ROOT, text=True, capture_output=True, encoding="utf-8")
         if result.returncode != 0:
             self.fail(result.stderr)
         return json.loads(result.stdout)
+
+    def test_expand_axes_and_formula_text(self):
+        out = self._run(r'''
+const logic = window.VariantBatchLogic;
+const fields = [
+  {name:"顏色", field_type:"select"},
+  {name:"長度", field_type:"select"},
+  {name:"特性詞條", field_type:"tags"},
+  {name:"備註", field_type:"text"},
+];
+const expanded = logic.expandAxes(fields, {"顏色":["黑","白","粉"], "長度":["1m","2m"]});
+out.names = expanded.axes.map(a => a.name);
+out.count = expanded.count;
+out.formula = logic.formulaText(expanded.axes);
+out.single = logic.formulaText([{name:"顏色", values:["黑","白"]}]);
+const empty = logic.expandAxes(fields.slice(2), {"特性詞條":"抗刮", "備註":"新品"});
+out.emptyAxes = empty.axes;
+out.emptyCount = empty.count;
+done();
+''')
+        self.assertEqual(out["names"], ["顏色", "長度"])
+        self.assertEqual(out["count"], 6)
+        self.assertEqual(out["formula"], "3 個顏色 × 2 個長度＝6 筆")
+        self.assertEqual(out["single"], "")
+        self.assertEqual(out["emptyAxes"], [])
+        self.assertEqual(out["emptyCount"], 1)
+
+    def test_expand_rows_applies_shared_values_and_barcode_rule(self):
+        out = self._run(r'''
+const logic = window.VariantBatchLogic;
+const fields = [
+  {name:"顏色", field_type:"select"}, {name:"長度", field_type:"select"},
+  {name:"規格", field_type:"multi"}, {name:"特性詞條", field_type:"tags"},
+  {name:"備註", field_type:"text"},
+];
+const input = {attrs:{"顏色":["黑","白","粉"], "長度":["1m","2m"],
+  "規格":["快充","防水"], "特性詞條":"抗刮", "備註":"新品"},
+  price:100, model_ids:[7,8], barcode:"F1", store:true};
+const rows = logic.expandRows(fields, input, 10);
+out.count = rows.length;
+out.first = rows[0]; out.last = rows[5];
+const noAxes = logic.expandRows(fields.slice(2), input, 20);
+out.noAxes = noAxes[0];
+done();
+''')
+        self.assertEqual(out["count"], 6)
+        self.assertEqual(out["first"]["attrs"]["顏色"], "黑")
+        self.assertEqual(out["last"]["attrs"]["長度"], "2m")
+        self.assertEqual(out["first"]["attrs"]["規格"], ["快充", "防水"])
+        self.assertEqual(out["first"]["attrs"]["特性詞條"], "抗刮")
+        self.assertEqual(out["first"]["model_ids"], [7, 8])
+        self.assertEqual(out["first"]["price"], 100)
+        self.assertEqual(out["first"]["barcode"], "")
+        self.assertTrue(out["first"]["store"])
+        self.assertEqual(out["noAxes"]["barcode"], "F1")
+
+    def test_duplicate_row_deep_copies_and_clears_barcode(self):
+        out = self._run(r'''
+const logic = window.VariantBatchLogic;
+const row = {draft_id:"d1", attrs:{"顏色":"黑", "規格":["快充"]},
+  price:100, model_ids:[7], barcode:"F1", store:true};
+const copy = logic.duplicateRow(row, 2);
+copy.attrs["規格"].push("防水"); copy.model_ids.push(8);
+out.copy = copy; out.original = row;
+done();
+''')
+        self.assertNotEqual(out["copy"]["draft_id"], out["original"]["draft_id"])
+        self.assertEqual(out["copy"]["barcode"], "")
+        self.assertEqual(out["copy"]["store"], True)
+        self.assertEqual(out["original"]["attrs"]["規格"], ["快充"])
+        self.assertEqual(out["original"]["model_ids"], [7])
+
+    def test_diff_field_names_detects_attribute_and_shared_value_changes(self):
+        out = self._run(r'''
+const logic = window.VariantBatchLogic;
+const fields = [{name:"顏色",field_type:"select"}, {name:"長度",field_type:"select"}];
+const same = [{attrs:{"顏色":"黑","長度":"1m"},price:100,barcode:"",model_ids:[7]},
+              {attrs:{"顏色":"黑","長度":"2m"},price:100,barcode:"",model_ids:[7]}];
+out.lengthOnly = Array.from(logic.diffFieldNames(same, fields));
+same[1].price = 200;
+out.withPrice = Array.from(logic.diffFieldNames(same, fields));
+done();
+''')
+        self.assertEqual(out["lengthOnly"], ["長度"])
+        self.assertIn("__price", out["withPrice"])
+
+    def test_partition_precheck_and_duplicate_reference_text(self):
+        out = self._run(r'''
+const logic = window.VariantBatchLogic;
+const rows = [{draft_id:"d1", attrs:{}}, {draft_id:"d2", attrs:{}}, {draft_id:"d3", attrs:{}}];
+const result = logic.partitionPrecheck(rows, [
+  {draft_id:"d1", existing_duplicate:true, related_variant_id:9, errors:["已存在"]},
+  {draft_id:"d2", existing_duplicate:false, errors:["必填規格未填"]},
+  {draft_id:"d3", existing_duplicate:false, errors:[]},
+]);
+out.kept = result.kept.map(r => r.draft_id);
+out.skipped = result.skipped.map(s => [s.row.draft_id, s.related_variant_id]);
+out.errors = result.errorsByDraftId;
+out.firstRef = logic.dupRefText({related_draft_id:"d1"}, rows);
+out.removedRef = logic.dupRefText({related_draft_id:"gone"}, rows);
+done();
+''')
+        self.assertEqual(out["kept"], ["d2", "d3"])
+        self.assertEqual(out["skipped"], [["d1", 9]])
+        self.assertEqual(out["errors"], {"d2": ["必填規格未填"]})
+        self.assertEqual(out["firstRef"], "與第 1 筆重複")
+        self.assertEqual(out["removedRef"], "與已移除的一筆重複")
 
     def test_add_draft_snapshots_input_independently(self):
         out = self._run(r'''
