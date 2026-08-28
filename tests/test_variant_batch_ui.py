@@ -33,6 +33,7 @@ context.window.initFormAttrs = (fields, existing) => {
   }
   return attrs;
 };
+context.window.buildAttrPayload = (fields, attrs) => Object.assign({}, attrs || {});
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);  // api.js
 vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);  // variant_batch_logic.js
@@ -412,6 +413,60 @@ done();
         self.assertTrue(out["rows"][1]["store"])
         self.assertEqual(out["rows"][1]["attrs"], {"顏色": "黑"})
 
+    def test_build_payload_keeps_factory_and_store_barcodes(self):
+        out = self._run(r'''
+const s = mkState({fields:[]});
+const rows = [
+  {draft_id:"both",attrs:{},price:null,model_ids:[],barcode:"F-001",store:true},
+  {draft_id:"factory",attrs:{},price:null,model_ids:[],barcode:"F-002",store:false},
+  {draft_id:"store",attrs:{},price:null,model_ids:[],barcode:"",store:true},
+  {draft_id:"none",attrs:{},price:null,model_ids:[],barcode:"",store:false},
+];
+out.barcodes = s.buildPayload(rows).map(row => [row.draft_id, row.barcodes]);
+done();
+''')
+        self.assertEqual(out["barcodes"], [
+            ["both", [
+                {"barcode": "F-001", "source": "factory"},
+                {"source": "store"},
+            ]],
+            ["factory", [{"barcode": "F-002", "source": "factory"}]],
+            ["store", [{"source": "store"}]],
+            ["none", []],
+        ])
+
+    def test_feature_tags_participate_in_logic_and_page_diff(self):
+        out = self._run(r'''
+const fields = [
+  {field_id:1,name:"顏色",field_type:"select"},
+  {field_id:2,name:"特性詞條",field_type:"tags"},
+];
+const rows = [
+  {draft_id:"d1",attrs:{"顏色":"黑","特性詞條":["防摔"]},price:100,barcode:"",model_ids:[]},
+  {draft_id:"d2",attrs:{"顏色":"黑","特性詞條":["磁吸"]},price:100,barcode:"",model_ids:[]},
+];
+out.logic = Array.from(window.VariantBatchLogic.diffFieldNames(rows, fields));
+const s = mkState({fields,drafts:rows});
+out.page = Array.from(s.diffFields);
+done();
+''')
+        self.assertEqual(out["logic"], ["特性詞條"])
+        self.assertEqual(out["page"], ["特性詞條"])
+
+    def test_barcode_errors_include_store_prefix_only(self):
+        out = self._run(r'''
+const draft = {draft_id:"d1"};
+const s = mkState({precheckErrors:{d1:[
+  {code:"duplicate_barcode",message:"條碼重複"},
+  {code:"store_prefix_barcode",message:"條碼不可使用自取碼前綴"},
+  {code:"missing_required",field_id:7,message:"顏色必填"},
+]}});
+out.codes = s.barcodeErrors(draft).map(error => error.code);
+done();
+''')
+        self.assertEqual(out["codes"], [
+            "duplicate_barcode", "store_prefix_barcode"])
+
     def test_commit_maps_structured_details(self):
         out = self._run(r'''
 API.batchCreateVariants = async () => {
@@ -444,9 +499,106 @@ const s = mkState({productId:5,fields:[{field_id:7,name:"顏色",field_type:"sel
         self.assertIn('class="batch-fixed-editor"', html)
         self.assertIn('class="batch-skipped"', html)
         self.assertIn('v-if="product && productReady"', html)
-        self.assertIn('js/variant_batch_logic.js?v=156', html)
+        self.assertIn('js/variant_batch_logic.js?v=157', html)
+        self.assertIn(
+            '<th v-if="featureField && (!showDiffOnly || '
+            'diffFields.has(featureField.name))">', html)
+        self.assertIn(
+            '<td v-if="featureField && (!showDiffOnly || '
+            'diffFields.has(featureField.name))"', html)
+        self.assertIn(
+            "'cell-diff':diffFields.has(featureField.name)", html)
         self.assertNotIn("openEdit", html)
         self.assertNotIn("dialog-overlay", html)
+
+    def test_escape_uses_single_outer_listener_and_fixed_editor_first(self):
+        batch_source = (STATIC / "js" / "variant_batch.js").read_text(
+            encoding="utf-8")
+        window_source = (STATIC / "js" / "variant_batch_window.js").read_text(
+            encoding="utf-8")
+        html = (STATIC / "variant_batch.html").read_text(encoding="utf-8")
+        self.assertNotIn('document.addEventListener("keydown"', batch_source)
+        self.assertEqual(window_source.count(
+            'document.addEventListener("keydown"'), 1)
+        self.assertIn('<page-variant-batch ref="batchPage"', html)
+
+        script = r'''
+const fs = require("fs"), vm = require("vm");
+const listeners = {};
+let definition;
+const closeCalls = [];
+const context = {
+  document: {
+    addEventListener(name, handler) {
+      (listeners[name] ||= []).push(handler);
+    },
+    removeEventListener() {},
+  },
+  window: {PosMixin:{}, PosPages:{}, PosComponents:{}},
+  API: {invoke: async (action, payload) => {
+    if (action === "desktop.child_window.context") return {context:{}};
+    if (action === "desktop.child_window.close") closeCalls.push(payload);
+    return {};
+  }},
+  Vue: {createApp(options) {
+    definition = options;
+    return {mixin(){}, component(){}, mount(){}};
+  }},
+  console, setTimeout, clearTimeout,
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
+listeners.DOMContentLoaded[0]();
+const state = Object.assign({}, definition.data());
+for (const [name, method] of Object.entries(definition.methods))
+  state[name] = method.bind(state);
+let editorClosed = 0;
+state.$refs = {batchPage:{
+  fixedEditor:{draftId:"d1",fieldName:"特性詞條"},
+  closeFixedEditor(){ editorClosed++; this.fixedEditor = null; },
+}};
+(async () => {
+  await definition.mounted.call(state);
+  const event = {key:"Escape",repeat:false,prevented:false,preventDefault(){this.prevented=true;}};
+  listeners.keydown[0](event);
+  await Promise.resolve();
+  const afterEditor = {editorClosed,prevented:event.prevented,closeCalls:closeCalls.length};
+  const repeated = {key:"Escape",repeat:true,prevented:false,preventDefault(){this.prevented=true;}};
+  listeners.keydown[0](repeated);
+  await Promise.resolve();
+  const afterRepeat = {editorClosed,prevented:repeated.prevented,closeCalls:closeCalls.length};
+  const event2 = {key:"Escape",repeat:false,prevented:false,preventDefault(){this.prevented=true;}};
+  listeners.keydown[0](event2);
+  await Promise.resolve();
+  process.stdout.write(JSON.stringify({
+    listenerCount:listeners.keydown.length,
+    afterEditor,
+    afterRepeat,
+    afterWindow:{editorClosed,prevented:event2.prevented,closeCalls:closeCalls.length},
+  }));
+})();
+'''
+        result = subprocess.run(
+            ["node", "-e", script,
+             str(STATIC / "js" / "variant_batch_window.js")],
+            cwd=ROOT, text=True, capture_output=True, encoding="utf-8")
+        if result.returncode != 0:
+            self.fail(result.stderr)
+        out = json.loads(result.stdout)
+        self.assertEqual(out["listenerCount"], 1)
+        self.assertEqual(out["afterEditor"], {
+            "editorClosed": 1, "prevented": True, "closeCalls": 0})
+        self.assertEqual(out["afterRepeat"], {
+            "editorClosed": 1, "prevented": False, "closeCalls": 0})
+        self.assertEqual(out["afterWindow"], {
+            "editorClosed": 1, "prevented": False, "closeCalls": 1})
+
+    def test_all_shared_resource_versions_are_157(self):
+        for filename in ["index.html", "variant_editor.html",
+                         "variant_batch.html", "field_editor.html"]:
+            html = (STATIC / filename).read_text(encoding="utf-8")
+            versions = set(re.findall(r"\?v=(\d+)", html))
+            self.assertEqual(versions, {"157"}, filename)
 
     def test_batch_workspace_has_only_table_as_outer_scroller(self):
         css = (STATIC / "css" / "pos.css").read_text(encoding="utf-8")

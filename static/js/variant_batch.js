@@ -38,7 +38,7 @@ window.PosPages["page-variant-batch"] = {
     previewCount() { return this.axesInfo.count; },
     inputFormula() { return window.VariantBatchLogic.formulaText(this.axesInfo.axes); },
     diffFields() {
-      return window.VariantBatchLogic.diffFieldNames(this.drafts, this.formalFields);
+      return window.VariantBatchLogic.diffFieldNames(this.drafts, this.fields);
     },
     fixedDraft() {
       return this.fixedEditor
@@ -50,10 +50,6 @@ window.PosPages["page-variant-batch"] = {
     },
   },
   async mounted() {
-    this._escHandler = ev => {
-      if (ev.key === "Escape" && this.fixedEditor) this.closeFixedEditor();
-    };
-    document.addEventListener("keydown", this._escHandler);
     await this.guard(async () => {
       this.categories = await API.listCategories({});
       this.products = await API.listCatalog({});
@@ -67,7 +63,6 @@ window.PosPages["page-variant-batch"] = {
   },
   unmounted() {
     this.invalidatePrecheck();
-    document.removeEventListener("keydown", this._escHandler);
   },
   methods: {
     blankInput() {
@@ -244,8 +239,9 @@ window.PosPages["page-variant-batch"] = {
 
     buildPayload(rows) {
       return (rows || this.drafts).map(d => {
-        const barcodes = d.barcode ? [{ barcode: d.barcode, source: "factory" }]
-          : (d.store ? [{ source: "store" }] : []);
+        const barcodes = [];
+        if (d.barcode) barcodes.push({ barcode: d.barcode, source: "factory" });
+        if (d.store) barcodes.push({ source: "store" });
         return {
           draft_id: d.draft_id,
           attributes: window.buildAttrPayload(this.fields, d.attrs),
@@ -263,7 +259,8 @@ window.PosPages["page-variant-batch"] = {
       return this.errorsFor(draft).filter(err => err.code === "missing_models");
     },
     barcodeErrors(draft) {
-      return this.errorsFor(draft).filter(err => err.code === "duplicate_barcode");
+      return this.errorsFor(draft).filter(err =>
+        err.code === "duplicate_barcode" || err.code === "store_prefix_barcode");
     },
     duplicateErrors(draft) {
       return this.errorsFor(draft).filter(err => err.code === "duplicate_signature");
