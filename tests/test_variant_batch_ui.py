@@ -453,6 +453,25 @@ done();
         self.assertEqual(out["logic"], ["特性詞條"])
         self.assertEqual(out["page"], ["特性詞條"])
 
+    def test_barcode_diff_includes_factory_barcode_and_store_flag(self):
+        out = self._run(r'''
+const logic = window.VariantBatchLogic;
+const base = {attrs:{},price:null,model_ids:[],barcode:"",store:false};
+out.store = Array.from(logic.diffFieldNames([
+  base, {...base,store:true},
+], []));
+out.factory = Array.from(logic.diffFieldNames([
+  base, {...base,barcode:"F-001"},
+], []));
+out.same = Array.from(logic.diffFieldNames([
+  base, {...base},
+], []));
+done();
+''')
+        self.assertEqual(out["store"], ["__barcode"])
+        self.assertEqual(out["factory"], ["__barcode"])
+        self.assertEqual(out["same"], [])
+
     def test_barcode_errors_include_store_prefix_only(self):
         out = self._run(r'''
 const draft = {draft_id:"d1"};
@@ -618,11 +637,29 @@ state.$refs = {batchPage:{
             }
 
         outer = declarations(".dialog-content.batch-content")
+        preview = declarations(".batch-content > .batch-preview")
         table = declarations(".batch-table")
+        footer = declarations(".batch-footer")
 
         self.assertEqual(outer.get("overflow"), "hidden")
         self.assertEqual(outer.get("overflow-y"), "hidden")
+        self.assertGreater(
+            css.index(".batch-content > .batch-preview"),
+            css.index(".batch-content > .dialog-section"),
+        )
+        self.assertEqual(preview.get("flex"), "1 1 180px")
+        self.assertEqual(preview.get("min-height"), "140px")
+        self.assertEqual(preview.get("min-width"), "0")
+        self.assertEqual(table.get("flex"), "1 1 auto")
+        self.assertEqual(table.get("min-height"), "0")
+        self.assertEqual(table.get("min-width"), "0")
         self.assertEqual(table.get("overflow"), "auto")
+        self.assertEqual(footer.get("position"), "relative")
+        self.assertEqual(footer.get("z-index"), "3")
+        for selector in [".batch-input", ".batch-skipped", ".batch-fixed-editor"]:
+            section = declarations(selector)
+            self.assertNotEqual(section.get("overflow"), "auto", selector)
+            self.assertNotEqual(section.get("overflow-y"), "auto", selector)
 
 
 if __name__ == "__main__":

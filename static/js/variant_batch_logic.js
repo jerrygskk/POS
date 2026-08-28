@@ -73,10 +73,13 @@
       if (rows.some(row => !sameValue(row.attrs && row.attrs[field.name],
         first.attrs && first.attrs[field.name]))) changed.add(field.name);
     }
-    const shared = [["__price", "price"], ["__barcode", "barcode"], ["__models", "model_ids"]];
+    const shared = [["__price", "price"], ["__models", "model_ids"]];
     for (const entry of shared) {
       if (rows.some(row => !sameValue(row[entry[1]], first[entry[1]]))) changed.add(entry[0]);
     }
+    const firstBarcode = [first.barcode, !!first.store];
+    if (rows.some(row => !sameValue([row.barcode, !!row.store], firstBarcode)))
+      changed.add("__barcode");
     return changed;
   }
 
