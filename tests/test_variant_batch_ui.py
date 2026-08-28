@@ -285,6 +285,118 @@ const loading = mkState({catId:1, productId:5, products:[product]});
         self.assertTrue(out["completedReady"])
         self.assertFalse(out["failedReady"])
 
+    def test_product_load_old_first_does_not_open_new_product_input(self):
+        out = self._run(r'''
+const requests = [];
+API.categoryFields = () => new Promise(resolve => requests.push(resolve));
+const products = [
+  {product_id:5, category_id:1}, {product_id:6, category_id:1},
+];
+const s = mkState({catId:1, productId:5, products});
+(async () => {
+  const oldLoad = s.onProductChange();
+  s.productId = 6;
+  const currentLoad = s.onProductChange();
+  requests[0]([{field_id:1,name:"舊欄位",field_type:"select"}]);
+  await oldLoad;
+  out.readyAfterOld = s.productReady;
+  out.fieldsAfterOld = s.fields.map(field => field.name);
+  requests[1]([{field_id:2,name:"新欄位",field_type:"select"}]);
+  await currentLoad;
+  out.readyAfterCurrent = s.productReady;
+  out.fieldsAfterCurrent = s.fields.map(field => field.name);
+  done();
+})();
+''')
+        self.assertFalse(out["readyAfterOld"])
+        self.assertEqual(out["fieldsAfterOld"], [])
+        self.assertTrue(out["readyAfterCurrent"])
+        self.assertEqual(out["fieldsAfterCurrent"], ["新欄位"])
+
+    def test_product_load_old_late_does_not_overwrite_current_input(self):
+        out = self._run(r'''
+const requests = [];
+API.categoryFields = () => new Promise(resolve => requests.push(resolve));
+const products = [
+  {product_id:5, category_id:1}, {product_id:6, category_id:1},
+];
+const s = mkState({catId:1, productId:5, products});
+(async () => {
+  const oldLoad = s.onProductChange();
+  s.productId = 6;
+  const currentLoad = s.onProductChange();
+  requests[1]([{field_id:2,name:"新欄位",field_type:"select"}]);
+  await currentLoad;
+  s.input.store = true;
+  requests[0]([{field_id:1,name:"舊欄位",field_type:"select"}]);
+  await oldLoad;
+  out.ready = s.productReady;
+  out.fields = s.fields.map(field => field.name);
+  out.store = s.input.store;
+  done();
+})();
+''')
+        self.assertTrue(out["ready"])
+        self.assertEqual(out["fields"], ["新欄位"])
+        self.assertTrue(out["store"])
+
+    def test_product_load_stale_failure_does_not_replace_current_state(self):
+        out = self._run(r'''
+const requests = [];
+API.categoryFields = () => new Promise((resolve, reject) => requests.push({resolve, reject}));
+const products = [
+  {product_id:5, category_id:1}, {product_id:6, category_id:1},
+];
+const s = mkState({catId:1, productId:5, products});
+s.guard = async fn => { try { await fn(); } catch (err) { s._error = err.message; } };
+(async () => {
+  const oldLoad = s.onProductChange();
+  s.productId = 6;
+  const currentLoad = s.onProductChange();
+  requests[1].resolve([{field_id:2,name:"新欄位",field_type:"select"}]);
+  await currentLoad;
+  requests[0].reject(new Error("舊產品載入失敗"));
+  await oldLoad;
+  out.error = s._error || null;
+  out.ready = s.productReady;
+  out.fields = s.fields.map(field => field.name);
+  done();
+})();
+''')
+        self.assertIsNone(out["error"])
+        self.assertTrue(out["ready"])
+        self.assertEqual(out["fields"], ["新欄位"])
+
+    def test_product_load_is_invalidated_by_category_or_null_product(self):
+        out = self._run(r'''
+const requests = [];
+API.categoryFields = () => new Promise(resolve => requests.push(resolve));
+const product = {product_id:5, category_id:1};
+(async () => {
+  const categoryState = mkState({catId:1, productId:5, products:[product]});
+  const categoryLoad = categoryState.onProductChange();
+  await categoryState.onCategoryChange();
+  requests[0]([{field_id:1,name:"舊欄位",field_type:"select"}]);
+  await categoryLoad;
+  out.categoryReady = categoryState.productReady;
+  out.categoryFields = categoryState.fields;
+
+  const nullState = mkState({catId:1, productId:5, products:[product]});
+  const productLoad = nullState.onProductChange();
+  nullState.productId = null;
+  await nullState.onProductChange();
+  requests[1]([{field_id:1,name:"舊欄位",field_type:"select"}]);
+  await productLoad;
+  out.nullReady = nullState.productReady;
+  out.nullFields = nullState.fields;
+  done();
+})();
+''')
+        self.assertFalse(out["categoryReady"])
+        self.assertEqual(out["categoryFields"], [])
+        self.assertFalse(out["nullReady"])
+        self.assertEqual(out["nullFields"], [])
+
     def test_duplicate_row_clears_barcode_keeps_store(self):
         out = self._run(r'''
 const s = mkState({drafts:[

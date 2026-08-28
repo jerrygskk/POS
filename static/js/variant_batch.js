@@ -14,7 +14,7 @@ window.PosPages["page-variant-batch"] = {
       fields: [], fieldUsage: {}, tagUsage: [],
       input: this.blankInput(),
       drafts: [], skipped: [], precheckErrors: {},
-      seq: 0, precheckSeq: 0, _precheckTimer: null,
+      seq: 0, precheckSeq: 0, _precheckTimer: null, productLoadSeq: 0,
       inputCollapsed: false, selectionCollapsed: false,
       productReady: false,
       showDiffOnly: false, showSkipped: false,
@@ -89,6 +89,7 @@ window.PosPages["page-variant-batch"] = {
     },
     async onCategoryChange() {
       this.invalidatePrecheck();
+      this.productLoadSeq++;
       this.productReady = false;
       this.productId = null;
       this.fields = [];
@@ -102,6 +103,7 @@ window.PosPages["page-variant-batch"] = {
     },
     async onProductChange() {
       this.invalidatePrecheck();
+      const loadSeq = ++this.productLoadSeq;
       this.productReady = false;
       this.clearWorksheet();
       this.doneMsg = "";
@@ -114,19 +116,31 @@ window.PosPages["page-variant-batch"] = {
         this.input = this.blankInput();
         return;
       }
-      let loaded = false;
+      const categoryId = this.catId;
+      const product = this.product;
       await this.guard(async () => {
-        this.fields = await API.categoryFields(this.catId);
-        this.fieldUsage = {};
-        const scope = window.CatalogFields.usageScope(this.product);
-        await window.CatalogFields.loadFieldUsage(
-          this.catId, this.formalFields, this.fieldUsage, null, scope);
-        this.tagUsage = this.featureField
-          ? await API.fieldUsage(this.catId, this.featureField.field_id, scope) : [];
+        let fields, fieldUsage, tagUsage;
+        try {
+          fields = await API.categoryFields(categoryId);
+          const formalFields = fields.filter(field => field.field_type !== "tags");
+          fieldUsage = {};
+          const scope = window.CatalogFields.usageScope(product);
+          await window.CatalogFields.loadFieldUsage(
+            categoryId, formalFields, fieldUsage, null, scope);
+          const featureField = fields.find(field => field.field_type === "tags") || null;
+          tagUsage = featureField
+            ? await API.fieldUsage(categoryId, featureField.field_id, scope) : [];
+        } catch (err) {
+          if (loadSeq === this.productLoadSeq) throw err;
+          return;
+        }
+        if (loadSeq !== this.productLoadSeq) return;
+        this.fields = fields;
+        this.fieldUsage = fieldUsage;
+        this.tagUsage = tagUsage;
         this.resetInput();
-        loaded = true;
+        this.productReady = true;
       });
-      this.productReady = loaded;
     },
     reopenProductSelection() {
       this.selectionCollapsed = false;
