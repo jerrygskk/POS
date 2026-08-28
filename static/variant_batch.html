@@ -113,7 +113,8 @@
         <div class="batch-formula">
           <span>{{ inputFormula || '單一組合' }}</span>
           <strong>將產生 {{ previewCount }} 筆</strong>
-          <button type="button" class="dialog-confirm" @click="generatePreview">產生預覽</button>
+          <button type="button" class="dialog-confirm" :disabled="generating || submitting"
+                  @click="generatePreview">{{ generating ? '產生中…' : '產生預覽' }}</button>
         </div>
       </div>
     </section>
@@ -252,8 +253,10 @@
         {{ skipped.length ? '已略過 '+skipped.length+' 筆｜' : '' }}待建立 {{ drafts.length }} 筆
       </span>
       <button type="button" class="dialog-cancel" @click="closeWindow">關閉</button>
-      <button type="button" class="dialog-confirm" :disabled="!drafts.length || committing"
-              @click="commitAll">建立 {{ drafts.length }} 筆</button>
+      <button type="button" class="dialog-confirm"
+              :disabled="!drafts.length || submitting || generating" @click="commitAll">
+        {{ submitting ? '建立中…' : '建立 '+drafts.length+' 筆' }}
+      </button>
     </div>
   </footer>
 </div>

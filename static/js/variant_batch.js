@@ -18,7 +18,7 @@ window.PosPages["page-variant-batch"] = {
       inputCollapsed: false, selectionCollapsed: false,
       showDiffOnly: false, showSkipped: false,
       fixedEditor: null, lastDeleted: null,
-      doneMsg: "", committing: false,
+      doneMsg: "", generating: false, submitting: false,
     };
   },
   computed: {
@@ -137,21 +137,28 @@ window.PosPages["page-variant-batch"] = {
     },
 
     async generatePreview() {
-      if (this.productId == null) {
-        this.showError("請先選擇產品");
-        return;
+      if (this.generating || this.submitting) return;
+      this.generating = true;
+      try {
+        if (this.productId == null) {
+          this.showError("請先選擇產品");
+          return;
+        }
+        const count = this.previewCount;
+        if (count > 30 &&
+            !await PosConfirm.ask(`將產生 ${count} 筆款式，確定展開？`)) return;
+        this.invalidatePrecheck();
+        const rows = window.VariantBatchLogic.expandRows(
+          this.formalFields, this.input, this.seq);
+        this.seq += rows.length;
+        this.drafts = this.drafts.concat(rows);
+        this.doneMsg = "";
+        await this.runPrecheck();
+        this.inputCollapsed = true;
+        this.resetInput();
+      } finally {
+        this.generating = false;
       }
-      const count = this.previewCount;
-      if (count > 30 && !await PosConfirm.ask(`將產生 ${count} 筆款式，確定展開？`)) return;
-      this.invalidatePrecheck();
-      const rows = window.VariantBatchLogic.expandRows(
-        this.formalFields, this.input, this.seq);
-      this.seq += rows.length;
-      this.drafts = this.drafts.concat(rows);
-      this.doneMsg = "";
-      await this.runPrecheck();
-      this.inputCollapsed = true;
-      this.resetInput();
     },
     duplicateRowAt(index) {
       const row = window.VariantBatchLogic.duplicateRow(this.drafts[index], ++this.seq);
@@ -322,9 +329,9 @@ window.PosPages["page-variant-batch"] = {
         ? await API.fieldUsage(this.catId, this.featureField.field_id, scope) : [];
     },
     async commitAll() {
-      if (!this.drafts.length || this.committing) return;
+      if (!this.drafts.length || this.submitting || this.generating) return;
       this.invalidatePrecheck();
-      this.committing = true;
+      this.submitting = true;
       try {
         const res = await API.batchCreateVariants(this.productId, this.buildPayload(this.drafts));
         this.doneMsg = `已建立 ${res.results.length} 筆款式。`;
@@ -337,7 +344,7 @@ window.PosPages["page-variant-batch"] = {
         this.precheckErrors = this.mapDetails(err.details);
         this.showError(err.message || "建立失敗");
       } finally {
-        this.committing = false;
+        this.submitting = false;
       }
     },
   },

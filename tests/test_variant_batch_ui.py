@@ -226,11 +226,38 @@ s.input.attrs = {"顏色":Array.from({length:31}, (_,i) => "色"+(i+1))};
   await s.generatePreview();
   out.prompt = prompt;
   out.count = s.drafts.length;
+  out.generating = s.generating;
   done();
 })();
 ''')
         self.assertEqual(out["prompt"], "將產生 31 筆款式，確定展開？")
         self.assertEqual(out["count"], 0)
+        self.assertFalse(out["generating"])
+
+    def test_generate_preview_concurrent_calls_add_rows_only_once_and_release_guard(self):
+        out = self._run(r'''
+const requests = [];
+API.batchPrecheckVariants = (productId, drafts) => new Promise(resolve => {
+  requests.push({drafts, resolve});
+});
+const fields = [{field_id:1,name:"顏色",field_type:"select"}];
+const s = mkState({productId:5,fields});
+s.input.attrs = {"顏色":["黑","白"]};
+(async () => {
+  const first = s.generatePreview();
+  const second = s.generatePreview();
+  for (const request of requests) request.resolve({results:
+    request.drafts.map(row => ({draft_id:row.draft_id,existing_duplicate:false,errors:[]}))});
+  await Promise.all([first, second]);
+  out.requestCount = requests.length;
+  out.draftIds = s.drafts.map(row => row.draft_id);
+  out.generating = s.generating;
+  done();
+})();
+''')
+        self.assertEqual(out["requestCount"], 1)
+        self.assertEqual(out["draftIds"], ["d1", "d2"])
+        self.assertFalse(out["generating"])
 
     def test_duplicate_row_clears_barcode_keeps_store(self):
         out = self._run(r'''

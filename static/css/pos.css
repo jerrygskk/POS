@@ -453,7 +453,7 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .batch-input-head h2 { pointer-events: none; }
 .batch-input.collapsed { padding: 10px 16px; }
 .batch-input.collapsed .batch-input-head h2 { position: static; padding: 0; }
-.batch-input-body { max-height: 330px; overflow-y: auto; padding: 2px; }
+.batch-input-body { padding: 2px; }
 .batch-input-control { min-width: 0; }
 .field-kind-note, .apply-all-note { display: block; margin-top: 2px; color: #636366;
   font-size: 10pt; font-weight: normal; }
@@ -476,14 +476,14 @@ button.primary.danger:hover { filter: brightness(0.92); }
   padding: 8px 12px; border: 0; border-radius: 0; background: transparent;
   text-align: left; }
 .dialog-shell .batch-summary-toggle span { color: #176b92; }
-.batch-skipped-list { max-height: 130px; overflow-y: auto; border-top: 1px solid #d5d5d8; }
+.batch-skipped-list { border-top: 1px solid #d5d5d8; }
 .batch-skipped-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
   padding: 7px 12px; font-size: 11pt; }
 .batch-skipped-row + .batch-skipped-row { border-top: 1px solid #e5e5ea; }
 .batch-skipped-row span:last-child { color: #636366; }
 
 .batch-fixed-editor { flex: 0 0 auto; padding: 10px 12px; border: 1px solid #8fa8c8;
-  border-radius: 6px; background: #f4f8fb; max-height: 220px; overflow-y: auto; }
+  border-radius: 6px; background: #f4f8fb; }
 .batch-fixed-head { display: flex; align-items: center; justify-content: space-between;
   gap: 12px; margin-bottom: 8px; }
 .batch-fixed-editor .model-picker { max-height: 150px; }
