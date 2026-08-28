@@ -260,6 +260,31 @@ s.input.attrs = {"顏色":["黑","白"]};
         self.assertEqual(out["draftIds"], ["d1", "d2"])
         self.assertFalse(out["generating"])
 
+    def test_product_input_waits_for_successful_initialization(self):
+        out = self._run(r'''
+let releaseFields;
+API.categoryFields = () => new Promise(resolve => { releaseFields = resolve; });
+const product = {product_id:5, category_id:1};
+const loading = mkState({catId:1, productId:5, products:[product]});
+(async () => {
+  const pending = loading.onProductChange();
+  out.pendingReady = loading.productReady === true;
+  releaseFields([{field_id:1,name:"顏色",field_type:"select"}]);
+  await pending;
+  out.completedReady = loading.productReady === true;
+
+  API.categoryFields = async () => { throw new Error("載入失敗"); };
+  const failed = mkState({catId:1, productId:5, products:[product]});
+  failed.guard = async fn => { try { await fn(); } catch (_) {} };
+  await failed.onProductChange();
+  out.failedReady = failed.productReady === true;
+  done();
+})();
+''')
+        self.assertFalse(out["pendingReady"])
+        self.assertTrue(out["completedReady"])
+        self.assertFalse(out["failedReady"])
+
     def test_duplicate_row_clears_barcode_keeps_store(self):
         out = self._run(r'''
 const s = mkState({drafts:[
@@ -306,6 +331,7 @@ const s = mkState({productId:5,fields:[{field_id:7,name:"顏色",field_type:"sel
         self.assertIn('class="batch-table"', html)
         self.assertIn('class="batch-fixed-editor"', html)
         self.assertIn('class="batch-skipped"', html)
+        self.assertIn('v-if="product && productReady"', html)
         self.assertIn('js/variant_batch_logic.js?v=156', html)
         self.assertNotIn("openEdit", html)
         self.assertNotIn("dialog-overlay", html)

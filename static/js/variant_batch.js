@@ -16,6 +16,7 @@ window.PosPages["page-variant-batch"] = {
       drafts: [], skipped: [], precheckErrors: {},
       seq: 0, precheckSeq: 0, _precheckTimer: null,
       inputCollapsed: false, selectionCollapsed: false,
+      productReady: false,
       showDiffOnly: false, showSkipped: false,
       fixedEditor: null, lastDeleted: null,
       doneMsg: "", generating: false, submitting: false,
@@ -88,6 +89,7 @@ window.PosPages["page-variant-batch"] = {
     },
     async onCategoryChange() {
       this.invalidatePrecheck();
+      this.productReady = false;
       this.productId = null;
       this.fields = [];
       this.fieldUsage = {};
@@ -100,6 +102,7 @@ window.PosPages["page-variant-batch"] = {
     },
     async onProductChange() {
       this.invalidatePrecheck();
+      this.productReady = false;
       this.clearWorksheet();
       this.doneMsg = "";
       this.inputCollapsed = false;
@@ -111,6 +114,7 @@ window.PosPages["page-variant-batch"] = {
         this.input = this.blankInput();
         return;
       }
+      let loaded = false;
       await this.guard(async () => {
         this.fields = await API.categoryFields(this.catId);
         this.fieldUsage = {};
@@ -120,7 +124,9 @@ window.PosPages["page-variant-batch"] = {
         this.tagUsage = this.featureField
           ? await API.fieldUsage(this.catId, this.featureField.field_id, scope) : [];
         this.resetInput();
+        loaded = true;
       });
+      this.productReady = loaded;
     },
     reopenProductSelection() {
       this.selectionCollapsed = false;

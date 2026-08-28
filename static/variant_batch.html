@@ -47,7 +47,7 @@
       </div>
     </section>
 
-    <section v-if="product" class="dialog-section batch-input"
+    <section v-if="product && productReady" class="dialog-section batch-input"
              :class="{collapsed:inputCollapsed}">
       <div class="batch-input-head" :class="{clickable:inputCollapsed}"
            @click="inputCollapsed=false">
