@@ -486,6 +486,33 @@ done();
         self.assertEqual(out["codes"], [
             "duplicate_barcode", "store_prefix_barcode"])
 
+    def test_reset_input_keeps_select_default_value(self):
+        out = self._run(r'''
+// 比照 api.js:initFormAttrs 對 select 預設值的處理(harness 的簡化替身沒有這段)
+window.initFormAttrs = (fields, existing) => {
+  const attrs = Object.assign({}, existing || {});
+  for (const field of (fields || [])) {
+    if (field.name in attrs) continue;
+    if (field.field_type === "multi") attrs[field.name] = [];
+    else if (field.field_type === "select" && field.default_value)
+      attrs[field.name] = field.default_value;
+    else attrs[field.name] = "";
+  }
+  return attrs;
+};
+const s = mkState({fields:[
+  {field_id:1, name:"版型", field_type:"select", default_value:"滿版"},
+  {field_id:2, name:"框色", field_type:"select"},
+]});
+s.resetInput();
+out.attrs = s.input.attrs;
+out.count = s.previewCount;
+done();
+''')
+        self.assertEqual(out["attrs"]["版型"], ["滿版"])   # 建檔預設值仍帶入
+        self.assertEqual(out["attrs"]["框色"], [])
+        self.assertEqual(out["count"], 1)                  # 單一組合,不觸發展開
+
     def test_commit_maps_structured_details(self):
         out = self._run(r'''
 API.batchCreateVariants = async () => {
@@ -518,7 +545,7 @@ const s = mkState({productId:5,fields:[{field_id:7,name:"顏色",field_type:"sel
         self.assertIn('class="batch-fixed-editor"', html)
         self.assertIn('class="batch-skipped"', html)
         self.assertIn('v-if="product && productReady"', html)
-        self.assertIn('js/variant_batch_logic.js?v=157', html)
+        self.assertRegex(html, r"js/variant_batch_logic\.js\?v=\d+")
         self.assertIn(
             '<th v-if="featureField && (!showDiffOnly || '
             'diffFields.has(featureField.name))">', html)
@@ -612,12 +639,18 @@ state.$refs = {batchPage:{
         self.assertEqual(out["afterWindow"], {
             "editorClosed": 1, "prevented": False, "closeCalls": 1})
 
-    def test_all_shared_resource_versions_are_157(self):
+    def test_all_shared_resource_versions_match(self):
+        # 資源版號會持續往上 bump,測固定數字每次改 css/js 都要改測試;
+        # 改測「四份共用同一個版號、且不低於 157」。
+        seen = set()
         for filename in ["index.html", "variant_editor.html",
                          "variant_batch.html", "field_editor.html"]:
             html = (STATIC / filename).read_text(encoding="utf-8")
             versions = set(re.findall(r"\?v=(\d+)", html))
-            self.assertEqual(versions, {"157"}, filename)
+            self.assertEqual(len(versions), 1, filename)
+            seen |= versions
+        self.assertEqual(len(seen), 1, seen)
+        self.assertGreaterEqual(int(seen.pop()), 157)
 
     def test_batch_workspace_has_only_table_as_outer_scroller(self):
         css = (STATIC / "css" / "pos.css").read_text(encoding="utf-8")
@@ -715,10 +748,18 @@ state.$refs = {batchPage:{
         self.assertIn('<td class="batch-cell-barcode"', html)
         self.assertEqual(footer.get("position"), "relative")
         self.assertEqual(footer.get("z-index"), "3")
-        for selector in [".batch-input", ".batch-skipped", ".batch-fixed-editor"]:
+        for selector in [".batch-content > .batch-input", ".batch-skipped",
+                         ".batch-fixed-editor"]:
             section = declarations(selector)
             self.assertNotEqual(section.get("overflow"), "auto", selector)
             self.assertNotEqual(section.get("overflow-y"), "auto", selector)
+        # 輸入區 section 本身不捲,但內容過高時由 body 內捲(VUE-18):
+        # section 必須可收縮(flex 0 1)且 body 是 overflow-y:auto 的內部捲動容器。
+        input_section = declarations(".batch-content > .batch-input")
+        self.assertEqual(input_section.get("flex"), "0 1 auto")
+        input_body = declarations(".batch-input-body")
+        self.assertEqual(input_body.get("overflow-y"), "auto")
+        self.assertEqual(input_body.get("min-height"), "0")
 
 
 if __name__ == "__main__":

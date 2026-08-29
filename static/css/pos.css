@@ -447,13 +447,18 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .batch-product-summary > button { margin-left: auto; }
 .batch-product-select { padding-top: 18px; }
 
-.batch-input { flex: 0 1 auto; min-height: 0; }
-.batch-input-head { min-height: 22px; display: flex; align-items: center; gap: 12px; }
+/* ⚠️ 上面的 .batch-content > .dialog-section 是 flex:0 0 auto(兩個 class),
+   輸入區要能收縮讓內部捲動,必須用同等優先權以上覆蓋,單一 .batch-input 會輸。 */
+.batch-content > .batch-input { flex: 0 1 auto; min-height: 0;
+  display: flex; flex-direction: column; }
+.batch-input-head { flex: 0 0 auto; min-height: 22px; display: flex; align-items: center;
+  gap: 12px; }
 .batch-input-head.clickable { cursor: pointer; }
 .batch-input-head h2 { pointer-events: none; }
 .batch-input.collapsed { padding: 10px 16px; }
 .batch-input.collapsed .batch-input-head h2 { position: static; padding: 0; }
-.batch-input-body { padding: 2px; }
+.batch-input-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  padding: 2px; }
 .batch-input-control { min-width: 0; }
 .field-kind-note, .apply-all-note { display: block; margin-top: 2px; color: #636366;
   font-size: 10pt; font-weight: normal; }

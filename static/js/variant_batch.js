@@ -71,7 +71,12 @@ window.PosPages["page-variant-batch"] = {
     resetInput() {
       const input = this.blankInput();
       input.attrs = window.initFormAttrs(this.fields, {});
-      for (const field of this.selectFields) input.attrs[field.name] = [];
+      // select 欄在組合輸入是陣列;有建檔預設值的欄要保留該值,不可一律清空
+      for (const field of this.selectFields) {
+        const preset = input.attrs[field.name];
+        input.attrs[field.name] =
+          preset != null && String(preset).trim() ? [String(preset).trim()] : [];
+      }
       this.input = input;
     },
     clearWorksheet() {
