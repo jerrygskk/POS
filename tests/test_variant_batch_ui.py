@@ -193,6 +193,55 @@ const s = mkState({productId:5,fields:[],drafts:[
         self.assertEqual(out["drafts"], ["d1"])
         self.assertEqual(out["skipped"], [])
 
+    def test_empty_precheck_clears_current_skipped_summary_without_api_call(self):
+        out = self._run(r'''
+let apiCalls = 0;
+API.batchPrecheckVariants = async () => { apiCalls++; return {results:[]}; };
+const s = mkState({
+  drafts:[],
+  skipped:[{row:{draft_id:"gone"},related_variant_id:8}],
+  showSkipped:true,
+  precheckErrors:{gone:[{code:"old",message:"舊錯誤"}]},
+});
+(async () => {
+  await s.runPrecheck();
+  out.current = {
+    apiCalls,
+    errors:s.precheckErrors,
+    skipped:s.skipped,
+    showSkipped:s.showSkipped,
+  };
+
+  const stale = mkState({
+    drafts:[],
+    skipped:[{row:{draft_id:"keep"},related_variant_id:9}],
+    showSkipped:true,
+    precheckErrors:{keep:[{code:"old",message:"保留"}]},
+  });
+  const originalErrors = stale.precheckErrors;
+  const originalSkipped = stale.skipped;
+  Object.defineProperty(stale, "precheckSeq", {
+    configurable:true,
+    get() { return this._seq || 0; },
+    set(value) { this._seq = value + 1; },
+  });
+  await stale.runPrecheck();
+  out.stale = {
+    errorsSame:stale.precheckErrors === originalErrors,
+    skippedSame:stale.skipped === originalSkipped,
+    showSkipped:stale.showSkipped,
+  };
+  done();
+})();
+''')
+        self.assertEqual(out["current"], {
+            "apiCalls": 0, "errors": {}, "skipped": [],
+            "showSkipped": False,
+        })
+        self.assertEqual(out["stale"], {
+            "errorsSame": True, "skippedSame": True, "showSkipped": True,
+        })
+
     def test_generate_rows_applies_barcode_rules(self):
         out = self._run(r'''
 API.batchPrecheckVariants = async (productId, drafts) => ({results:
@@ -515,6 +564,7 @@ done();
 
     def test_commit_maps_structured_details(self):
         out = self._run(r'''
+let refreshCalls = 0;
 API.batchCreateVariants = async () => {
   const err = new Error("部分資料有誤");
   err.details = [{index:1,draft_id:"d2",errors:[
@@ -523,6 +573,7 @@ API.batchCreateVariants = async () => {
   ]}];
   throw err;
 };
+API.listCatalog = async () => { refreshCalls++; return []; };
 const s = mkState({productId:5,fields:[{field_id:7,name:"顏色",field_type:"select"}],drafts:[
   {draft_id:"d1",attrs:{"顏色":"黑"},price:null,model_ids:[],barcode:"",store:false},
   {draft_id:"d2",attrs:{"顏色":"黑"},price:null,model_ids:[],barcode:"",store:false},
@@ -532,12 +583,163 @@ const s = mkState({productId:5,fields:[{field_id:7,name:"顏色",field_type:"sel
   out.errors = s.precheckErrors;
   out.status = s.rowStatus(s.drafts[1]);
   out.kept = s.drafts.length;
+  out.refreshCalls = refreshCalls;
+  out.submitting = s.submitting;
   done();
 })();
 ''')
         self.assertEqual(out["errors"]["d2"][1]["message"], "顏色必填")
         self.assertEqual(out["status"], "與第 1 筆重複")
         self.assertEqual(out["kept"], 2)
+        self.assertEqual(out["refreshCalls"], 0)
+        self.assertFalse(out["submitting"])
+
+    def test_existing_variant_text_explains_unavailable_variant(self):
+        out = self._run(r'''
+const active = {
+  variant_id:37,
+  attributes:{"顏色":"黑色","材質":"玻璃"},
+};
+const s = mkState({products:[{product_id:5,variants:[active]}]});
+out.found = s.existingVariantText({related_variant_id:37});
+out.missing = s.existingVariantText({related_variant_id:38});
+done();
+''')
+        self.assertEqual(out["found"], "顏色：黑色｜材質：玻璃")
+        self.assertEqual(
+            out["missing"],
+            "款式編號 38（目前為已停用或待處理，請至商品資料庫勾選"
+            "「顯示已停用」或「待處理」後處理）",
+        )
+
+    def test_successful_commit_refreshes_catalog_without_resetting_selection(self):
+        out = self._run(r'''
+const refreshed = [{product_id:5,variants:[{
+  variant_id:88,attributes:{"顏色":"白色"},
+}]}];
+let catalogArgs = null;
+API.batchCreateVariants = async () => ({results:[{variant_id:88}]});
+API.listCatalog = async args => { catalogArgs = args; return refreshed; };
+const fields = [{field_id:1,name:"顏色",field_type:"select"}];
+const s = mkState({
+  catId:1,
+  productId:5,
+  products:[{product_id:5,variants:[]}],
+  fields,
+  drafts:[{draft_id:"d1",attrs:{"顏色":"白色"},price:null,
+           model_ids:[],barcode:"",store:false}],
+});
+s.reloadUsage = async () => {};
+(async () => {
+  await s.commitAll();
+  out.catalogArgs = catalogArgs;
+  out.sameSnapshot = s.products === refreshed;
+  out.productId = s.productId;
+  out.fieldsSame = s.fields === fields;
+  out.found = s.existingVariant({related_variant_id:88});
+  done();
+})();
+''')
+        self.assertEqual(out["catalogArgs"], {})
+        self.assertTrue(out["sameSnapshot"])
+        self.assertEqual(out["productId"], 5)
+        self.assertTrue(out["fieldsSame"])
+        self.assertEqual(out["found"]["variant_id"], 88)
+
+    def test_successful_commit_runs_both_refreshes_and_reports_refresh_failure(self):
+        out = self._run(r'''
+const refreshed = [{product_id:5,variants:[{variant_id:88,attributes:{}}]}];
+const message = "款式已建立，但畫面資料重新整理失敗，請關閉後重新開啟視窗。";
+API.batchCreateVariants = async () => ({results:[{variant_id:88}]});
+let catalogCalls = 0;
+API.listCatalog = async () => { catalogCalls++; return refreshed; };
+const first = mkState({productId:5,fields:[],drafts:[
+  {draft_id:"d1",attrs:{},price:null,model_ids:[],barcode:"",store:false},
+]});
+first.reloadUsage = async () => { throw new Error("usage refresh failed"); };
+
+const second = mkState({productId:5,fields:[],drafts:[
+  {draft_id:"d2",attrs:{},price:null,model_ids:[],barcode:"",store:false},
+]});
+second.reloadUsage = async () => {};
+API.listCatalog = async () => {
+  catalogCalls++;
+  const err = new Error("catalog refresh failed");
+  err.details = [{draft_id:"d2",errors:[{code:"raw",message:"不可映射"}]}];
+  throw err;
+};
+
+(async () => {
+  API.listCatalog = async () => { catalogCalls++; return refreshed; };
+  await first.commitAll();
+  out.usageFailure = {
+    catalogCalls,
+    productsSame:first.products === refreshed,
+    error:first._error,
+    saved:first._saved,
+    doneMsg:first.doneMsg,
+    drafts:first.drafts,
+    submitting:first.submitting,
+  };
+
+  API.listCatalog = async () => {
+    catalogCalls++;
+    const err = new Error("catalog refresh failed");
+    err.details = [{draft_id:"d2",errors:[{code:"raw",message:"不可映射"}]}];
+    throw err;
+  };
+  await second.commitAll();
+  out.catalogFailure = {
+    catalogCalls,
+    error:second._error,
+    saved:second._saved,
+    doneMsg:second.doneMsg,
+    drafts:second.drafts,
+    errors:second.precheckErrors,
+    submitting:second.submitting,
+  };
+  out.message = message;
+  done();
+})();
+''')
+        self.assertEqual(out["usageFailure"], {
+            "catalogCalls": 1,
+            "productsSame": True,
+            "error": out["message"],
+            "saved": True,
+            "doneMsg": "已建立 1 筆款式。",
+            "drafts": [],
+            "submitting": False,
+        })
+        self.assertEqual(out["catalogFailure"], {
+            "catalogCalls": 2,
+            "error": out["message"],
+            "saved": True,
+            "doneMsg": "已建立 1 筆款式。",
+            "drafts": [],
+            "errors": {},
+            "submitting": False,
+        })
+
+    def test_field_options_preserve_values_and_mark_only_inactive_usage(self):
+        out = self._run(r'''
+const field = {field_id:7,name:"顏色",field_type:"select"};
+const s = mkState({fieldUsage:{7:[
+  {value:"黑色",active:true},
+  {value:"白色",active:false},
+]}});
+const known = {attrs:{"顏色":"白色"}};
+const unknown = {attrs:{"顏色":"透明"}};
+out.knownOptions = s.fieldOptions(field, known);
+out.knownInactive = out.knownOptions.map(value => s.fieldOptionInactive(field, value));
+out.unknownOptions = s.fieldOptions(field, unknown);
+out.unknownInactive = out.unknownOptions.map(value => s.fieldOptionInactive(field, value));
+done();
+''')
+        self.assertEqual(out["knownOptions"], ["黑色", "白色"])
+        self.assertEqual(out["knownInactive"], [False, True])
+        self.assertEqual(out["unknownOptions"], ["黑色", "白色", "透明"])
+        self.assertEqual(out["unknownInactive"], [False, True, False])
 
     def test_template_is_workbook_without_edit_popup(self):
         html = (STATIC / "variant_batch.html").read_text(encoding="utf-8")
@@ -554,6 +756,10 @@ const s = mkState({productId:5,fields:[{field_id:7,name:"顏色",field_type:"sel
             'diffFields.has(featureField.name))"', html)
         self.assertIn(
             "'cell-diff':diffFields.has(featureField.name)", html)
+        self.assertIn(
+            "fieldOptionInactive(f,value) ? '（停用，將重新啟用）' : ''",
+            html,
+        )
         self.assertNotIn("openEdit", html)
         self.assertNotIn("dialog-overlay", html)
 

@@ -224,7 +224,11 @@ window.PosPages["page-variant-batch"] = {
       const seq = ++this.precheckSeq;
       const rows = this.drafts.slice();
       if (!rows.length) {
-        if (seq === this.precheckSeq) this.precheckErrors = {};
+        if (seq === this.precheckSeq) {
+          this.precheckErrors = {};
+          this.skipped = [];
+          this.showSkipped = false;
+        }
         return;
       }
       let res;
@@ -290,6 +294,11 @@ window.PosPages["page-variant-batch"] = {
       if (current != null && String(current).trim() && !values.includes(current)) values.push(current);
       return values;
     },
+    fieldOptionInactive(field, value) {
+      const option = (this.fieldUsage[field.field_id] || []).find(
+        item => item.value === value);
+      return option ? !option.active : false;
+    },
     draftSpecText(draft) {
       const parts = [];
       for (const field of this.formalFields) {
@@ -326,7 +335,11 @@ window.PosPages["page-variant-batch"] = {
     },
     existingVariantText(item) {
       const variant = this.existingVariant(item);
-      if (!variant) return `款式編號 ${item.related_variant_id}`;
+      if (!variant) {
+        return `款式編號 ${item.related_variant_id}`
+          + "（目前為已停用或待處理，請至商品資料庫勾選"
+          + "「顯示已停用」或「待處理」後處理）";
+      }
       const attrs = variant.attributes || {};
       const parts = Array.isArray(attrs)
         ? attrs.map(value => value.value || value.option_value || "").filter(Boolean)
@@ -355,16 +368,36 @@ window.PosPages["page-variant-batch"] = {
       this.invalidatePrecheck();
       this.submitting = true;
       try {
-        const res = await API.batchCreateVariants(this.productId, this.buildPayload(this.drafts));
+        let res;
+        try {
+          res = await API.batchCreateVariants(this.productId, this.buildPayload(this.drafts));
+        } catch (err) {
+          this.precheckErrors = this.mapDetails(err.details);
+          this.showError(err.message || "建立失敗");
+          return;
+        }
         this.doneMsg = `已建立 ${res.results.length} 筆款式。`;
         this.markSaved();
         this.clearWorksheet();
         this.resetInput();
         this.inputCollapsed = false;
-        await this.reloadUsage();
-      } catch (err) {
-        this.precheckErrors = this.mapDetails(err.details);
-        this.showError(err.message || "建立失敗");
+
+        let refreshFailed = false;
+        try {
+          await this.reloadUsage();
+        } catch (_) {
+          refreshFailed = true;
+        }
+        try {
+          const products = await API.listCatalog({});
+          this.products = products;
+        } catch (_) {
+          refreshFailed = true;
+        }
+        if (refreshFailed) {
+          this.showError(
+            "款式已建立，但畫面資料重新整理失敗，請關閉後重新開啟視窗。");
+        }
       } finally {
         this.submitting = false;
       }
