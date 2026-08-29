@@ -34,13 +34,15 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `lib/legacy_migrations.py` | 凍結的 v1–v13 migration DDL；僅供既有資料庫按版本升級，不作為現行 schema 定義 |
 | `lib/db_seed.py` | 共用欄(商品描述/顏色)、付款方式種子 |
 | `lib/product_rules.py` | 共用商品規則(`FIELD_TYPES`、欄位型別驗證、自取碼取號) |
+| `lib/variant_batch_service.py` | 子產品批次建立與唯讀預檢（共用 `_validate_batch`，`dry=True` 不寫入任何資料） |
 | `lib/backup.py` | GFS 備份(日7/週4/月12) |
 | `lib/label_printer.py` | NIIMBOT B1 協定與序列埠溝通(自動尋埠、送圖、錯誤轉譯) |
 | `lib/label_layout.py` | 商品標籤版面繪製(純函式,輸入四個字串輸出 Pillow 影像) |
 | `lib/*_service.py` | 正式 Facade／Service／Repository 應用層與資料存取實作 |
 | `static/` | `index.html` + `css/pos.css` + `js/*.js`（Vue 3、DesktopBridge 包裝、各頁邏輯） |
 | `static/variant_editor.html` | 款式修改子視窗頁面（獨立 Vue app，共用 `attrfields`／`modelpicker`／`optpicker` 元件） |
-| `static/variant_batch.html` | 新增款式子視窗頁面（`variant_batch_window.js` 外殼＋既有建檔頁元件與樣板） |
+| `static/variant_batch.html` | 新增款式子視窗頁面（`variant_batch_window.js` 外殼＋組合輸入區與批次工作表樣板） |
+| `static/js/variant_batch_logic.js` | 新增款式的純邏輯（組合展開、算式、條碼展開規則、差異欄計算、預檢結果分流）；不碰 API，可單獨以 Node 測試 |
 | `static/field_editor.html` | 規格選項子視窗頁面（`field_editor.js`；設定頁自訂規格列的「✎ 選項」由此開窗，只管選項清單與建檔預設帶入值） |
 | `static/js/pos_shared.js` | 主視窗與子視窗共用的全域 mixin（`guard`／`guardReload`／`attrText`） |
 | `static/js/optpicker.js` | 規格值候選選取器 `opt-picker`／`tag-selector`（前排常用值＋搜尋＋當場新增；檔頭寫明三種輸入公版的分工） |
@@ -111,6 +113,77 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 服務層在同一連線內完成,任一步失敗整筆 rollback、自取碼計數器一併回復,
 錯誤訊息回子視窗且視窗保留讓店員修正。新出現的 select/multi/tags 值會自動
 補進 `AttributeOption`(比照建檔流程,不重新啟用已停用選項)。
+
+### 新增款式的組合展開與批次工作表
+
+新增款式子視窗(`variant_batch`)由「一次填一筆、加入預覽」改為
+**組合輸入＋批次工作表**。原流程視窗一路往下長、看不出各筆差異、
+要複製修改只能重填一次;實際使用最常見的是兩個規格交叉
+(例如線的顏色×長度)。
+
+**組合展開只認單值規格(select)**:候選區標「可複選以產生組合」,
+勾第二個值的當下即進入展開(不設欄位級開關——主場景每次都要交叉,
+多一個開關就是每次多一步),該欄顯示「將展開 N 種」徽章,
+底部常駐算式「3 個顏色 × 2 個長度＝6 筆」,刪回一個值自動退出。
+`multi`／`tags`／適用型號**不參與展開**:它們本來就代表同一筆資料的多個值,
+若也拿來交叉會與「產生多筆」語意混淆,欄旁固定標「套用至每一筆」。
+⚠️ 空乘積為 1:沒有 select 展開軸(種類只有 text/multi/tags,或 select 全空)
+時仍產生一筆,寫成 0 會讓這些種類一筆都建不出來。
+預計筆數超過 30 先確認再展開——4 色×5 型號×3 長度瞬間就是 60 筆。
+
+**條碼展開規則(寫死)**:原廠條碼只在預計產生一筆時自動帶入,
+多筆時該欄停用並提示「請於預覽表逐筆掃描」;自取碼可套用至每一筆,
+號碼由建立時逐筆產生;複製列時規格與售價照複製、**原廠條碼一律清空**、
+自取碼勾選保留。這是批次建檔最容易把同一組條碼灌進多筆的地方。
+
+**差異呈現**:差異儲存格淡藍底(`.cell-diff`),相同欄位維持正常顯示——
+不灰化、不自動收合(灰掉看起來像壞掉,本專案已否決過此類呈現);
+另給「全部欄位／只看差異」切換,由使用者決定要不要收,不自動判斷。
+差異計算涵蓋表格上顯示的全部欄,含特性詞條、售價、條碼與適用型號。
+
+**就地編輯與固定編輯區**:售價、條碼、單選規格直接在儲存格改;
+多值規格、特性詞條、適用型號點格後在**表格上方的固定編輯區**改,
+不再開巢狀彈窗(原本的「修改」popup 已移除)。理由:那些欄位要能新增選項、
+重新啟用停用值、依型號過濾候選,塞進儲存格會變成又小又難操作的編輯器。
+Escape 優先關固定編輯區,編輯區沒開才關子視窗,避免誤關丟掉整批工作表。
+
+**版面**:只有預覽表與輸入區內部捲動,底部動作列永遠可見。
+⚠️ 輸入區能捲的前提是它自己可收縮——`.batch-content > .dialog-section`
+是兩個 class,覆寫要用同等優先權(`.batch-content > .batch-input`),
+否則 section 維持 `flex-shrink: 0`,內部 `overflow-y: auto` 永遠沒有可捲區間
+(PITFALLS VUE-18)。
+
+### 子產品批次建立的唯讀預檢與錯誤契約
+
+展開當下就要能標出「這一列有問題」,但重複判定必須與建立時完全一致——
+若前端自己重做一套簽章規則,兩邊遲早會不一樣。因此新增唯讀預檢 action
+`variants.batch_precheck`,payload 與 `variants.batch_create` 完全相同,
+**共用同一段驗證程式**(`VariantBatchService._validate_batch(payload, dry)`)。
+
+**唯讀由構造保證**:`dry=True` 時 `_resolve_option()` 不 INSERT 也不 UPDATE——
+命中既有選項(含停用)回原 `option_id` 但不重新啟用,沒命中回
+`("new", normalize_key(value))` 當簽章佔位。佔位可雜湊、同批同欄同值穩定相等,
+因此批內判重照樣正確,而資料庫不會被寫進任何一筆。有專測驗證跑完預檢後
+Variant／AttributeOption／Barcode／VariantAttribute 筆數完全不變。
+product 層級失敗(產品不存在或已停用)仍照 `_require_product()` raise——
+那不是某一列的問題,沒有 per-row 結果可回。
+
+**結構化錯誤契約**(預檢與建立共用):每項錯誤是
+`{code, field_id, message, related_variant_id, related_draft_id}`,
+前端據此標到列與欄,不解析訊息字串。codes:`unknown_field`／
+`select_multi_value`／`missing_required`／`missing_models`／`model_not_found`／
+`store_prefix_barcode`／`duplicate_signature`／`duplicate_barcode`。
+⚠️ 批內重複以**首見筆的 `draft_id`** 回報,不用陣列索引:前端會略過、刪除、
+複製列,索引會指到別筆;「與第 N 筆重複」的 N 由前端依目前顯示順序換算。
+
+**重複列的處理**:與既有款式重複的列不進可提交清單,改列入「已略過 N 筆」
+摘要(可展開看規格與對應既有款式),不計入建立筆數,**不能強制建立**。
+既有款式若是停用或待處理筆,`catalog.list` 查不到它,摘要會說明狀態與
+處理入口——只給一個款式編號使用者無從處理。
+
+**交易語意不變**:`variants.batch_create` 仍是全有全無,任一錯誤整批不寫入;
+`tolerant_create`(匯入等容錯路徑)只共用解析結果,忽略嚴格建立用的業務錯誤,
+維持原本逐問題寫 `VariantIssue` 的行為。
 
 ### 固定列：適用型號與特性詞條(種類設定)
 
