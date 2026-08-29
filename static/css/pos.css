@@ -436,3 +436,117 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .tag-reactivate { color: var(--primary-hover); font-size: 11px; margin-left: 4px; }
 .tag-search { display: flex; gap: 6px; align-items: center; }
 .tag-search input { flex: 1; }
+
+/* ── 新增款式：組合輸入＋批次工作表 ── */
+.dialog-content.batch-content { display: flex; flex-direction: column; gap: 12px;
+  overflow: hidden; overflow-y: hidden; padding-bottom: 12px; }
+.batch-content > .dialog-section { flex: 0 0 auto; margin-top: 0; }
+.batch-product-summary { display: flex; align-items: center; gap: 12px; min-height: 46px;
+  padding: 10px 12px; white-space: nowrap; }
+.batch-product-summary > span { color: #636366; overflow: hidden; text-overflow: ellipsis; }
+.batch-product-summary > button { margin-left: auto; }
+.batch-product-select { padding-top: 18px; }
+
+/* ⚠️ 上面的 .batch-content > .dialog-section 是 flex:0 0 auto(兩個 class),
+   輸入區要能收縮讓內部捲動,必須用同等優先權以上覆蓋,單一 .batch-input 會輸。 */
+.batch-content > .batch-input { flex: 0 1 auto; min-height: 0;
+  display: flex; flex-direction: column; }
+.batch-input-head { flex: 0 0 auto; min-height: 22px; display: flex; align-items: center;
+  gap: 12px; }
+.batch-input-head.clickable { cursor: pointer; }
+.batch-input-head h2 { pointer-events: none; }
+.batch-input.collapsed { padding: 10px 16px; }
+.batch-input.collapsed .batch-input-head h2 { position: static; padding: 0; }
+.batch-input-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  padding: 2px; }
+.batch-input-control { min-width: 0; }
+.field-kind-note, .apply-all-note { display: block; margin-top: 2px; color: #636366;
+  font-size: 10pt; font-weight: normal; }
+.expand-badge { display: inline-block; margin-top: 6px; padding: 2px 7px;
+  border: 1px solid #9fc7dc; border-radius: 4px; color: #176b92; background: #eef7fb;
+  font-size: 10pt; }
+.batch-price-barcode { display: grid; grid-template-columns: minmax(120px, 0.7fr)
+  minmax(220px, 1.4fr) auto; gap: 12px; align-items: end; margin-top: 10px; }
+.batch-price-barcode > label:not(.dialog-check) { display: flex; flex-direction: column;
+  gap: 4px; }
+.batch-price-barcode .dialog-check { margin: 0 0 7px; white-space: nowrap; }
+.batch-formula { display: flex; align-items: center; gap: 12px; margin-top: 12px;
+  padding-top: 10px; border-top: 1px solid #e5e5ea; }
+.batch-formula > strong { color: #176b92; }
+.batch-formula > button { margin-left: auto; }
+
+.batch-skipped { flex: 0 0 auto; border: 1px solid #d5d5d8; border-radius: 6px;
+  background: #f7f7f9; color: #3c3c43; overflow: hidden; }
+.dialog-shell .batch-summary-toggle { display: flex; gap: 10px; width: 100%; min-width: 0;
+  padding: 8px 12px; border: 0; border-radius: 0; background: transparent;
+  text-align: left; }
+.dialog-shell .batch-summary-toggle span { color: #176b92; }
+.batch-skipped-list { border-top: 1px solid #d5d5d8; }
+.batch-skipped-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  padding: 7px 12px; font-size: 11pt; }
+.batch-skipped-row + .batch-skipped-row { border-top: 1px solid #e5e5ea; }
+.batch-skipped-row span:last-child { color: #636366; }
+
+.batch-fixed-editor { flex: 0 0 auto; padding: 10px 12px; border: 1px solid #8fa8c8;
+  border-radius: 6px; background: #f4f8fb; }
+.batch-fixed-head { display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 8px; }
+.batch-fixed-editor .model-picker { max-height: 150px; }
+
+.batch-content > .batch-preview { flex: 1 1 180px; min-height: 140px; min-width: 0;
+  display: flex; flex-direction: column;
+  border: 1px solid #d5d5d8; border-radius: 6px; overflow: hidden; }
+.batch-toolbar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-bottom: 1px solid #d5d5d8; background: #f7f7f9; }
+.batch-toolbar > strong { margin-right: auto; }
+.batch-table { flex: 1 1 auto; min-height: 0; min-width: 0;
+  overflow-y: auto; overflow-x: hidden; }
+.batch-table .dialog-table { width: 100%; min-width: 0; table-layout: fixed; }
+.batch-table .dialog-table th { position: sticky; top: 0; z-index: 2; background: #f7f7f9; }
+.batch-table .dialog-table th, .batch-table .dialog-table td { min-width: 0;
+  box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11pt; vertical-align: top; }
+.batch-table .dialog-table .batch-col-actions,
+.batch-table .dialog-table .batch-row-actions { min-width: 0; width: 80px; }
+.batch-table .dialog-table .batch-col-model,
+.batch-table .dialog-table .batch-cell-model { min-width: 0; width: 110px; }
+.batch-table .dialog-table .batch-col-price,
+.batch-table .dialog-table .batch-cell-price { min-width: 0; width: 80px; }
+.batch-table .dialog-table .batch-col-barcode,
+.batch-table .dialog-table .batch-cell-barcode { min-width: 0; width: 150px; }
+.batch-table .dialog-table .batch-col-status,
+.batch-table .dialog-table .batch-status { min-width: 0; width: 110px; }
+.batch-table input, .batch-table select, .batch-table button {
+  min-width: 0; max-width: 100%; box-sizing: border-box; white-space: nowrap; }
+.batch-row-actions { white-space: nowrap; }
+.dialog-shell .dialog-icon { min-width: 28px; width: 28px; height: 28px; padding: 0;
+  border: 0; background: transparent; font-weight: normal; }
+.dialog-shell .dialog-icon:hover { background: #e5e5ea; }
+.dialog-shell .dialog-icon.danger { color: #c0392b; }
+.dialog-shell .batch-cell-button { width: 100%; min-width: 0; padding: 5px 6px;
+  border: 1px solid transparent; background: transparent; text-align: left;
+  font-weight: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dialog-shell .batch-cell-button:hover { border-color: #8fa8c8; background: #f4f8fb; }
+.batch-store-check { display: flex; align-items: center; min-width: 0; max-width: 100%;
+  box-sizing: border-box; margin-top: 6px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.batch-store-check input { flex: 0 0 auto; }
+.cell-diff { background: #eaf3fb; }
+.dialog-shell .dialog-table td.cell-diff { background: #eaf3fb; }
+.dialog-shell .dialog-table tr.duplicate > td { border-top: 2px solid #c0392b;
+  border-bottom-color: #c0392b; }
+.dialog-shell .dialog-table td.cell-error { background: #fdf3f2; }
+.dialog-shell .dialog-table td.cell-error input,
+.dialog-shell .dialog-table td.cell-error select { border-color: #c0392b; }
+.cell-error-text { display: block; margin-top: 4px; color: #c0392b; font-size: 9.5pt; }
+.batch-status { color: #287548; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.batch-status.cell-error { color: #c0392b; }
+.batch-footer { position: relative; z-index: 3; }
+
+@media (max-width: 760px) {
+  .batch-product-summary { white-space: normal; flex-wrap: wrap; }
+  .batch-price-barcode { grid-template-columns: 1fr 1fr; }
+  .batch-price-barcode .dialog-check { grid-column: 1 / -1; }
+  .batch-skipped-row { grid-template-columns: 1fr; gap: 3px; }
+}

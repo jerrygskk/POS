@@ -16,7 +16,15 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       this.ready = true;
       this._keydown = (event) => {
-        if (event.key === "Escape") this.closeWindow();
+        if (event.key !== "Escape") return;
+        if (event.repeat) return;
+        const page = this.$refs.batchPage;
+        if (page && page.fixedEditor) {
+          event.preventDefault();
+          page.closeFixedEditor();
+          return;
+        }
+        this.closeWindow();
       };
       document.addEventListener("keydown", this._keydown);
     },
