@@ -438,8 +438,10 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .tag-search input { flex: 1; }
 
 /* ── 新增款式：組合輸入＋批次工作表 ── */
+/* 垂直捲動回歸 dialog 公版:整頁捲一條,不再分「輸入區自捲」「表格自捲」兩層。
+   表格只保留橫向自捲(欄寬超過視窗時整頁跟著左右跑很難用)。 */
 .dialog-content.batch-content { display: flex; flex-direction: column; gap: 12px;
-  overflow: hidden; overflow-y: hidden; padding-bottom: 12px; }
+  overflow-x: hidden; overflow-y: auto; padding-bottom: 12px; }
 .batch-content > .dialog-section { flex: 0 0 auto; margin-top: 0; }
 .batch-product-summary { display: flex; align-items: center; gap: 12px; min-height: 46px;
   padding: 10px 12px; white-space: nowrap; }
@@ -449,26 +451,32 @@ button.primary.danger:hover { filter: brightness(0.92); }
 
 /* ⚠️ 上面的 .batch-content > .dialog-section 是 flex:0 0 auto(兩個 class),
    輸入區要能收縮讓內部捲動,必須用同等優先權以上覆蓋,單一 .batch-input 會輸。 */
-.batch-content > .batch-input { flex: 0 1 auto; min-height: 0;
+.batch-content > .batch-input { flex: 0 0 auto; min-height: 0;
   display: flex; flex-direction: column; }
 .batch-input-head { flex: 0 0 auto; min-height: 22px; display: flex; align-items: center;
   gap: 12px; }
 .batch-input-head.clickable { cursor: pointer; }
+.batch-input-caret { margin-left: auto; color: #636366; }
 .batch-input-head h2 { pointer-events: none; }
 .batch-input.collapsed { padding: 10px 16px; }
 .batch-input.collapsed .batch-input-head h2 { position: static; padding: 0; }
-.batch-input-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
-  padding: 2px; }
+.batch-input-body { flex: 0 0 auto; min-height: 0; padding: 2px; }
 .batch-input-control { min-width: 0; }
 .field-kind-note, .apply-all-note { display: block; margin-top: 2px; color: #636366;
   font-size: 10pt; font-weight: normal; }
 .expand-badge { display: inline-block; margin-top: 6px; padding: 2px 7px;
   border: 1px solid #9fc7dc; border-radius: 4px; color: #176b92; background: #eef7fb;
   font-size: 10pt; }
+/* ⚠️ 條碼欄的「請於預覽表逐筆掃描」提示會隨筆數出現／消失。它若佔版面,
+   這排是底部對齊,一出現就把售價與自取碼往下推、條碼自己往上跳(實測位移
+   17px 與 7px)。故提示改絕對定位、該排預留一行高度,出現與否版面不動。 */
 .batch-price-barcode { display: grid; grid-template-columns: minmax(120px, 0.7fr)
-  minmax(220px, 1.4fr) auto; gap: 12px; align-items: end; margin-top: 10px; }
-.batch-price-barcode > label:not(.dialog-check) { display: flex; flex-direction: column;
-  gap: 4px; }
+  minmax(220px, 1.4fr) auto; gap: 12px; align-items: end; margin-top: 10px;
+  padding-bottom: 20px; }
+.batch-price-barcode > label:not(.dialog-check) { position: relative;
+  display: flex; flex-direction: column; gap: 4px; }
+.batch-price-barcode > label .field-kind-note { position: absolute; top: 100%;
+  left: 0; right: 0; margin-top: 3px; }
 .batch-price-barcode .dialog-check { margin: 0 0 7px; white-space: nowrap; }
 .batch-formula { display: flex; align-items: center; gap: 12px; margin-top: 12px;
   padding-top: 10px; border-top: 1px solid #e5e5ea; }
@@ -493,29 +501,31 @@ button.primary.danger:hover { filter: brightness(0.92); }
   gap: 12px; margin-bottom: 8px; }
 .batch-fixed-editor .model-picker { max-height: 150px; }
 
-.batch-content > .batch-preview { flex: 1 1 180px; min-height: 140px; min-width: 0;
+.batch-content > .batch-preview { flex: 0 0 auto; min-width: 0;
   display: flex; flex-direction: column;
-  border: 1px solid #d5d5d8; border-radius: 6px; overflow: hidden; }
+  /* clip 而非 hidden:hidden 會變成捲動容器,表頭 sticky 就只釘在這個框裡 */
+  border: 1px solid #d5d5d8; border-radius: 6px; overflow: clip; }
 .batch-toolbar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
   padding: 8px 10px; border-bottom: 1px solid #d5d5d8; background: #f7f7f9; }
 .batch-toolbar > strong { margin-right: auto; }
-.batch-table { flex: 1 1 auto; min-height: 0; min-width: 0;
-  overflow-y: auto; overflow-x: hidden; }
-.batch-table .dialog-table { width: 100%; min-width: 0; table-layout: fixed; }
-.batch-table .dialog-table th { position: sticky; top: 0; z-index: 2; background: #f7f7f9; }
+/* 欄寬由 <colgroup> 指定(JS 依實際內容算,可拖曳調整),不再均分擠壓;
+   視窗仍放不下時整張表橫向捲動,不靠切字硬塞。 */
+/* overflow-y: clip 而非 hidden/auto:clip 不會讓它變成捲動容器,
+   表頭的 sticky 才會釘在整頁的捲動範圍上,而不是釘在這個框裡。 */
+.batch-table { flex: 0 0 auto; min-width: 0;
+  overflow-x: auto; overflow-y: clip; }
+.batch-table .dialog-table { min-width: 100%; table-layout: fixed; }
+.batch-table .dialog-table th { position: sticky; top: 0; z-index: 2; background: #f7f7f9;
+  padding-right: 14px; }
 .batch-table .dialog-table th, .batch-table .dialog-table td { min-width: 0;
   box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 11pt; vertical-align: top; }
-.batch-table .dialog-table .batch-col-actions,
-.batch-table .dialog-table .batch-row-actions { min-width: 0; width: 80px; }
-.batch-table .dialog-table .batch-col-model,
-.batch-table .dialog-table .batch-cell-model { min-width: 0; width: 110px; }
-.batch-table .dialog-table .batch-col-price,
-.batch-table .dialog-table .batch-cell-price { min-width: 0; width: 80px; }
-.batch-table .dialog-table .batch-col-barcode,
-.batch-table .dialog-table .batch-cell-barcode { min-width: 0; width: 150px; }
-.batch-table .dialog-table .batch-col-status,
-.batch-table .dialog-table .batch-status { min-width: 0; width: 110px; }
+.batch-col-label { display: block; overflow: hidden; text-overflow: ellipsis; }
+.batch-col-grip { position: absolute; top: 0; right: 0; width: 9px; height: 100%;
+  cursor: col-resize; }
+.batch-col-grip::after { content: ""; position: absolute; top: 6px; bottom: 6px; right: 4px;
+  border-right: 1px solid #d5d5d8; }
+.batch-col-grip:hover::after { border-right-color: #4977b1; }
 .batch-table input, .batch-table select, .batch-table button {
   min-width: 0; max-width: 100%; box-sizing: border-box; white-space: nowrap; }
 .batch-row-actions { white-space: nowrap; }

@@ -16,8 +16,10 @@ CHILD_PAGES = {
     "variant_batch": {
         "file": "variant_batch.html",
         "title": "新增款式",
-        "size": (980, 820),
-        "min_size": (760, 560),
+        # 預覽工作表最寬的種類是鋼化玻璃(四個規格欄＋型號＋條碼＋狀態),
+        # 實機量到欄寬合計約 1141,加上視窗邊框與捲軸取 1220。
+        "size": (1220, 820),
+        "min_size": (940, 560),
     },
     "field_editor": {
         "file": "field_editor.html",

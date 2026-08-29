@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>新增款式</title>
-<link rel="stylesheet" href="css/pos.css?v=162">
-<link rel="stylesheet" href="css/dialog-theme.css?v=162">
+<link rel="stylesheet" href="css/pos.css?v=164">
+<link rel="stylesheet" href="css/dialog-theme.css?v=164">
 </head>
 <body>
 <div id="variant-batch-window" v-cloak>
@@ -49,10 +49,10 @@
 
     <section v-if="product && productReady" class="dialog-section batch-input"
              :class="{collapsed:inputCollapsed}">
-      <div class="batch-input-head" :class="{clickable:inputCollapsed}"
-           @click="inputCollapsed=false">
+      <div class="batch-input-head clickable" @click="inputCollapsed=!inputCollapsed">
         <h2>組合輸入</h2>
-        <span v-if="inputCollapsed" class="dialog-hint">已收合，點此繼續新增組合</span>
+        <span class="dialog-hint">{{ inputCollapsed ? '已收合，點此繼續新增組合' : '點此收合' }}</span>
+        <span class="batch-input-caret">{{ inputCollapsed ? '▾' : '▴' }}</span>
       </div>
       <div v-show="!inputCollapsed" class="batch-input-body">
         <div v-for="f in formalFields" :key="f.field_id" class="attr-row">
@@ -160,18 +160,19 @@
       </div>
 
       <div class="batch-table">
-        <table class="dialog-table">
+        <table class="dialog-table" :style="{width:tableWidth+'px'}">
+          <colgroup>
+            <col v-for="col in columnDefs" :key="col.key"
+                 :style="{width:columnWidths[col.key]+'px'}">
+          </colgroup>
           <thead>
             <tr>
-              <th class="batch-col-actions">操作</th>
-              <template v-for="f in formalFields" :key="f.field_id">
-                <th v-if="!showDiffOnly || diffFields.has(f.name)">{{ f.name }}</th>
-              </template>
-              <th v-if="featureField && (!showDiffOnly || diffFields.has(featureField.name))">{{ featureField.name }}</th>
-              <th v-if="modelMode==='required'" class="batch-col-model">適用型號</th>
-              <th class="batch-col-price">售價</th>
-              <th class="batch-col-barcode">條碼</th>
-              <th class="batch-col-status">狀態</th>
+              <th v-for="col in columnDefs" :key="col.key" :title="col.label">
+                <span class="batch-col-label">{{ col.label }}</span>
+                <span class="batch-col-grip" title="拖曳調整欄寬，雙擊還原"
+                      @mousedown.prevent="startColResize(col.key,$event)"
+                      @dblclick="resetColWidth(col.key)"></span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -208,6 +209,7 @@
               <td v-if="featureField && (!showDiffOnly || diffFields.has(featureField.name))"
                   :class="{'cell-diff':diffFields.has(featureField.name)}">
                 <button type="button" class="batch-cell-button"
+                        :title="draftTags(d) || '—'"
                         @click="openFixedEditor(d.draft_id,featureField.name)">
                   {{ draftTags(d) || '—' }}
                 </button>
@@ -216,6 +218,7 @@
                   :class="{'cell-diff':diffFields.has('__models'),'cell-error':modelErrors(d).length}"
                   :title="errorText(modelErrors(d))">
                 <button type="button" class="batch-cell-button"
+                        :title="draftModels(d) || '尚未選擇型號'"
                         @click="openFixedEditor(d.draft_id,'__models')">
                   {{ draftModels(d) || '—' }}
                 </button>
@@ -264,15 +267,15 @@
 </div>
 </template>
 
-<script src="js/vue.global.prod.js?v=162"></script>
-<script src="js/api.js?v=162"></script>
-<script src="js/confirm.js?v=162"></script>
-<script src="js/pos_shared.js?v=162"></script>
-<script src="js/catalogfields.js?v=162"></script>
-<script src="js/modelpicker.js?v=162"></script>
-<script src="js/optpicker.js?v=162"></script>
-<script src="js/variant_batch_logic.js?v=162"></script>
-<script src="js/variant_batch.js?v=162"></script>
-<script src="js/variant_batch_window.js?v=162"></script>
+<script src="js/vue.global.prod.js?v=164"></script>
+<script src="js/api.js?v=164"></script>
+<script src="js/confirm.js?v=164"></script>
+<script src="js/pos_shared.js?v=164"></script>
+<script src="js/catalogfields.js?v=164"></script>
+<script src="js/modelpicker.js?v=164"></script>
+<script src="js/optpicker.js?v=164"></script>
+<script src="js/variant_batch_logic.js?v=164"></script>
+<script src="js/variant_batch.js?v=164"></script>
+<script src="js/variant_batch_window.js?v=164"></script>
 </body>
 </html>

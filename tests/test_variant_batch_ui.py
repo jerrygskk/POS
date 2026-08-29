@@ -741,6 +741,139 @@ done();
         self.assertEqual(out["unknownOptions"], ["黑色", "白色", "透明"])
         self.assertEqual(out["unknownInactive"], [False, True, False])
 
+    def test_column_width_follows_content_and_manual_override(self):
+        out = self._run(r"""
+const logic = window.VariantBatchLogic;
+// 手機殼最長款式值:黑色巨牆磁吸支架(附掛環扣)
+out.longSelect = logic.columnWidth(
+  {key:"f1", label:"款式", kind:"select", samples:["黑色巨牆磁吸支架(附掛環扣)"]});
+out.shortSelect = logic.columnWidth({key:"f2", label:"版型", kind:"select", samples:["滿版"]});
+out.statusFloor = logic.columnWidth(
+  {key:"__status", label:"狀態", kind:"text", min:130, max:200, samples:["可建立"]});
+// 適用型號整串會超過上限,以上限收斂(保留省略號,滑鼠移上顯示全文)
+out.modelCapped = logic.columnWidth({key:"__models", label:"適用型號", kind:"button",
+  samples:["iPhone 16 Plus、iPhone 15 Plus、iPhone 14 Pro Max"]});
+const cols = [{key:"a", label:"操作", kind:"text", min:80, max:80},
+              {key:"b", label:"版型", kind:"select", samples:["滿版"]}];
+out.resolved = logic.resolveWidths(cols, {b: 210});
+out.tooSmall = logic.resolveWidths(cols, {b: 10}).b;
+out.total = logic.totalWidth(cols, {b: 210});
+out.min = logic.COLUMN_MIN_PX;
+done();
+""")
+        self.assertGreater(out["longSelect"], out["shortSelect"])
+        self.assertGreaterEqual(out["longSelect"], 220)
+        self.assertEqual(out["statusFloor"], 130)
+        self.assertEqual(out["modelCapped"], 240)
+        self.assertEqual(out["resolved"]["a"], 80)
+        self.assertEqual(out["resolved"]["b"], 210)
+        self.assertEqual(out["tooSmall"], out["min"])
+        self.assertEqual(out["total"], 290)
+
+    def test_column_defs_cover_visible_columns_and_survive_diff_toggle(self):
+        out = self._run(r"""
+const fields = [
+  {field_id:1, name:"材質", field_type:"multi"},
+  {field_id:2, name:"框色", field_type:"select"},
+  {field_id:9, name:"特性詞條", field_type:"tags"},
+];
+const s = mkState({
+  fields,
+  catId: 3,
+  categories: [{category_id:3, name:"鋼化玻璃", model_mode:"required"}],
+  models: [{model_id:1, name:"iPhone 16"}],
+  fieldUsage: {2: [{value:"天峰藍", active:true}]},
+  drafts: [
+    {draft_id:"d1", attrs:{"材質":["藍光","防窺"], "框色":"黑色", "特性詞條":"SGS認證"},
+     price:null, model_ids:[1], barcode:"", store:false},
+    {draft_id:"d2", attrs:{"材質":["藍光","防窺"], "框色":"綠色", "特性詞條":"SGS認證"},
+     price:null, model_ids:[1], barcode:"", store:false},
+  ],
+});
+out.keys = s.columnDefs.map(col => col.key);
+out.widths = s.columnWidths;
+out.total = s.tableWidth;
+s.showDiffOnly = true;
+out.diffKeys = s.columnDefs.map(col => col.key);
+done();
+""")
+        self.assertEqual(out["keys"],
+                         ["__actions", "f1", "f2", "f9", "__models",
+                          "__price", "__barcode", "__status"])
+        self.assertEqual(out["widths"]["__actions"], 88)
+        self.assertGreaterEqual(out["widths"]["__barcode"], 165)
+        self.assertEqual(out["total"], sum(out["widths"].values()))
+        # 只看差異時僅框色有差,材質與詞條的欄位一起收起來
+        self.assertEqual(out["diffKeys"],
+                         ["__actions", "f2", "__models", "__price",
+                          "__barcode", "__status"])
+
+    def test_manual_column_width_is_remembered_per_category(self):
+        """欄寬依種類記在本機儲存(僅本次執行有效,私密模式下不跨啟動)。"""
+        out = self._run(r"""
+const store = {};
+window.localStorage = {
+  getItem: key => (key in store ? store[key] : null),
+  setItem: (key, value) => { store[key] = value; },
+};
+const s = mkState({catId: 3});
+s.colOverrides = {f2: 260};
+s.saveColWidths();
+out.saved = Object.keys(store);
+s.colOverrides = {};
+s.loadColWidths();
+out.reloaded = s.colOverrides;
+s.catId = 5;
+s.loadColWidths();
+out.otherCategory = s.colOverrides;
+s.catId = 3;
+s.loadColWidths();
+s.resetColWidth("f2");
+out.afterReset = s.colOverrides;
+out.storedAfterReset = store["posBatchColWidths:v1:cat3"];
+done();
+""")
+        self.assertEqual(out["saved"], ["posBatchColWidths:v1:cat3"])
+        self.assertEqual(out["reloaded"], {"f2": 260})
+        self.assertEqual(out["otherCategory"], {})
+        self.assertEqual(out["afterReset"], {})
+        self.assertEqual(out["storedAfterReset"], "{}")
+
+    def test_column_widths_survive_missing_local_storage(self):
+        out = self._run(r"""
+window.localStorage = {
+  getItem: () => { throw new Error("blocked"); },
+  setItem: () => { throw new Error("blocked"); },
+};
+const s = mkState({catId: 3, colOverrides: {f2: 200}});
+s.loadColWidths();
+out.overrides = s.colOverrides;
+s.colOverrides = {f2: 200};
+s.saveColWidths();
+out.stillHere = s.colOverrides;
+done();
+""")
+        self.assertEqual(out["overrides"], {})
+        self.assertEqual(out["stillHere"], {"f2": 200})
+
+    def test_barcode_hint_does_not_move_the_price_row(self):
+        """條碼欄提示會隨筆數出現/消失,不得推動同排的售價與自取碼。"""
+        css = (STATIC / "css" / "pos.css").read_text(encoding="utf-8")
+        match = re.search(
+            r"^[ 	]*\.batch-price-barcode > label \.field-kind-note\s*\{([^}]*)\}",
+            css, re.DOTALL | re.MULTILINE)
+        self.assertIsNotNone(match, "提示未設為絕對定位")
+        self.assertIn("position: absolute", match.group(1))
+        row = re.search(r"^[ 	]*\.batch-price-barcode \{([^}]*)\}", css,
+                        re.DOTALL | re.MULTILINE)
+        self.assertIn("padding-bottom", row.group(1))
+
+    def test_input_section_head_toggles_both_ways(self):
+        html = (STATIC / "variant_batch.html").read_text(encoding="utf-8")
+        self.assertIn('@click="inputCollapsed=!inputCollapsed"', html)
+        self.assertNotIn('@click="inputCollapsed=false"', html)
+        self.assertIn("點此收合", html)
+
     def test_template_is_workbook_without_edit_popup(self):
         html = (STATIC / "variant_batch.html").read_text(encoding="utf-8")
         self.assertIn('class="batch-table"', html)
@@ -748,9 +881,8 @@ done();
         self.assertIn('class="batch-skipped"', html)
         self.assertIn('v-if="product && productReady"', html)
         self.assertRegex(html, r"js/variant_batch_logic\.js\?v=\d+")
-        self.assertIn(
-            '<th v-if="featureField && (!showDiffOnly || '
-            'diffFields.has(featureField.name))">', html)
+        # 表頭改為依 columnDefs 逐欄輸出(含 colgroup 欄寬),不再逐欄寫死
+        self.assertIn('<th v-for="col in columnDefs"', html)
         self.assertIn(
             '<td v-if="featureField && (!showDiffOnly || '
             'diffFields.has(featureField.name))"', html)
@@ -858,7 +990,7 @@ state.$refs = {batchPage:{
         self.assertEqual(len(seen), 1, seen)
         self.assertGreaterEqual(int(seen.pop()), 157)
 
-    def test_batch_workspace_has_only_table_as_outer_scroller(self):
+    def test_batch_workspace_scrolls_as_one_page(self):
         css = (STATIC / "css" / "pos.css").read_text(encoding="utf-8")
         html = (STATIC / "variant_batch.html").read_text(encoding="utf-8")
 
@@ -882,21 +1014,6 @@ state.$refs = {batchPage:{
         grid = declarations(".batch-table .dialog-table")
         cells = declarations(
             ".batch-table .dialog-table th, .batch-table .dialog-table td")
-        actions = declarations(
-            ".batch-table .dialog-table .batch-col-actions,\n"
-            ".batch-table .dialog-table .batch-row-actions")
-        models = declarations(
-            ".batch-table .dialog-table .batch-col-model,\n"
-            ".batch-table .dialog-table .batch-cell-model")
-        prices = declarations(
-            ".batch-table .dialog-table .batch-col-price,\n"
-            ".batch-table .dialog-table .batch-cell-price")
-        barcodes = declarations(
-            ".batch-table .dialog-table .batch-col-barcode,\n"
-            ".batch-table .dialog-table .batch-cell-barcode")
-        statuses = declarations(
-            ".batch-table .dialog-table .batch-col-status,\n"
-            ".batch-table .dialog-table .batch-status")
         controls = declarations(
             ".batch-table input, .batch-table select, .batch-table button")
         cell_button = declarations(".dialog-shell .batch-cell-button")
@@ -904,34 +1021,36 @@ state.$refs = {batchPage:{
         status = declarations(".batch-status")
         footer = declarations(".batch-footer")
 
-        self.assertEqual(outer.get("overflow"), "hidden")
-        self.assertEqual(outer.get("overflow-y"), "hidden")
+        # 垂直只有一條捲軸(整頁);輸入區與表格都不再各自垂直捲
+        self.assertEqual(outer.get("overflow-y"), "auto")
+        self.assertEqual(outer.get("overflow-x"), "hidden")
+        input_body = declarations(".batch-input-body")
+        self.assertIsNone(input_body.get("overflow-y"))
+        self.assertEqual(preview.get("overflow"), "clip")
         self.assertGreater(
             css.index(".batch-content > .batch-preview"),
             css.index(".batch-content > .dialog-section"),
         )
-        self.assertEqual(preview.get("flex"), "1 1 180px")
-        self.assertEqual(preview.get("min-height"), "140px")
+        self.assertEqual(preview.get("flex"), "0 0 auto")
         self.assertEqual(preview.get("min-width"), "0")
-        self.assertEqual(table.get("flex"), "1 1 auto")
-        self.assertEqual(table.get("min-height"), "0")
+        self.assertEqual(table.get("flex"), "0 0 auto")
         self.assertEqual(table.get("min-width"), "0")
-        self.assertEqual(table.get("overflow-y"), "auto")
-        self.assertEqual(table.get("overflow-x"), "hidden")
-        self.assertEqual(grid.get("width"), "100%")
-        self.assertEqual(grid.get("min-width"), "0")
+        # 欄寬改由 colgroup 指定,塞不下時只有表格橫向捲動(不再靠切字硬塞);
+        # 垂直用 clip 而非 hidden/auto,才不會多長出一個捲動容器
+        self.assertEqual(table.get("overflow-x"), "auto")
+        self.assertEqual(table.get("overflow-y"), "clip")
+        self.assertEqual(grid.get("min-width"), "100%")
         self.assertEqual(grid.get("table-layout"), "fixed")
-        self.assertNotEqual(grid.get("width"), "max-content")
+        self.assertIsNone(grid.get("width"))
         self.assertEqual(cells.get("min-width"), "0")
         self.assertEqual(cells.get("white-space"), "nowrap")
         self.assertEqual(cells.get("overflow"), "hidden")
         self.assertEqual(cells.get("text-overflow"), "ellipsis")
         self.assertNotEqual(cells.get("overflow-wrap"), "anywhere")
-        for column, width in [
-                (actions, "80px"), (models, "110px"), (prices, "80px"),
-                (barcodes, "150px"), (statuses, "110px")]:
-            self.assertEqual(column.get("width"), width)
-            self.assertEqual(column.get("min-width"), "0")
+        # 舊的寫死 px 欄寬規則必須已移除,否則又會把長值擠成省略號
+        for legacy in ["batch-col-actions", "batch-col-model", "batch-col-price",
+                       "batch-col-barcode", "batch-col-status"]:
+            self.assertNotIn(".batch-table .dialog-table ." + legacy, css)
         self.assertEqual(controls.get("min-width"), "0")
         self.assertEqual(controls.get("max-width"), "100%")
         self.assertEqual(controls.get("box-sizing"), "border-box")
@@ -946,12 +1065,14 @@ state.$refs = {batchPage:{
         self.assertEqual(status.get("overflow"), "hidden")
         self.assertEqual(status.get("text-overflow"), "ellipsis")
         self.assertNotEqual(status.get("overflow-wrap"), "anywhere")
-        self.assertIn('<th v-if="modelMode===\'required\'" class="batch-col-model">', html)
         self.assertIn('<td v-if="modelMode===\'required\'" class="batch-cell-model"', html)
-        self.assertIn('<th class="batch-col-price">售價</th>', html)
         self.assertIn('<td class="batch-cell-price"', html)
-        self.assertIn('<th class="batch-col-barcode">條碼</th>', html)
         self.assertIn('<td class="batch-cell-barcode"', html)
+        self.assertIn(":style=\"{width:columnWidths[col.key]+'px'}\"", html)
+        self.assertIn("startColResize(col.key,$event)", html)
+        self.assertIn("resetColWidth(col.key)", html)
+        grip = declarations(".batch-col-grip")
+        self.assertEqual(grip.get("cursor"), "col-resize")
         self.assertEqual(footer.get("position"), "relative")
         self.assertEqual(footer.get("z-index"), "3")
         for selector in [".batch-content > .batch-input", ".batch-skipped",
@@ -959,13 +1080,11 @@ state.$refs = {batchPage:{
             section = declarations(selector)
             self.assertNotEqual(section.get("overflow"), "auto", selector)
             self.assertNotEqual(section.get("overflow-y"), "auto", selector)
-        # 輸入區 section 本身不捲,但內容過高時由 body 內捲(VUE-18):
-        # section 必須可收縮(flex 0 1)且 body 是 overflow-y:auto 的內部捲動容器。
+        # 輸入區不再自己捲(改為整頁一條捲軸):section 撐開多少就多少,
+        # body 不得再是內部捲動容器,否則又變成兩層垂直捲動。
         input_section = declarations(".batch-content > .batch-input")
-        self.assertEqual(input_section.get("flex"), "0 1 auto")
-        input_body = declarations(".batch-input-body")
-        self.assertEqual(input_body.get("overflow-y"), "auto")
-        self.assertEqual(input_body.get("min-height"), "0")
+        self.assertEqual(input_section.get("flex"), "0 0 auto")
+        self.assertIsNone(declarations(".batch-input-body").get("overflow-y"))
 
 
 if __name__ == "__main__":

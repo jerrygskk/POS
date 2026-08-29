@@ -20,6 +20,7 @@ window.PosPages["page-variant-batch"] = {
       showDiffOnly: false, showSkipped: false,
       fixedEditor: null, lastDeleted: null,
       doneMsg: "", generating: false, submitting: false,
+      colOverrides: {}, resizing: null,
     };
   },
   computed: {
@@ -39,6 +40,53 @@ window.PosPages["page-variant-batch"] = {
     inputFormula() { return window.VariantBatchLogic.formulaText(this.axesInfo.axes); },
     diffFields() {
       return window.VariantBatchLogic.diffFieldNames(this.drafts, this.fields);
+    },
+    columnDefs() {
+      const L = window.VariantBatchLogic;
+      const defs = [{ key: "__actions", label: "操作", kind: "text", min: 88, max: 88 }];
+      for (const field of this.formalFields) {
+        if (this.showDiffOnly && !this.diffFields.has(field.name)) continue;
+        defs.push({
+          key: "f" + field.field_id,
+          label: field.name,
+          kind: field.field_type === "select" ? "select"
+            : (field.field_type === "multi" ? "button" : "input"),
+          samples: this.columnSamples(field),
+        });
+      }
+      if (this.featureField
+          && (!this.showDiffOnly || this.diffFields.has(this.featureField.name))) {
+        defs.push({
+          key: "f" + this.featureField.field_id,
+          label: this.featureField.name,
+          kind: "button",
+          samples: this.drafts.map(d => this.draftTags(d)),
+        });
+      }
+      if (this.modelMode === "required") {
+        defs.push({
+          key: "__models", label: "適用型號", kind: "button",
+          samples: this.drafts.map(d => this.draftModels(d)),
+        });
+      }
+      defs.push({ key: "__price", label: "售價", kind: "input", min: 84, max: 110 });
+      defs.push({
+        key: "__barcode", label: "條碼", kind: "input", min: 165,
+        samples: this.drafts.map(d => d.barcode),
+      });
+      defs.push({
+        key: "__status", label: "狀態", kind: "text", min: 130, max: 200,
+        samples: this.drafts.map(d => this.rowStatus(d)),
+      });
+      return defs;
+    },
+    columnWidths() {
+      return window.VariantBatchLogic.resolveWidths(
+        this.columnDefs, this.colOverrides, this.measureText);
+    },
+    tableWidth() {
+      return window.VariantBatchLogic.totalWidth(
+        this.columnDefs, this.colOverrides, this.measureText);
     },
     fixedDraft() {
       return this.fixedEditor
@@ -100,6 +148,7 @@ window.PosPages["page-variant-batch"] = {
       this.inputCollapsed = false;
       this.selectionCollapsed = false;
       this.doneMsg = "";
+      this.loadColWidths();
     },
     async onProductChange() {
       this.invalidatePrecheck();
@@ -109,6 +158,7 @@ window.PosPages["page-variant-batch"] = {
       this.doneMsg = "";
       this.inputCollapsed = false;
       this.selectionCollapsed = this.productId != null;
+      this.loadColWidths();
       if (this.productId == null) {
         this.fields = [];
         this.fieldUsage = {};
@@ -209,6 +259,86 @@ window.PosPages["page-variant-batch"] = {
       if (!this.fixedEditor) return;
       this.fixedEditor = null;
       this.schedulePrecheck();
+    },
+
+    // 以 canvas 量表格字型下的真實字寬;量不到(無 canvas)回傳 null,
+    // 由邏輯層退回半形寬估算。
+    measureText(text) {
+      if (typeof document === "undefined" || !document.createElement)
+        return window.VariantBatchLogic.halfWidth(text) * 7.5;
+      const canvas = this._measureCanvas
+        || (this._measureCanvas = document.createElement("canvas"));
+      const context = canvas.getContext && canvas.getContext("2d");
+      if (!context) return window.VariantBatchLogic.halfWidth(text) * 7.5;
+      // 字型要取表格儲存格的(11pt),表格還沒畫出來時先用 body 量,
+      // 但不要把那次的字型記起來,否則之後一直用錯的字型算欄寬。
+      const probe = document.querySelector(".batch-table .dialog-table td")
+        || document.querySelector(".batch-table .dialog-table th");
+      if (probe || !this._measureFont) {
+        const style = window.getComputedStyle(probe || document.body);
+        const font = `${style.fontStyle} ${style.fontWeight} `
+          + `${style.fontSize} ${style.fontFamily}`;
+        if (probe) this._measureFont = font;
+        context.font = font;
+      } else {
+        context.font = this._measureFont;
+      }
+      return context.measureText(String(text == null ? "" : text)).width;
+    },
+    columnSamples(field) {
+      const fromDrafts = this.drafts.map(d => {
+        const value = d.attrs[field.name];
+        return Array.isArray(value) ? value.join("＋") : String(value == null ? "" : value);
+      });
+      const fromOptions = (this.fieldUsage[field.field_id] || []).map(o => o.value);
+      return fromDrafts.concat(fromOptions);
+    },
+    // 欄寬記在瀏覽器本機儲存,依種類分開。⚠️ pywebview 預設私密模式,
+    // WebView2 的資料夾是暫存的:關掉程式再開就會清空,只在本次執行期間有效
+    // (維護者裁示如此,不為此關閉私密模式或改存資料庫)。
+    colStorageKey() {
+      return this.catId == null ? null : "posBatchColWidths:v1:cat" + this.catId;
+    },
+    loadColWidths() {
+      this.colOverrides = {};
+      const key = this.colStorageKey();
+      if (!key) return;
+      try {
+        const raw = window.localStorage.getItem(key);
+        const saved = raw ? JSON.parse(raw) : null;
+        if (saved && typeof saved === "object") this.colOverrides = saved;
+      } catch (_) { /* 讀不到就用自動欄寬 */ }
+    },
+    saveColWidths() {
+      const key = this.colStorageKey();
+      if (!key) return;
+      try {
+        window.localStorage.setItem(key, JSON.stringify(this.colOverrides));
+      } catch (_) { /* 存不進去不影響操作 */ }
+    },
+    startColResize(key, event) {
+      const startX = event.clientX;
+      const startWidth = this.columnWidths[key];
+      const onMove = (moveEvent) => {
+        const next = Math.max(window.VariantBatchLogic.COLUMN_MIN_PX,
+          startWidth + (moveEvent.clientX - startX));
+        this.colOverrides = Object.assign({}, this.colOverrides, { [key]: next });
+      };
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        this.resizing = null;
+        this.saveColWidths();
+      };
+      this.resizing = key;
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+    resetColWidth(key) {
+      const next = Object.assign({}, this.colOverrides);
+      delete next[key];
+      this.colOverrides = next;
+      this.saveColWidths();
     },
 
     invalidatePrecheck() {

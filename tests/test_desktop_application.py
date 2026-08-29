@@ -345,6 +345,15 @@ class ChildWindowFitSizeTests(unittest.TestCase):
             child_window.fit_size((980, 820), (760, 560), (1536, 816)),
             (980, 736))
 
+    def test_batch_window_is_wide_enough_for_worksheet(self):
+        # 預覽工作表最寬的種類實測需要約 1065 內容寬;1920x1080@125%
+        # 的工作區(1536)扣掉邊距仍放得下,不該被夾窄。
+        spec = child_window.CHILD_PAGES["variant_batch"]
+        self.assertGreaterEqual(spec["size"][0], 1220)
+        self.assertEqual(
+            child_window.fit_size(spec["size"], spec["min_size"], (1536, 816))[0],
+            spec["size"][0])
+
     def test_min_size_wins_over_tiny_work_area(self):
         self.assertEqual(
             child_window.fit_size((720, 760), (640, 520), (600, 500)),
