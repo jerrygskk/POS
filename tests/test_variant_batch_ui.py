@@ -621,12 +621,13 @@ state.$refs = {batchPage:{
 
     def test_batch_workspace_has_only_table_as_outer_scroller(self):
         css = (STATIC / "css" / "pos.css").read_text(encoding="utf-8")
+        html = (STATIC / "variant_batch.html").read_text(encoding="utf-8")
 
         def declarations(selector):
             match = re.search(
-                rf"{re.escape(selector)}\s*\{{([^}}]*)\}}",
+                rf"^[ \t]*{re.escape(selector)}\s*\{{([^}}]*)\}}",
                 css,
-                re.DOTALL,
+                re.DOTALL | re.MULTILINE,
             )
             self.assertIsNotNone(match, f"missing CSS rule for {selector}")
             return {
@@ -639,6 +640,29 @@ state.$refs = {batchPage:{
         outer = declarations(".dialog-content.batch-content")
         preview = declarations(".batch-content > .batch-preview")
         table = declarations(".batch-table")
+        grid = declarations(".batch-table .dialog-table")
+        cells = declarations(
+            ".batch-table .dialog-table th, .batch-table .dialog-table td")
+        actions = declarations(
+            ".batch-table .dialog-table .batch-col-actions,\n"
+            ".batch-table .dialog-table .batch-row-actions")
+        models = declarations(
+            ".batch-table .dialog-table .batch-col-model,\n"
+            ".batch-table .dialog-table .batch-cell-model")
+        prices = declarations(
+            ".batch-table .dialog-table .batch-col-price,\n"
+            ".batch-table .dialog-table .batch-cell-price")
+        barcodes = declarations(
+            ".batch-table .dialog-table .batch-col-barcode,\n"
+            ".batch-table .dialog-table .batch-cell-barcode")
+        statuses = declarations(
+            ".batch-table .dialog-table .batch-col-status,\n"
+            ".batch-table .dialog-table .batch-status")
+        controls = declarations(
+            ".batch-table input, .batch-table select, .batch-table button")
+        cell_button = declarations(".dialog-shell .batch-cell-button")
+        store_check = declarations(".batch-store-check")
+        status = declarations(".batch-status")
         footer = declarations(".batch-footer")
 
         self.assertEqual(outer.get("overflow"), "hidden")
@@ -653,7 +677,42 @@ state.$refs = {batchPage:{
         self.assertEqual(table.get("flex"), "1 1 auto")
         self.assertEqual(table.get("min-height"), "0")
         self.assertEqual(table.get("min-width"), "0")
-        self.assertEqual(table.get("overflow"), "auto")
+        self.assertEqual(table.get("overflow-y"), "auto")
+        self.assertEqual(table.get("overflow-x"), "hidden")
+        self.assertEqual(grid.get("width"), "100%")
+        self.assertEqual(grid.get("min-width"), "0")
+        self.assertEqual(grid.get("table-layout"), "fixed")
+        self.assertNotEqual(grid.get("width"), "max-content")
+        self.assertEqual(cells.get("min-width"), "0")
+        self.assertEqual(cells.get("white-space"), "nowrap")
+        self.assertEqual(cells.get("overflow"), "hidden")
+        self.assertEqual(cells.get("text-overflow"), "ellipsis")
+        self.assertNotEqual(cells.get("overflow-wrap"), "anywhere")
+        for column, width in [
+                (actions, "80px"), (models, "110px"), (prices, "80px"),
+                (barcodes, "150px"), (statuses, "110px")]:
+            self.assertEqual(column.get("width"), width)
+            self.assertEqual(column.get("min-width"), "0")
+        self.assertEqual(controls.get("min-width"), "0")
+        self.assertEqual(controls.get("max-width"), "100%")
+        self.assertEqual(controls.get("box-sizing"), "border-box")
+        self.assertEqual(controls.get("white-space"), "nowrap")
+        self.assertEqual(cell_button.get("overflow"), "hidden")
+        self.assertEqual(cell_button.get("text-overflow"), "ellipsis")
+        self.assertEqual(cell_button.get("white-space"), "nowrap")
+        self.assertEqual(store_check.get("min-width"), "0")
+        self.assertEqual(store_check.get("white-space"), "nowrap")
+        self.assertEqual(store_check.get("overflow"), "hidden")
+        self.assertEqual(status.get("white-space"), "nowrap")
+        self.assertEqual(status.get("overflow"), "hidden")
+        self.assertEqual(status.get("text-overflow"), "ellipsis")
+        self.assertNotEqual(status.get("overflow-wrap"), "anywhere")
+        self.assertIn('<th v-if="modelMode===\'required\'" class="batch-col-model">', html)
+        self.assertIn('<td v-if="modelMode===\'required\'" class="batch-cell-model"', html)
+        self.assertIn('<th class="batch-col-price">售價</th>', html)
+        self.assertIn('<td class="batch-cell-price"', html)
+        self.assertIn('<th class="batch-col-barcode">條碼</th>', html)
+        self.assertIn('<td class="batch-cell-barcode"', html)
         self.assertEqual(footer.get("position"), "relative")
         self.assertEqual(footer.get("z-index"), "3")
         for selector in [".batch-input", ".batch-skipped", ".batch-fixed-editor"]:

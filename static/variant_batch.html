@@ -168,9 +168,9 @@
                 <th v-if="!showDiffOnly || diffFields.has(f.name)">{{ f.name }}</th>
               </template>
               <th v-if="featureField && (!showDiffOnly || diffFields.has(featureField.name))">{{ featureField.name }}</th>
-              <th v-if="modelMode==='required'">適用型號</th>
-              <th>售價</th>
-              <th>條碼</th>
+              <th v-if="modelMode==='required'" class="batch-col-model">適用型號</th>
+              <th class="batch-col-price">售價</th>
+              <th class="batch-col-barcode">條碼</th>
               <th class="batch-col-status">狀態</th>
             </tr>
           </thead>
@@ -212,7 +212,7 @@
                   {{ draftTags(d) || '—' }}
                 </button>
               </td>
-              <td v-if="modelMode==='required'"
+              <td v-if="modelMode==='required'" class="batch-cell-model"
                   :class="{'cell-diff':diffFields.has('__models'),'cell-error':modelErrors(d).length}"
                   :title="errorText(modelErrors(d))">
                 <button type="button" class="batch-cell-button"
@@ -223,10 +223,11 @@
                   {{ err.message }}
                 </small>
               </td>
-              <td :class="{'cell-diff':diffFields.has('__price')}">
+              <td class="batch-cell-price" :class="{'cell-diff':diffFields.has('__price')}">
                 <input type="number" min="0" v-model.number="d.price" @change="schedulePrecheck">
               </td>
-              <td :class="{'cell-diff':diffFields.has('__barcode'),'cell-error':barcodeErrors(d).length}"
+              <td class="batch-cell-barcode"
+                  :class="{'cell-diff':diffFields.has('__barcode'),'cell-error':barcodeErrors(d).length}"
                   :title="errorText(barcodeErrors(d))">
                 <input v-model="d.barcode" @change="schedulePrecheck" placeholder="原廠條碼">
                 <label class="batch-store-check">
