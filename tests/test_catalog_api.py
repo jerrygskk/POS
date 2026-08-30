@@ -95,7 +95,8 @@ class TestCatalogApi(FacadeTestCase):
         oid = self.invoke("options.list", {"field_id": fid})[0]["option_id"]; self.invoke("options.set_models", {"id": oid, "model_ids": [mid]}); self.assert_application_error("conflict", "models.delete", {"id": mid})
 
     def test_category_fields_merge(self):
-        cid = self.create_category("glass"); fid = self.create_field("size", cid); self.invoke("options.create", {"field_id": fid, "value": "large"}); common = self.invoke("fields.list", {"common": True})[0]["field_id"]
+        cid = self.create_category("glass"); fid = self.create_field("size", cid); self.invoke("options.create", {"field_id": fid, "value": "large"})
+        common = self.invoke("fields.create", {"name": "顏色", "field_type": "select"})["field_id"]   # 種子不再建共用欄,測共用行為時自己建
         other = self.create_category("case"); self.invoke("categories.set_common_fields", {"id": other, "field_ids": [common]}); self.invoke("categories.set_common_fields", {"id": cid, "field_ids": [common]})
         fields = self.invoke("categories.fields", {"id": cid}); own = next(field for field in fields if field["field_id"] == fid); shared = next(field for field in fields if field["field_id"] == common)
         self.assertEqual([option["value"] for option in own["options"]], ["large"]); self.assertFalse(own["shared"]); self.assertTrue(shared["shared"])
@@ -113,6 +114,21 @@ class TestCatalogApi(FacadeTestCase):
     def test_catalog_returns_names(self):
         cid = self.create_category("glass"); bid = self.invoke("brands.create", {"name": "HODA"})["brand_id"]; self._product(cid, brand_id=bid)
         product = self.invoke("catalog.list")[0]; self.assertEqual((product["category_name"], product["brand_name"]), ("glass", "HODA"))
+
+    def test_brand_list_with_products_skips_brands_without_items(self):
+        # 商品資料庫的廠牌下拉只列真的有商品的廠牌:掛了種類卻沒商品的選了只會查無資料
+        glass = self.create_category("glass"); case = self.create_category("case")
+        hoda = self.invoke("brands.create", {"name": "HODA"})["brand_id"]
+        xmart = self.invoke("brands.create", {"name": "XMART"})["brand_id"]
+        self.invoke("brands.set_categories", {"id": xmart, "category_ids": [glass]})
+        self._product(glass, brand_id=hoda)
+
+        names = lambda p: [b["name"] for b in self.invoke("brands.list", p)]
+        self.assertEqual(names({"with_products": True, "category_id": glass}), ["HODA"])
+        self.assertEqual(names({"with_products": True, "category_id": case}), [])
+        self.assertEqual(names({"with_products": True}), ["HODA"])
+        # 未帶 with_products 仍是原本的行為(依 BrandCategory 掛勾,含沒商品的 XMART)
+        self.assertEqual(sorted(names({"category_id": glass})), ["HODA", "XMART"])
 
 
 if __name__ == "__main__":

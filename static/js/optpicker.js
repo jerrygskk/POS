@@ -54,8 +54,10 @@ window.PosComponents["opt-picker"] = {
       // 依適用型號過濾特別色候選(usage row 帶 model_ids)
       return window.CatalogFields.filterOptions(this.usage, this.modelIds);
     },
+    // 已選的候選 chip 留在原位(標成已選),不從候選區抽走——抽走會讓候選少一顆、
+    // 行數變動,整排欄位跟著上下跳。
     available() {
-      return this.pool.filter(o => o.active && !this.selectedKeys.has(o.value.toLowerCase()));
+      return this.pool.filter(o => o.active || this.selectedKeys.has(o.value.toLowerCase()));
     },
     // 前排:服務層標記 lead 的值(該廠牌／該產品曾出現過,含固定次序值)全部顯示,
     // 其餘收進「更多…」。完全沒有 lead(全新產品第一筆)才退回種類次數前 8。
@@ -75,8 +77,7 @@ window.PosComponents["opt-picker"] = {
     matches() {
       const q = this.query.trim().toLowerCase();
       if (!q) return [];
-      return this.pool.filter(o => o.value.toLowerCase().includes(q)
-        && !this.selectedKeys.has(o.value.toLowerCase())).slice(0, 12);
+      return this.pool.filter(o => o.value.toLowerCase().includes(q)).slice(0, 12);
     },
     exactExists() {
       const q = this.query.trim().toLowerCase();
@@ -100,46 +101,66 @@ window.PosComponents["opt-picker"] = {
       if (this.selectedKeys.has(val.toLowerCase())) return;
       this.emitList(this.multiple ? this.selected.concat([val]) : [val]);
     },
+    // 候選/搜尋結果的 chip:再點一次取消選取(chip 不會消失,只換樣式)
+    isSelectedVal(val) { return this.selectedKeys.has(String(val).toLowerCase()); },
+    toggle(o) {
+      if (this.isSelectedVal(o.value)) { this.remove(o.value); return; }
+      this.add(o.value);
+    },
     remove(val) {
       this.emitList(this.selected.filter(s => s.toLowerCase() !== val.toLowerCase()));
     },
+    // 自訂新值:字串本身已變成選中的值,留著只會讓「新增「○○」」按鈕再出現一次
     addFromSearch() { this.add(this.query); this.query = ""; },
     handleSearchEnter(event) {
       event.preventDefault();
       event.stopPropagation();
       this.addFromSearch();
     },
-    pickMatch(o) { this.add(o.value); this.query = ""; },
+    // 複選時保留搜尋字與結果清單,讓使用者接著挑同一批的下一個
+    // (打「透」要選透明、透明磁吸…);單選選完就結束,清空。
+    pickMatch(o) {
+      this.toggle(o);
+      if (!this.multiple) { this.query = ""; return; }
+      // 焦點留在搜尋框:點候選會把焦點帶走,接著打字就沒反應了
+      if (this.$refs.search) this.$refs.search.focus();
+    },
   },
   template: `
   <div class="tag-selector">
-    <div class="chip-wrap" v-if="selected.length">
+    <div class="chip-wrap tag-picked">
       <span v-for="val in selected" :key="val" class="chip on tag-chip">
         {{ val }}
         <span v-if="isDisabledVal(val)" class="tag-reactivate">(將重新啟用)</span>
         <button type="button" class="tag-x" @click="remove(val)">✕</button>
       </span>
+      <span v-if="!selected.length" class="tag-empty">尚未選擇</span>
     </div>
     <div class="chip-wrap" v-if="topChips.length || moreChips.length">
       <button type="button" v-for="o in topChips" :key="o.option_id" class="chip"
-              @click="add(o.value)">{{ o.value }}<span class="tag-count">{{ countOf(o) }}</span></button>
+              :class="{ on: isSelectedVal(o.value) }"
+              @click="toggle(o)">{{ o.value }}<span class="tag-count">{{ countOf(o) }}</span></button>
       <button type="button" v-if="moreChips.length && !showMore" class="chip tag-more"
               @click="showMore=true">更多…</button>
       <template v-if="showMore">
         <button type="button" v-for="o in moreChips" :key="o.option_id" class="chip"
-                @click="add(o.value)">{{ o.value }}<span class="tag-count">{{ countOf(o) }}</span></button>
+                :class="{ on: isSelectedVal(o.value) }"
+                @click="toggle(o)">{{ o.value }}<span class="tag-count">{{ countOf(o) }}</span></button>
       </template>
     </div>
     <div class="tag-search">
-      <input v-model="query" :placeholder="placeholder" @keydown.enter="handleSearchEnter">
+      <input ref="search" v-model="query" :placeholder="placeholder"
+             @keydown.enter="handleSearchEnter">
       <button type="button" class="btn-sm" v-if="query.trim() && !exactExists"
               @click="addFromSearch">新增「{{ query.trim() }}」</button>
     </div>
-    <div class="chip-wrap" v-if="matches.length">
+    <div class="chip-wrap tag-matches">
       <button type="button" v-for="o in matches" :key="o.option_id" class="chip"
-              :class="{ inactive: !o.active }" @click="pickMatch(o)">
+              :class="{ inactive: !o.active, on: isSelectedVal(o.value) }"
+              @click="pickMatch(o)">
         {{ o.value }}<span v-if="!o.active" class="tag-reactivate">(停用，將重新啟用)</span>
       </button>
+      <span v-if="!matches.length" class="tag-empty">{{ query.trim() ? '查無相符的值' : '' }}</span>
     </div>
   </div>`,
 };

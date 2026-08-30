@@ -177,8 +177,10 @@ class SettingsLayersTests(unittest.TestCase):
         self.assertIn('cat.model_mode === "required" ? "hidden" : "required"', source)
         self.assertIn('v-for="f in fixedRows"', html)
         self.assertIn('@click.stop="toggleFixedRow(f)"', html)
-        # 新種類預設帶顏色與款式(選填)
-        self.assertIn('const DEFAULT_CATEGORY_FIELDS = ["顏色", "款式"]', source)
+        # 新種類預設帶顏色與款式,兩個都是本種類自己一份(規格欄不跨種類共用)
+        self.assertIn(
+            'const DEFAULT_OWN_FIELDS = [["顏色", "select"], ["款式", "select"]]',
+            source)
         self.assertIn("await this.attachDefaultFields(r.category_id)", source)
         self.assertIn("{ sort: sort++, required: 0, active: 1 }", source)
         # 自訂規格列的操作鈕:✎ 選項與紅色 ✕(刪除前顯示影響筆數)

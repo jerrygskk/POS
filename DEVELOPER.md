@@ -32,7 +32,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `lib/db.py` | `get_conn` / `db_conn`(context manager)/ `init_db`,純資料層(零框架依賴) |
 | `lib/db_schema.py` | 現行 schema DDL 唯一來源；未來變更仍依 migration 規則升級既有資料庫 |
 | `lib/legacy_migrations.py` | 凍結的 v1–v13 migration DDL；僅供既有資料庫按版本升級，不作為現行 schema 定義 |
-| `lib/db_seed.py` | 共用欄(商品描述/顏色)、付款方式種子 |
+| `lib/db_seed.py` | 付款方式種子、新種類預設欄清單(規格欄由各種類自建,種子不建欄) |
 | `lib/product_rules.py` | 共用商品規則(`FIELD_TYPES`、欄位型別驗證、自取碼取號) |
 | `lib/variant_batch_service.py` | 子產品批次建立與唯讀預檢（共用 `_validate_batch`，`dry=True` 不寫入任何資料） |
 | `lib/backup.py` | GFS 備份(日7/週4/月12) |
@@ -57,7 +57,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 
 - **庫存採異動流水制**:不存「目前庫存」欄位,一律由 `StockMovement` 加總取得（`lib/product_data.py:stock_of`）。`kind` 為 `purchase`(進貨,+)、`sale`(銷售,-)、`adjust`(盤點調整,±)。
 - **金額一律 int**:新台幣元,無小數;數量亦為 int。
-- **商品結構**:`Category`/`Brand`/`PhoneModel` 為正式資料表;`Product`(款)以 `category_id`/`brand_id` FK 掛種類/廠牌;`Variant`(變體)以 `VariantModel` 多對多掛適用型號(共用款可掛多筆型號);規格欄 `AttributeField` 依 `category_id` 掛種類(NULL 為共用欄,各種類需經 `CategoryField` 勾選啟用才可用);`AttributeOption` 無 parent 連動。
+- **商品結構**:`Category`/`Brand`/`PhoneModel` 為正式資料表;`Product`(款)以 `category_id`/`brand_id` FK 掛種類/廠牌;`Variant`(變體)以 `VariantModel` 多對多掛適用型號(共用款可掛多筆型號);規格欄 `AttributeField` 為欄位主檔,以 `CategoryField` 掛種類(一律一個欄只掛一個種類,見「新種類的預設模板」);`AttributeOption` 無 parent 連動。
 - **規格值正規化**:變體規格不再存 JSON,改由 `VariantAttribute(variant_id, field_id, option_id?, text_value?)` 關聯表承載(`CHECK` 約束 `option_id`/`text_value` 恰一非 NULL:select 欄存 `option_id`、text 欄存 `text_value`)。Desktop action 以 `attributes:{欄名:值}` dict 進出，讀寫由 `lib/product_data.py` 的 `set_variant_attributes`/`attrs_by_variant` 在 dict 與關聯列間轉換（讀取一次 JOIN 撈齊避免 N+1）。因此**改欄名/改選項值即生效**,不需回掃變體;寫入時 select 值查無對應選項會回傳 validation error。
 - **規格選項生命週期**:`AttributeOption.active` 只控制新增選單可見性。有 `VariantAttribute` 引用時刪除會清除預設選項與限定型號後設為停用,保留既有商品關聯;0 使用中才硬刪除。設定頁重新加入同欄位、同值的停用選項時會恢復原 `option_id` 並重新啟用;商品建檔流程自動補選項時不會重新啟用。`options.list` 的 `usage_count` 為引用該 `option_id` 的 distinct `variant_id` 數量。
 - **選項限定型號**:`OptionModel(option_id, model_id)` 記錄選項只在特定型號出現(特別色)。`options.list` 搭配 `field_id`／`model_ids` 過濾時回傳「未綁任何型號的 ∪ 綁定含任一給定型號的」聯集,僅過濾建檔下拉,不回溯既有變體;未提供 `model_ids` 時回全部。`options.set_models` 以 `id`／`model_ids` 全量替換限定型號清單(空清單=改回通用)。
@@ -66,8 +66,9 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 - **關鍵輸入驗證**:進貨數量與盤點掃描數量須大於 0,盤點實數不得小於 0;結帳單品折扣不可超過品項小計、總額不得為負,付款方式須存在設定清單。規格欄型別統一由 `lib/product_rules.py` 驗證。
 - **盤點結案防重**:結案先以 `status='open'` 條件原子更新盤點單;不存在回 404,已結案回 409,避免重複產生 `adjust` 庫存異動。
 - **有效售價**:`Variant.price` 不為 NULL 時採用,否則退回 `Product.default_price`,兩者皆 NULL 則售價為 `null`。
-- **共用欄 NULL 去重提醒**:`AttributeField` 的共用欄 `category_id` 為 NULL;SQLite 的 `UNIQUE` 對 NULL 不視為相等,故去重不能單靠資料庫唯一鍵,需靠應用層先查再插。
+- **同名欄去重提醒**:`AttributeField` 沒有 `category_id`,同名欄可能有多份(各種類一份);SQLite 的 `UNIQUE` 也不套正規化,故去重不能靠資料庫唯一鍵,一律先以「欄名＋型別＋種類」查再插。
 - **設定頁模板列與型號**:見下方「固定列：適用型號與特性詞條」「規格欄的移除」「新種類的預設模板」三節。
+- **商品資料庫的廠牌篩選**:廠牌下拉只列「目前種類真的有商品」的廠牌(`brands.list` 帶 `with_products`,以 `Product.brand_id` 判斷,不看 `BrandCategory` 掛勾)。掛了種類卻一件商品都沒有的廠牌選了只會查無資料。切換種類時重撈清單,原本選的廠牌若不在新清單內自動清成「全部廠牌」。設定頁的廠牌歸屬仍走原本的掛勾清單,不受影響。
 - **商品資料庫搜尋**:關鍵字以空白切成多個詞,採 **AND**(每個詞都要命中才算符合),大小寫與全半形以 `casefold` 正規化。比對範圍為商品名稱、種類、廠牌、款式的規格值(含 multi/tags 的每個值)、適用型號與條碼,命中時只保留符合的款式列。查無啟用中資料時另查一次停用資料,回報筆數並提供「顯示已停用」入口,不直接把停用商品混進結果。條碼只針對當頁款式查詢(`variant_id IN (...)`),不整表撈。
 - **Schema 與 migration**:`lib/db_schema.py` 是現行 schema DDL 的唯一來源；`lib/legacy_migrations.py` 封存 v1–v13 的歷史 migration DDL。未來修改現行 schema 時，仍須依 migration 規則新增升級步驟，讓既有資料庫可安全演進。
 
@@ -123,7 +124,8 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 
 **組合展開只認單值規格(select)**:候選區標「可複選以產生組合」,
 勾第二個值的當下即進入展開(不設欄位級開關——主場景每次都要交叉,
-多一個開關就是每次多一步),該欄顯示「將展開 N 種」徽章,
+多一個開關就是每次多一步),該欄的欄名下方顯示「已選擇 N 個（欄名）」徽章
+(放欄名側而非輸入框下,避免出現／消失時把輸入框整排往下推),
 底部常駐算式「3 個顏色 × 2 個長度＝6 筆」,刪回一個值自動退出。
 `multi`／`tags`／適用型號**不參與展開**:它們本來就代表同一筆資料的多個值,
 若也拿來交叉會與「產生多筆」語意混淆,欄旁固定標「套用至每一筆」。
@@ -137,9 +139,10 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 自取碼勾選保留。這是批次建檔最容易把同一組條碼灌進多筆的地方。
 
 **差異呈現**:差異儲存格淡藍底(`.cell-diff`),相同欄位維持正常顯示——
-不灰化、不自動收合(灰掉看起來像壞掉,本專案已否決過此類呈現);
-另給「全部欄位／只看差異」切換,由使用者決定要不要收,不自動判斷。
+不灰化、不自動收合(灰掉看起來像壞掉,本專案已否決過此類呈現)。
 差異計算涵蓋表格上顯示的全部欄,含特性詞條、售價、條碼與適用型號。
+原本工具列的「全部欄位／只看差異」切換已移除:欄位一下有一下沒有反而難對照,
+一律顯示全部欄,差異只靠底色標示。
 
 **就地編輯與固定編輯區**:售價、條碼、單選規格直接在儲存格改;
 多值規格、特性詞條、適用型號點格後在**表格上方的固定編輯區**改,
@@ -277,7 +280,8 @@ product 層級失敗(產品不存在或已停用)仍照 `_require_product()` rai
 
 ### 規格欄的移除(設定頁模板列紅色 ✕)
 
-規格欄是全域共用的(同一個「顏色」掛在多個種類),故 ✕ 的語意是
+規格欄雖然掛勾在 `CategoryField`,但實務上一個欄只屬於一個種類(見下方
+「新種類的預設模板」),故 ✕ 的語意是
 **從此種類移除掛勾＋清掉此種類商品填過的值**(`categories.delete_field`);
 其他種類不受影響。等到沒有任何種類再用、也沒有任何商品的值,才把欄位本身與其選項
 一起清掉(沿用零使用自動清理的慣例)。手機型號與特性詞條為固定列,不給 ✕,改走右側開關。
@@ -286,11 +290,24 @@ product 層級失敗(產品不存在或已停用)仍照 `_require_product()` rai
 
 ### 新種類的預設模板
 
-新增種類時自動掛上既有全域欄位「顏色」「款式」(選填),空白模板讓店員無從下手。
-掛的動作在設定頁建立流程(`settings.js` 的 `attachDefaultFields`),不放在
-`categories.create`——服務層自動掛欄位會改寫所有測試 fixture 對「空白種類」的假設。
-全新資料庫另給起始選項(顏色:黑色／白色／透明;款式:款式A～C,預期被改掉),
-`db_seed.seed(fresh=True)` 只在建立全新資料庫時補,既有資料庫升級一律不碰選單庫。
+新增種類時自動建「顏色」「款式」兩個規格欄(選填),空白模板讓店員無從下手。
+兩個都是**本種類自己一份**。
+
+⚠️ **規格欄一律不跨種類共用**(`db_seed.NEW_CATEGORY_OWN_FIELDS`)。同名欄在不同種類的
+詞彙互不相干——手機殼的「天峰藍」不該出現在傳輸線的候選、AppleWatch玻璃的款式不該
+混進手機殼的——共用一份會讓建檔候選互相汙染(特性詞條最早就是因此拆開的)。
+與其在設定頁教店員分辨哪些欄共用、再給一個切換,不如一律不共用:畫面上不必解釋
+「共用」是什麼,規則一句話講完。
+
+既有資料庫由兩個 migration 拆開:v14 `_mig_split_style_field` 拆款式,
+v15 `_mig_split_shared_fields` 拆其餘所有跨種類共用欄(顏色、框色、產品型號…)。
+搬移規則:每個種類各建一份同名同型別的欄,只複製**該種類真的用過**的選項
+(含限定型號與模板預設值),text 欄的值直接改指新欄;沒人用過的選項與原共用欄清掉。
+種子(`db_seed`)因此不再建任何規格欄與起始選項,只留付款方式。
+匯入工具(未入庫)照同一條規則實作:只重用已綁本種類的欄,查無就新建。
+
+建欄的動作在設定頁建立流程(`settings.js` 的 `attachDefaultFields`),不放在
+`categories.create`——服務層自動建欄位會改寫所有測試 fixture 對「空白種類」的假設。
 
 ### 標籤列印(NIIMBOT B1)
 
@@ -338,6 +355,7 @@ product 層級失敗(產品不存在或已停用)仍照 `_require_product()` rai
 - **必填／選填用切換式標籤**（`.chip-toggle`）：關閉＝白底灰框寫「選填」，開啟＝淡藍底主色字寫「必填」，文字隨狀態切換。不可用勾選框（太小、看不出狀態），鎖定時**不轉灰**，只是點不動並以 title 說明原因。
 - **輸入控制項三選一，不要再造第四種**：
   - `opt-picker`（`static/js/optpicker.js`）：值域會長大、需要排出常用值的欄位（規格值、特性詞條）。前排該範圍用過的值＋次數、可搜尋、可當場新增；需要 `variants.field_usage`。
+    版面由上而下固定四塊：**已選／候選／搜尋框／搜尋結果**。⚠️ 三條規則一起才不會跳版：①已選區最少一行、最多兩行（`.tag-picked`），搜尋結果區高度**寫死兩行**（`.tag-matches`，超過自己捲）——結果多寡與選了幾個都不影響版面，空狀態顯示灰字；②候選 chip 被選走後**留在原位只換成已選樣式**（再點一次取消），不從候選區抽走；③複選（`multiple`）點候選後**保留搜尋字與結果、焦點回搜尋框**，讓使用者接著挑同一批的下一個（打「透」連續選透明、透明磁吸），單選才清空。自己打字新增的值一律清空搜尋字（那串字已成為選中的值）。
   - `combo-box`（`static/js/combobox.js`）：從既有主檔挑一筆（廠牌之類），只有搜尋與「新增○○」。右側箭頭畫在輸入框的 `background-image`（與 select 同一個外框）；⚠️ 點擊區不可用 `<button>`——全域 `button` 有 `min-width: 80px` 與 hover 底色，會在框內冒出一塊灰。取得焦點不自動展開清單（會蓋住下面的欄位），點箭頭或開始打字才展開。
   - 原生 `<select>`：選項固定且少（型態、狀態）。
   原本 select/multi/tags 還有一條「候選未載入就退回 datalist／勾選框」的退路，已移除：它會靜默換成外觀完全不同的介面，出事看不出來，現在改顯示「候選載入中…」。

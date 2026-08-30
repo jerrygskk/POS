@@ -17,7 +17,7 @@ window.PosPages["page-variant-batch"] = {
       seq: 0, precheckSeq: 0, _precheckTimer: null, productLoadSeq: 0,
       inputCollapsed: false, selectionCollapsed: false,
       productReady: false,
-      showDiffOnly: false, showSkipped: false,
+      showSkipped: false,
       fixedEditor: null, lastDeleted: null,
       doneMsg: "", generating: false, submitting: false,
       colOverrides: {}, resizing: null,
@@ -45,7 +45,6 @@ window.PosPages["page-variant-batch"] = {
       const L = window.VariantBatchLogic;
       const defs = [{ key: "__actions", label: "操作", kind: "text", min: 88, max: 88 }];
       for (const field of this.formalFields) {
-        if (this.showDiffOnly && !this.diffFields.has(field.name)) continue;
         defs.push({
           key: "f" + field.field_id,
           label: field.name,
@@ -54,8 +53,7 @@ window.PosPages["page-variant-batch"] = {
           samples: this.columnSamples(field),
         });
       }
-      if (this.featureField
-          && (!this.showDiffOnly || this.diffFields.has(this.featureField.name))) {
+      if (this.featureField) {
         defs.push({
           key: "f" + this.featureField.field_id,
           label: this.featureField.name,

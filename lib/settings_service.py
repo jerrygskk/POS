@@ -65,6 +65,9 @@ for _kind in ("categories", "brands", "phone_brands"):
     _ACTION_RULES[f"{_kind}.delete"] = ({"id": int}, {})
     _ACTION_RULES[f"{_kind}.sort"] = ({"ids": "int_list"}, {})
     _ACTION_RULES[f"{_kind}.list"] = ({}, {"all": (bool, int), "category_id": (int, type(None))})
+# 廠牌清單另支援 with_products:只回在該範圍真的有商品的廠牌(商品資料庫篩選列用)
+_ACTION_RULES["brands.list"] = ({}, {"all": (bool, int), "category_id": (int, type(None)),
+                                     "with_products": (bool, int)})
 # 種類另支援 model_mode(適用型號模式)讀寫
 _ACTION_RULES["categories.create"] = ({"name": str}, {"sort": (int, type(None)), "model_mode": (str, type(None))})
 
@@ -217,7 +220,14 @@ class SettingsService:
             self.repo.execute(f"UPDATE {table} SET sort=? WHERE {id_col}=?", (sort, item_id))
         return {"ok": True}
 
-    def list_brands(self, all=False, category_id=None):
+    def list_brands(self, all=False, category_id=None, with_products=False):
+        # with_products:只回真的有商品的廠牌。商品資料庫的篩選列用——掛了種類卻一件
+        # 商品都沒有的廠牌選了只會查無資料,列出來只是讓店員多按一次。
+        if with_products:
+            sql = ("SELECT DISTINCT b.* FROM Brand b JOIN Product p ON p.brand_id=b.brand_id"
+                   + (" WHERE p.category_id=?" if category_id is not None else "")
+                   + " ORDER BY b.sort,b.brand_id")
+            return self.repo.rows(sql, (category_id,) if category_id is not None else ())
         if category_id is None:
             return self.simple_list("brands", all)
         return self.repo.rows("SELECT b.* FROM Brand b JOIN BrandCategory bc ON b.brand_id=bc.brand_id WHERE bc.category_id=? ORDER BY b.sort,b.brand_id", (category_id,))
@@ -550,7 +560,7 @@ class SettingsFacade(BaseFacade):
         s=SettingsService(SettingsRepository(conn)); parts=action.split("."); kind=parts[0]; op=parts[1] if len(parts)==2 else ""
         simple={"categories":"categories","brands":"brands","phone_brands":"phone_brands"}
         if kind in simple and op in {"list","create","update","delete","sort"}:
-            if kind=="brands" and op=="list": return s.list_brands(bool(payload.get("all")),payload.get("category_id"))
+            if kind=="brands" and op=="list": return s.list_brands(bool(payload.get("all")),payload.get("category_id"),bool(payload.get("with_products")))
             if op=="list": return s.simple_list(simple[kind],bool(payload.get("all")))
             if op=="create": return s.simple_create(simple[kind],payload)
             if op=="update": return s.simple_update(simple[kind],payload["id"],payload.get("fields",{}))

@@ -103,10 +103,10 @@ class OptionCleanupTests(ConnTestCase):
         conn.close()
 
     def test_manual_cleanup_global(self):
-        # 全域:顏色(紅/藍)+長度(1m/2m)共 4 個零使用選項,皆無 default;
-        # 另有種子起始選項(顏色 3 個、款式 3 個)同樣零使用,一併清掉
+        # 全域:顏色(紅/藍)+長度(1m/2m)共 4 個零使用選項,皆無 default,全部清掉
+        # (種子已不再建規格欄與起始選項)
         res = self.settings.invoke("options.cleanup", {})
-        self.assertEqual(res["deleted"], 10)
+        self.assertEqual(res["deleted"], 4)
         conn = self._fresh()
         self.assertFalse(self._opt_exists(conn, self.red))
         self.assertFalse(self._opt_exists(conn, self.blue))

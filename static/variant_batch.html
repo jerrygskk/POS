@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>新增款式</title>
-<link rel="stylesheet" href="css/pos.css?v=164">
-<link rel="stylesheet" href="css/dialog-theme.css?v=164">
+<link rel="stylesheet" href="css/pos.css?v=177">
+<link rel="stylesheet" href="css/dialog-theme.css?v=177">
 </head>
 <body>
 <div id="variant-batch-window" v-cloak>
@@ -51,15 +51,18 @@
              :class="{collapsed:inputCollapsed}">
       <div class="batch-input-head clickable" @click="inputCollapsed=!inputCollapsed">
         <h2>組合輸入</h2>
-        <span class="dialog-hint">{{ inputCollapsed ? '已收合，點此繼續新增組合' : '點此收合' }}</span>
-        <span class="batch-input-caret">{{ inputCollapsed ? '▾' : '▴' }}</span>
+        <span class="dialog-hint">{{ inputCollapsed ? '已收合，點此繼續新增組合 ▼' : '收合 ▲' }}</span>
       </div>
+      <transition name="collapse">
       <div v-show="!inputCollapsed" class="batch-input-body">
         <div v-for="f in formalFields" :key="f.field_id" class="attr-row">
           <div class="attr-name">
             {{ f.name }}<span v-if="f.required"> *</span>
             <small v-if="f.field_type==='select'" class="field-kind-note">可複選以產生組合</small>
             <small v-else-if="f.field_type==='multi'" class="apply-all-note">套用至每一筆</small>
+            <span v-if="f.field_type==='select' && optionCount(f.name)>=2" class="expand-badge">
+              已選擇 {{ optionCount(f.name) }} 個（{{ f.name }}）
+            </span>
           </div>
           <div v-if="f.field_type==='select'" class="batch-input-control">
             <opt-picker v-if="fieldUsage[f.field_id]" :model-value="input.attrs[f.name]"
@@ -67,9 +70,6 @@
                         :model-ids="input.model_ids" :placeholder="'搜尋或輸入'+f.name"
                         @update:model-value="setInputAttr(f.name,$event)"></opt-picker>
             <span v-else class="dialog-hint">候選載入中…</span>
-            <span v-if="optionCount(f.name)>=2" class="expand-badge">
-              將展開 {{ optionCount(f.name) }} 種
-            </span>
           </div>
           <opt-picker v-else-if="f.field_type==='multi' && fieldUsage[f.field_id]"
                       :model-value="input.attrs[f.name]" :usage="fieldUsage[f.field_id]"
@@ -117,6 +117,7 @@
                   @click="generatePreview">{{ generating ? '產生中…' : '產生預覽' }}</button>
         </div>
       </div>
+      </transition>
     </section>
 
     <div v-if="skipped.length" class="batch-skipped">
@@ -151,10 +152,6 @@
     <section v-if="drafts.length" class="batch-preview">
       <div class="batch-toolbar">
         <strong>預覽工作表（{{ drafts.length }} 筆）</strong>
-        <button type="button" class="chip-toggle" :class="{on:showDiffOnly}"
-                @click="showDiffOnly=!showDiffOnly">
-          {{ showDiffOnly ? '只看差異' : '全部欄位' }}
-        </button>
         <button v-if="lastDeleted" type="button" class="dialog-small"
                 @click="undoDelete">復原刪除</button>
       </div>
@@ -185,8 +182,7 @@
                         aria-label="刪除此列" @click="removeDraft(i)">✕</button>
               </td>
               <template v-for="f in formalFields" :key="f.field_id">
-                <td v-if="!showDiffOnly || diffFields.has(f.name)"
-                    :class="{'cell-diff':diffFields.has(f.name),'cell-error':fieldErrors(d,f).length}"
+                <td :class="{'cell-diff':diffFields.has(f.name),'cell-error':fieldErrors(d,f).length}"
                     :title="errorText(fieldErrors(d,f))">
                   <select v-if="f.field_type==='select'" v-model="d.attrs[f.name]"
                           @change="schedulePrecheck">
@@ -206,7 +202,7 @@
                   </small>
                 </td>
               </template>
-              <td v-if="featureField && (!showDiffOnly || diffFields.has(featureField.name))"
+              <td v-if="featureField"
                   :class="{'cell-diff':diffFields.has(featureField.name)}">
                 <button type="button" class="batch-cell-button"
                         :title="draftTags(d) || '—'"
@@ -235,8 +231,8 @@
                 <input v-model="d.barcode" @change="schedulePrecheck" placeholder="原廠條碼">
                 <label class="batch-store-check">
                   <input type="checkbox" v-model="d.store" @change="schedulePrecheck"> 配自取碼
+                  <small v-if="!d.barcode && d.store" class="dialog-hint">（建立後產生）</small>
                 </label>
-                <small v-if="!d.barcode && d.store" class="dialog-hint">建立後產生自取碼</small>
                 <small v-for="(err,ei) in barcodeErrors(d)" :key="ei" class="cell-error-text">
                   {{ err.message }}
                 </small>
@@ -267,15 +263,15 @@
 </div>
 </template>
 
-<script src="js/vue.global.prod.js?v=164"></script>
-<script src="js/api.js?v=164"></script>
-<script src="js/confirm.js?v=164"></script>
-<script src="js/pos_shared.js?v=164"></script>
-<script src="js/catalogfields.js?v=164"></script>
-<script src="js/modelpicker.js?v=164"></script>
-<script src="js/optpicker.js?v=164"></script>
-<script src="js/variant_batch_logic.js?v=164"></script>
-<script src="js/variant_batch.js?v=164"></script>
-<script src="js/variant_batch_window.js?v=164"></script>
+<script src="js/vue.global.prod.js?v=177"></script>
+<script src="js/api.js?v=177"></script>
+<script src="js/confirm.js?v=177"></script>
+<script src="js/pos_shared.js?v=177"></script>
+<script src="js/catalogfields.js?v=177"></script>
+<script src="js/modelpicker.js?v=177"></script>
+<script src="js/optpicker.js?v=177"></script>
+<script src="js/variant_batch_logic.js?v=177"></script>
+<script src="js/variant_batch.js?v=177"></script>
+<script src="js/variant_batch_window.js?v=177"></script>
 </body>
 </html>

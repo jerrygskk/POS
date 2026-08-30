@@ -12,8 +12,9 @@ const _MAINT = {
 // 故以固定列呈現而非真的建 AttributeField。
 const MODEL_ROW_ID = "__model__";
 const FEATURE_ROW_ID = "__feature__";   // 該種類尚未啟用特性詞條時的佔位列
-// 新種類預設帶入的規格欄(既有全域欄位,不新建);與 lib/db_seed.NEW_CATEGORY_FIELDS 對齊
-const DEFAULT_CATEGORY_FIELDS = ["顏色", "款式"];
+// 新種類自動建的規格欄(每個種類各自一份,不與別種類共用);
+// 與 lib/db_seed.NEW_CATEGORY_OWN_FIELDS 對齊
+const DEFAULT_OWN_FIELDS = [["顏色", "select"], ["款式", "select"]];
 
 window.PosPages["page-settings"] = {
   template: "#tpl-settings",
@@ -172,14 +173,14 @@ window.PosPages["page-settings"] = {
       });
     },
     // 新種類預設帶「顏色」「款式」兩個規格欄(選填):空白模板讓店員無從下手。
-    // 掛的是既有全域欄位,不新建欄位;不需要的用模板列紅色 ✕ 移除。
+    // 兩個都是本種類自己一份——同名欄在不同種類的詞彙互不相干(手機殼的天峰藍
+    // vs 傳輸線的黑白),共用會讓建檔候選混進別種類的值。不需要的用紅色 ✕ 移除。
     async attachDefaultFields(categoryId) {
-      const all = await API.listFields({});
       let sort = 1;
-      for (const name of DEFAULT_CATEGORY_FIELDS) {
-        const field = all.find(f => f.name === name);
-        if (!field) continue;
-        await API.setCategoryField(categoryId, field.field_id,
+      for (const [name, fieldType] of DEFAULT_OWN_FIELDS) {
+        const created = await API.createField(
+          { name, field_type: fieldType, category_id: categoryId });
+        await API.setCategoryField(categoryId, created.field_id,
                                    { sort: sort++, required: 0, active: 1 });
       }
     },

@@ -4,14 +4,12 @@ from lib.db import get_conn
 from base import FacadeTestCase
 
 class TestAttributes(FacadeTestCase):
-    def test_seed_common_fields(self):
-        # 種子只留兩個共用欄:商品描述、顏色
-        names = [f["name"] for f in self.invoke("fields.list")]
-        self.assertIn("商品描述", names)
-        self.assertIn("顏色", names)
+    def test_seed_creates_no_shared_fields(self):
+        # 規格欄一律由各種類自己建,種子不再留任何共用欄
+        self.assertEqual(self.invoke("fields.list"), [])
 
     def test_rename_field(self):
-        fid = self.invoke("fields.list")[0]["field_id"]
+        fid = self.create_field("商品描述")
         self.invoke("fields.update", {"id": fid, "fields": {"name": "描述"}})
         self.assertIn("描述", [f["name"] for f in self.invoke("fields.list")])
 
@@ -33,7 +31,7 @@ class TestAttributes(FacadeTestCase):
         self.assertEqual(vals, ["亮面", "霧面"])
 
     def test_duplicate_option_idempotent(self):
-        fid = self.invoke("fields.list")[0]["field_id"]
+        fid = self.create_field("顏色")
         self.invoke("options.create", {"field_id": fid, "value": "黑"})
         self.invoke("options.create", {"field_id": fid, "value": "黑"})
         opts = self.invoke("options.list", {"field_id": fid})
@@ -164,7 +162,7 @@ class TestAttributes(FacadeTestCase):
 
     def test_invalid_field_type_rejected_on_add_and_patch(self):
         self.assert_application_error("validation_error", "fields.create", {"name": "壞欄", "field_type": "number"})
-        fid = self.invoke("fields.list")[0]["field_id"]
+        fid = self.create_field("版型")
         self.assert_application_error("validation_error", "fields.update", {"id": fid, "fields": {"field_type": "number"}})
 
     def test_default_option_must_be_created_with_field_and_belong_to_field(self):

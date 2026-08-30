@@ -24,15 +24,14 @@ class TestSchema(ConnTestCase):
         init_db(self.db)  # 第二次不炸
         conn = get_conn(self.db)
         n = conn.execute("SELECT COUNT(*) c FROM AttributeField").fetchone()["c"]
-        self.assertEqual(n, 3)  # 種子不重複:商品描述、顏色、款式
+        self.assertEqual(n, 0)   # 種子不建規格欄
 
-    def test_default_fields(self):
-        # AttributeField 全域化後無 sort 欄,依插入順序(field_id)驗證種子
+    def test_seed_creates_no_fields(self):
+        # 規格欄一律由各種類建立時自己建一份(詞彙互不相干),種子不留共用主檔
         conn = get_conn(self.db)
         rows = [(r["name"], r["field_type"]) for r in conn.execute(
             "SELECT name, field_type FROM AttributeField ORDER BY field_id")]
-        self.assertEqual(rows, [("商品描述", "text"), ("顏色", "select"),
-                                ("款式", "select")])
+        self.assertEqual(rows, [])
 
     def test_product_has_category_and_brand_id(self):
         conn = get_conn(self.db)
@@ -41,32 +40,11 @@ class TestSchema(ConnTestCase):
         self.assertIn("brand_id", cols)
         self.assertNotIn("category", cols)  # 舊字串欄退場
 
-    def test_seed_fields_are_global(self):
-        # AttributeField 全域化後種子欄即全域欄(不再有 category_id);全新 DB 應只有 3 欄
+    def test_attributefield_has_no_category_column(self):
+        # 欄位主檔不帶 category_id;種類關係一律走 CategoryField
         conn = get_conn(self.db)
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(AttributeField)")}
         self.assertNotIn("category_id", cols)
-        n = conn.execute("SELECT COUNT(*) c FROM AttributeField").fetchone()["c"]
-        self.assertEqual(n, 3)
-
-    def test_fresh_db_seeds_starter_options_but_upgrade_does_not(self):
-        # 全新資料庫給看得懂的起點值(店員預期會改掉);既有資料庫升級不動選單庫
-        conn = get_conn(self.db)
-        got = {}
-        for name in ("顏色", "款式"):
-            fid = conn.execute(
-                "SELECT field_id FROM AttributeField WHERE name=?", (name,)).fetchone()["field_id"]
-            got[name] = [r["value"] for r in conn.execute(
-                "SELECT value FROM AttributeOption WHERE field_id=? ORDER BY sort", (fid,))]
-        self.assertEqual(got["顏色"], ["黑色", "白色", "透明"])
-        self.assertEqual(got["款式"], ["款式A", "款式B", "款式C"])
-        conn.execute("DELETE FROM AttributeOption")
-        conn.commit()
-        conn.close()
-        init_db(self.db)   # 既有資料庫再開一次:不補回起始選項
-        conn = get_conn(self.db)
-        n = conn.execute("SELECT COUNT(*) c FROM AttributeOption").fetchone()["c"]
-        self.assertEqual(n, 0)
 
     def test_phonemodel_has_series_column(self):
         # 全新 DB 建表即含 series 欄

@@ -79,7 +79,7 @@ window.PosPages["page-catalog"] = {
     window.addEventListener("pos-child-window-closed", this._childWindowClosed);
     await this.guard(async () => {
       this.categories = await API.listCategories({});
-      this.brands = await API.listBrands({});
+      this.brands = await API.listBrands({ with_products: true });
       this.models = await API.listModels({});
     });
     await this.reload();
@@ -116,6 +116,19 @@ window.PosPages["page-catalog"] = {
           this.showError(error.message);
         }
       });
+    },
+    // 廠牌下拉只列「目前種類真的有商品」的廠牌:掛了種類卻沒商品的廠牌選了只會
+    // 查無資料。切種類後原本選的廠牌若不在清單內,一併清掉避免查出空白。
+    async reloadBrands() {
+      const params = { with_products: true };
+      if (this.fCategory != null) params.category_id = this.fCategory;
+      this.brands = await API.listBrands(params);
+      if (this.fBrand != null
+          && !this.brands.some(b => b.brand_id === this.fBrand)) this.fBrand = null;
+    },
+    async onCategoryChange() {
+      await this.guard(() => this.reloadBrands());
+      await this.reload();
     },
     catalogParams() {
       return {q: this.q, include_inactive: this.includeInactive,

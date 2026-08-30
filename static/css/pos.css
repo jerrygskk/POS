@@ -434,6 +434,15 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .tag-selector .tag-more { font-style: italic; }
 .tag-selector .chip.inactive { opacity: 0.6; border-style: dashed; }
 .tag-reactivate { color: var(--primary-hover); font-size: 11px; margin-left: 4px; }
+/* ⚠️ 四個區塊(已選／候選／搜尋框／搜尋結果)高度固定,不隨內容出現消失而上下跳:
+   已選與搜尋結果空的時候仍保留一行 chip 的高度(28px = chip 4+4 padding
+   ＋line-height 18＋上下框線 2)。候選 chip 選走後也留在原位只換樣式。 */
+/* 搜尋結果區高度寫死兩行(28×2＋列距 6):結果多寡不影響版面,超過自己捲。
+   已選區最少一行、最多兩行,選很多也不會把下面的欄位一路往下推。 */
+.tag-picked { min-height: 28px; max-height: 62px; overflow-y: auto;
+  align-content: flex-start; }
+.tag-matches { height: 62px; overflow-y: auto; align-content: flex-start; }
+.tag-empty { color: var(--text-3); font-size: 13px; line-height: 28px; }
 .tag-search { display: flex; gap: 6px; align-items: center; }
 .tag-search input { flex: 1; }
 
@@ -456,7 +465,6 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .batch-input-head { flex: 0 0 auto; min-height: 22px; display: flex; align-items: center;
   gap: 12px; }
 .batch-input-head.clickable { cursor: pointer; }
-.batch-input-caret { margin-left: auto; color: #636366; }
 .batch-input-head h2 { pointer-events: none; }
 .batch-input.collapsed { padding: 10px 16px; }
 .batch-input.collapsed .batch-input-head h2 { position: static; padding: 0; }
@@ -541,6 +549,10 @@ button.primary.danger:hover { filter: brightness(0.92); }
   box-sizing: border-box; margin-top: 6px; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
 .batch-store-check input { flex: 0 0 auto; }
+/* 「（建立後產生）」隨勾選出現,擠在同一行不換行、放不下就省略號 */
+.batch-store-check .dialog-hint { flex: 0 1 auto; min-width: 0; margin-left: 4px;
+  color: var(--danger);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cell-diff { background: #eaf3fb; }
 .dialog-shell .dialog-table td.cell-diff { background: #eaf3fb; }
 .dialog-shell .dialog-table tr.duplicate > td { border-top: 2px solid #c0392b;

@@ -793,8 +793,6 @@ const s = mkState({
 out.keys = s.columnDefs.map(col => col.key);
 out.widths = s.columnWidths;
 out.total = s.tableWidth;
-s.showDiffOnly = true;
-out.diffKeys = s.columnDefs.map(col => col.key);
 done();
 """)
         self.assertEqual(out["keys"],
@@ -803,10 +801,6 @@ done();
         self.assertEqual(out["widths"]["__actions"], 88)
         self.assertGreaterEqual(out["widths"]["__barcode"], 165)
         self.assertEqual(out["total"], sum(out["widths"].values()))
-        # 只看差異時僅框色有差,材質與詞條的欄位一起收起來
-        self.assertEqual(out["diffKeys"],
-                         ["__actions", "f2", "__models", "__price",
-                          "__barcode", "__status"])
 
     def test_manual_column_width_is_remembered_per_category(self):
         """欄寬依種類記在本機儲存(僅本次執行有效,私密模式下不跨啟動)。"""
@@ -872,7 +866,10 @@ done();
         html = (STATIC / "variant_batch.html").read_text(encoding="utf-8")
         self.assertIn('@click="inputCollapsed=!inputCollapsed"', html)
         self.assertNotIn('@click="inputCollapsed=false"', html)
-        self.assertIn("點此收合", html)
+        self.assertIn("收合 ▲", html)
+        # 收合／展開套公版滑動動畫,箭頭併入提示文字(不再有獨立箭頭欄)
+        self.assertIn('<transition name="collapse">', html)
+        self.assertNotIn("batch-input-caret", html)
 
     def test_template_is_workbook_without_edit_popup(self):
         html = (STATIC / "variant_batch.html").read_text(encoding="utf-8")
@@ -883,9 +880,9 @@ done();
         self.assertRegex(html, r"js/variant_batch_logic\.js\?v=\d+")
         # 表頭改為依 columnDefs 逐欄輸出(含 colgroup 欄寬),不再逐欄寫死
         self.assertIn('<th v-for="col in columnDefs"', html)
-        self.assertIn(
-            '<td v-if="featureField && (!showDiffOnly || '
-            'diffFields.has(featureField.name))"', html)
+        self.assertIn('<td v-if="featureField"', html)
+        # 只看差異的切換已移除,差異仍以 cell-diff 底色標示
+        self.assertNotIn("showDiffOnly", html)
         self.assertIn(
             "'cell-diff':diffFields.has(featureField.name)", html)
         self.assertIn(

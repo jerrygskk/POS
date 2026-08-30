@@ -256,7 +256,7 @@ class TestDeleteEmptyCategoryCascade(FacadeTestCase):
         category_id = self.create_category("template")
         specific_field_id = self.create_field("size", category_id)
         self.create_options(specific_field_id, ("full",))
-        common_field_id = next(item["field_id"] for item in self.invoke("fields.list", {"common": 1}) if item["name"] == "顏色")
+        common_field_id = self.invoke("fields.create", {"name": "顏色", "field_type": "select"})["field_id"]
         other_category_id = self.create_category("other")
         self.invoke("categories.set_common_fields", {"id": other_category_id, "field_ids": [common_field_id]})
         self.invoke("categories.set_common_fields", {"id": category_id, "field_ids": [common_field_id]})

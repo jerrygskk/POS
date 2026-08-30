@@ -183,6 +183,165 @@ from lib.legacy_migrations import (
     _mig_variant_issue,
 )
 
+def _mig_split_style_field(conn):
+    """把全域共用的「款式」欄依種類拆成各自一份,選項不互通。
+
+    原本「顏色」「款式」同為全域欄(新種類預設模板),但款式的詞彙各種類完全不同
+    (手機殼「磁吸支架(附掛環扣)」vs AppleWatch玻璃「3D全玻璃」),共用會讓建檔候選
+    混進別種類的款式。特性詞條先前已因同樣理由改為各種類一份,款式當時漏改。
+
+    搬移規則:每個掛過此欄的種類各建一份同名 select 欄,只複製「該種類真的用過」
+    的選項值(兩個種類都用過的值兩邊各一份),VariantAttribute 改指新選項;
+    沒有任何種類用過的選項(款式A~C 種子)丟掉,原全域欄清空後刪除。
+    """
+    rows = conn.execute(
+        "SELECT f.field_id FROM AttributeField f WHERE f.name='款式' "
+        "AND f.field_type='select' AND (SELECT COUNT(*) FROM CategoryField cf "
+        "WHERE cf.field_id=f.field_id) > 1").fetchall()
+    for row in rows:
+        old_fid = row[0]
+        cats = [r[0] for r in conn.execute(
+            "SELECT category_id FROM CategoryField WHERE field_id=? ORDER BY category_id",
+            (old_fid,))]
+        for cid in cats:
+            new_fid = conn.execute(
+                "INSERT INTO AttributeField(name,field_type) VALUES('款式','select')"
+            ).lastrowid
+            used = conn.execute(
+                "SELECT DISTINCT o.option_id, o.value, o.sort, o.active "
+                "FROM AttributeOption o JOIN VariantAttribute va ON va.option_id=o.option_id "
+                "JOIN Variant v ON v.variant_id=va.variant_id "
+                "JOIN Product p ON p.product_id=v.product_id "
+                "WHERE o.field_id=? AND p.category_id=? ORDER BY o.sort, o.option_id",
+                (old_fid, cid)).fetchall()
+            copies = {}
+            for opt_id, value, sort, active in used:
+                copy_id = conn.execute(
+                    "INSERT INTO AttributeOption(field_id,value,sort,active) "
+                    "VALUES(?,?,?,?)", (new_fid, value, sort, active)).lastrowid
+                conn.execute(
+                    "UPDATE VariantAttribute SET field_id=?, option_id=? "
+                    "WHERE option_id=? AND variant_id IN ("
+                    "  SELECT v.variant_id FROM Variant v JOIN Product p "
+                    "  ON p.product_id=v.product_id WHERE p.category_id=?)",
+                    (new_fid, copy_id, opt_id, cid))
+                # 限定型號(特別色)跟著複製,否則新選項會從「限定」變成「通用」
+                conn.execute(
+                    "INSERT INTO OptionModel(option_id,model_id) "
+                    "SELECT ?, model_id FROM OptionModel WHERE option_id=?",
+                    (copy_id, opt_id))
+                copies[opt_id] = copy_id
+            row_sort, required, active, default_id = conn.execute(
+                "SELECT sort, required, active, default_option_id FROM CategoryField "
+                "WHERE category_id=? AND field_id=?", (cid, old_fid)).fetchone()
+            conn.execute(
+                "INSERT INTO CategoryField(category_id,field_id,sort,required,active,"
+                "default_option_id) VALUES(?,?,?,?,?,?)",
+                (cid, new_fid, row_sort, required, active, copies.get(default_id)))
+        conn.execute("DELETE FROM CategoryField WHERE field_id=?", (old_fid,))
+        conn.execute(
+            "DELETE FROM OptionModel WHERE option_id IN "
+            "(SELECT option_id FROM AttributeOption WHERE field_id=?)", (old_fid,))
+        conn.execute("DELETE FROM AttributeOption WHERE field_id=?", (old_fid,))
+        conn.execute("DELETE FROM AttributeField WHERE field_id=?", (old_fid,))
+    # 沒掛任何種類、也沒人填過值的全域款式欄(全新資料庫的種子)一併清掉:
+    # 款式改為建立種類時各自新建,不再留一份共用主檔。
+    conn.execute(
+        "DELETE FROM AttributeOption WHERE field_id IN ("
+        "  SELECT f.field_id FROM AttributeField f WHERE f.name='款式' "
+        "  AND NOT EXISTS(SELECT 1 FROM CategoryField cf WHERE cf.field_id=f.field_id) "
+        "  AND NOT EXISTS(SELECT 1 FROM VariantAttribute va WHERE va.field_id=f.field_id))")
+    conn.execute(
+        "DELETE FROM AttributeField WHERE name='款式' "
+        "AND NOT EXISTS(SELECT 1 FROM CategoryField cf WHERE cf.field_id=AttributeField.field_id) "
+        "AND NOT EXISTS(SELECT 1 FROM VariantAttribute va WHERE va.field_id=AttributeField.field_id) "
+        "AND NOT EXISTS(SELECT 1 FROM AttributeOption o WHERE o.field_id=AttributeField.field_id)")
+
+
+def _mig_split_shared_fields(conn):
+    """把所有跨種類共用的規格欄依種類拆成各自一份(款式之外的其餘欄)。
+
+    v14 先拆了款式;實務上「顏色」也一樣會混:手機殼的天峰藍不該出現在傳輸線的
+    候選裡。與其教店員分辨哪些欄共用,不如一律不共用——設定頁就不必解釋這件事。
+    搬移規則同 v14:每個種類各建一份同名同型別的欄,只複製該種類用過的選項
+    (含限定型號與模板預設值),text 欄直接改指新欄;沒人用過的選項丟掉,原欄刪除。
+    """
+    shared = conn.execute(
+        "SELECT f.field_id, f.name, f.field_type, f.active FROM AttributeField f "
+        "WHERE (SELECT COUNT(*) FROM CategoryField cf WHERE cf.field_id=f.field_id) > 1"
+    ).fetchall()
+    for old_fid, name, field_type, active in shared:
+        _split_field_by_category(conn, old_fid, name, field_type, active)
+    # 沒掛任何種類、也沒人填過值的全域欄(種子的商品描述之類)一併清掉:
+    # 欄位一律由種類自己建,不再留共用主檔。
+    conn.execute(
+        "DELETE FROM AttributeOption WHERE field_id IN ("
+        "  SELECT f.field_id FROM AttributeField f "
+        "  WHERE NOT EXISTS(SELECT 1 FROM CategoryField cf WHERE cf.field_id=f.field_id) "
+        "  AND NOT EXISTS(SELECT 1 FROM VariantAttribute va WHERE va.field_id=f.field_id))")
+    conn.execute(
+        "DELETE FROM AttributeField WHERE "
+        "NOT EXISTS(SELECT 1 FROM CategoryField cf WHERE cf.field_id=AttributeField.field_id) "
+        "AND NOT EXISTS(SELECT 1 FROM VariantAttribute va "
+        "               WHERE va.field_id=AttributeField.field_id) "
+        "AND NOT EXISTS(SELECT 1 FROM AttributeOption o "
+        "               WHERE o.field_id=AttributeField.field_id)")
+
+
+def _split_field_by_category(conn, old_fid, name, field_type, active=1):
+    """把一個跨種類共用的欄拆成每個種類各一份,並刪掉原欄。"""
+    cats = [r[0] for r in conn.execute(
+        "SELECT category_id FROM CategoryField WHERE field_id=? ORDER BY category_id",
+        (old_fid,))]
+    for cid in cats:
+        new_fid = conn.execute(
+            "INSERT INTO AttributeField(name,field_type,active) VALUES(?,?,?)",
+            (name, field_type, active)).lastrowid
+        copies = {}
+        used = conn.execute(
+            "SELECT DISTINCT o.option_id, o.value, o.sort, o.active "
+            "FROM AttributeOption o JOIN VariantAttribute va ON va.option_id=o.option_id "
+            "JOIN Variant v ON v.variant_id=va.variant_id "
+            "JOIN Product p ON p.product_id=v.product_id "
+            "WHERE o.field_id=? AND p.category_id=? ORDER BY o.sort, o.option_id",
+            (old_fid, cid)).fetchall()
+        for opt_id, value, sort, opt_active in used:
+            copy_id = conn.execute(
+                "INSERT INTO AttributeOption(field_id,value,sort,active) VALUES(?,?,?,?)",
+                (new_fid, value, sort, opt_active)).lastrowid
+            conn.execute(
+                "UPDATE VariantAttribute SET field_id=?, option_id=? "
+                "WHERE option_id=? AND variant_id IN ("
+                "  SELECT v.variant_id FROM Variant v JOIN Product p "
+                "  ON p.product_id=v.product_id WHERE p.category_id=?)",
+                (new_fid, copy_id, opt_id, cid))
+            # 限定型號(特別色)跟著複製,否則新選項會從「限定」變成「通用」
+            conn.execute(
+                "INSERT INTO OptionModel(option_id,model_id) "
+                "SELECT ?, model_id FROM OptionModel WHERE option_id=?",
+                (copy_id, opt_id))
+            copies[opt_id] = copy_id
+        # text 欄沒有選項,值直接改指新欄
+        conn.execute(
+            "UPDATE VariantAttribute SET field_id=? WHERE field_id=? AND option_id IS NULL "
+            "AND variant_id IN (SELECT v.variant_id FROM Variant v JOIN Product p "
+            "ON p.product_id=v.product_id WHERE p.category_id=?)",
+            (new_fid, old_fid, cid))
+        row_sort, required, cf_active, default_id = conn.execute(
+            "SELECT sort, required, active, default_option_id FROM CategoryField "
+            "WHERE category_id=? AND field_id=?", (cid, old_fid)).fetchone()
+        conn.execute(
+            "INSERT INTO CategoryField(category_id,field_id,sort,required,active,"
+            "default_option_id) VALUES(?,?,?,?,?,?)",
+            (cid, new_fid, row_sort, required, cf_active, copies.get(default_id)))
+    conn.execute("DELETE FROM CategoryField WHERE field_id=?", (old_fid,))
+    conn.execute(
+        "DELETE FROM OptionModel WHERE option_id IN "
+        "(SELECT option_id FROM AttributeOption WHERE field_id=?)", (old_fid,))
+    conn.execute("DELETE FROM AttributeOption WHERE field_id=?", (old_fid,))
+    conn.execute("DELETE FROM AttributeField WHERE field_id=?", (old_fid,))
+
+
 MIGRATIONS = [
     (BASE_VERSION + 1, _mig_phone_brand),
     (BASE_VERSION + 2, _mig_variant_attributes),
@@ -196,6 +355,8 @@ MIGRATIONS = [
     (BASE_VERSION + 10, _mig_drop_brand_active),
     (BASE_VERSION + 11, _mig_backfill_brand_category),
     (BASE_VERSION + 12, _mig_variant_issue),
+    (BASE_VERSION + 13, _mig_split_style_field),
+    (BASE_VERSION + 14, _mig_split_shared_fields),
 ]
 
 # 最新版號 = 初版 + 遷移筆數;全新 DB 建 SCHEMA 即為此版

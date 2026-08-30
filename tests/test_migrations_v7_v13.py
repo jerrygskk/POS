@@ -133,6 +133,18 @@ def _table_cols(conn):
     return out
 
 
+def _init_v7_v13(db):
+    """只跑到 v13 的升級。
+
+    v14/v15 會把 v8 合併出來的共用欄再依種類拆開(規格欄一律不跨種類共用),
+    那是後面兩批遷移的行為,不是本批的驗證範圍;混在一起驗會看不出哪一批出錯。
+    """
+    limit = db_schema.BASE_VERSION + 12
+    with patch.object(db_schema, "MIGRATIONS",
+                      [m for m in db_schema.MIGRATIONS if m[0] <= limit]):
+        init_db(db)
+
+
 class TestMigrationV7toV13(unittest.TestCase):
     def setUp(self):
         db = _new_v6_db()
@@ -185,7 +197,7 @@ class TestMigrationV7toV13(unittest.TestCase):
         conn.commit()
         conn.close()
         self.db = db
-        init_db(db)  # 觸發 v7–v13 升級
+        _init_v7_v13(db)  # 只觸發 v7–v13
         self.conn = get_conn(db)
 
     def tearDown(self):
@@ -196,8 +208,7 @@ class TestMigrationV7toV13(unittest.TestCase):
 
     def test_version_bumped(self):
         v = int(self._one("SELECT value FROM Setting WHERE key='schema_version'")["value"])
-        self.assertEqual(v, db_schema.SCHEMA_VERSION)
-        self.assertEqual(v, 13)
+        self.assertEqual(v, db_schema.BASE_VERSION + 12)   # 本批只跑到 v13
 
     # v7 -----------------------------------------------------------------
     def test_model_mode_from_data(self):
@@ -362,7 +373,7 @@ class TestMigrationConflictAutoResolve(unittest.TestCase):
         """)
         conn.commit()
         conn.close()
-        init_db(db)  # 不應 raise
+        _init_v7_v13(db)  # 不應 raise
         c = get_conn(db)
         try:
             # 種子 text 顏色(field1)已刪除
@@ -421,7 +432,7 @@ class TestMigrationSelectMultiMergeToMulti(unittest.TestCase):
         """)
         conn.commit()
         conn.close()
-        init_db(db)  # 不應 raise
+        _init_v7_v13(db)  # 不應 raise
         c = get_conn(db)
         try:
             # 存活取最小 field_id=1,型態統一為 multi
@@ -523,7 +534,8 @@ class TestMigrationFinalForeignKeyProtection(unittest.TestCase):
             }
             self.assertEqual(before, after)
             self.assertEqual(conn.execute(
-                "SELECT value FROM Setting WHERE key='schema_version'").fetchone()[0], "13")
+                "SELECT value FROM Setting WHERE key='schema_version'").fetchone()[0],
+                str(db_schema.SCHEMA_VERSION))
             self.assertEqual(conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)
             self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
         finally:
