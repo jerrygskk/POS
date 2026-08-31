@@ -88,6 +88,12 @@ def _validate_action_payload(action, payload):
         for key in ("brand_id","product_id"):
             if payload.get(key) is not None and not _is_int(payload[key]):raise ValidationError("識別碼格式不正確")
         return
+    if action=="variants.model_usage":
+        _allow(payload,{"category_id","brand_id","product_id"})
+        if not _is_int(payload.get("category_id")):raise ValidationError("識別碼格式不正確")
+        for key in ("brand_id","product_id"):
+            if payload.get(key) is not None and not _is_int(payload[key]):raise ValidationError("識別碼格式不正確")
+        return
     if action=="variants.update_editor":
         _allow(payload,{"id","fields","model_ids","deleted_barcodes","factory_barcodes","store_barcode_count"})
         if not _is_int(payload.get("id")):raise ValidationError("識別碼格式不正確")
@@ -424,7 +430,7 @@ class ProductService:
 class ProductFacade(BaseFacade):
     ACTIONS = {"products.create", "products.list", "catalog.list", "products.update", "products.delete",
                "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.update_editor", "variants.delete",
-               "variants.batch_create", "variants.batch_precheck", "variants.field_usage", "variants.activate", "variants.issues",
+               "variants.batch_create", "variants.batch_precheck", "variants.field_usage", "variants.model_usage", "variants.activate", "variants.issues",
                "barcodes.scan", "barcodes.add", "barcodes.delete"}
 
     ERROR_MESSAGE = "不支援的商品操作"
@@ -460,6 +466,10 @@ class ProductFacade(BaseFacade):
         if action == "variants.field_usage":
             return product_data.option_usage_in_category(
                 connection, payload["field_id"], payload["category_id"],
+                brand_id=payload.get("brand_id"), product_id=payload.get("product_id"))
+        if action == "variants.model_usage":
+            return product_data.model_usage_in_category(
+                connection, payload["category_id"],
                 brand_id=payload.get("brand_id"), product_id=payload.get("product_id"))
         if action == "barcodes.scan": return s.scan(payload["code"])
         if action == "barcodes.delete": return s.delete_barcode(payload["code"])

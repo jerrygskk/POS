@@ -71,7 +71,7 @@ BODY
             self.fail(result.stderr)
         return json.loads(result.stdout)
 
-    def test_expand_axes_formula_and_diff_fields(self):
+    def test_expand_axes_and_formula(self):
         out = self._run(r'''
 const logic = window.VariantBatchLogic;
 const fields = [
@@ -82,17 +82,11 @@ const expanded = logic.expandAxes(fields, {"顏色":["黑","白"], "長度":["1m
 out.count = expanded.count;
 out.formula = logic.formulaText(expanded.axes);
 out.emptyCount = logic.expandAxes([{name:"備註",field_type:"text"}], {"備註":"新品"}).count;
-const rows = [
-  {attrs:{"顏色":"黑","長度":"1m"}, price:100, barcode:"", model_ids:[]},
-  {attrs:{"顏色":"白","長度":"1m"}, price:100, barcode:"", model_ids:[]},
-];
-out.diff = Array.from(logic.diffFieldNames(rows, fields));
 done();
 ''')
         self.assertEqual(out["count"], 4)
         self.assertEqual(out["formula"], "2 個顏色 × 2 個長度＝4 筆")
         self.assertEqual(out["emptyCount"], 1)
-        self.assertEqual(out["diff"], ["顏色"])
 
     def test_partition_precheck_keeps_structured_errors_and_skips_existing(self):
         out = self._run(r'''
@@ -484,43 +478,6 @@ done();
             ["none", []],
         ])
 
-    def test_feature_tags_participate_in_logic_and_page_diff(self):
-        out = self._run(r'''
-const fields = [
-  {field_id:1,name:"顏色",field_type:"select"},
-  {field_id:2,name:"特性詞條",field_type:"tags"},
-];
-const rows = [
-  {draft_id:"d1",attrs:{"顏色":"黑","特性詞條":["防摔"]},price:100,barcode:"",model_ids:[]},
-  {draft_id:"d2",attrs:{"顏色":"黑","特性詞條":["磁吸"]},price:100,barcode:"",model_ids:[]},
-];
-out.logic = Array.from(window.VariantBatchLogic.diffFieldNames(rows, fields));
-const s = mkState({fields,drafts:rows});
-out.page = Array.from(s.diffFields);
-done();
-''')
-        self.assertEqual(out["logic"], ["特性詞條"])
-        self.assertEqual(out["page"], ["特性詞條"])
-
-    def test_barcode_diff_includes_factory_barcode_and_store_flag(self):
-        out = self._run(r'''
-const logic = window.VariantBatchLogic;
-const base = {attrs:{},price:null,model_ids:[],barcode:"",store:false};
-out.store = Array.from(logic.diffFieldNames([
-  base, {...base,store:true},
-], []));
-out.factory = Array.from(logic.diffFieldNames([
-  base, {...base,barcode:"F-001"},
-], []));
-out.same = Array.from(logic.diffFieldNames([
-  base, {...base},
-], []));
-done();
-''')
-        self.assertEqual(out["store"], ["__barcode"])
-        self.assertEqual(out["factory"], ["__barcode"])
-        self.assertEqual(out["same"], [])
-
     def test_barcode_errors_include_store_prefix_only(self):
         out = self._run(r'''
 const draft = {draft_id:"d1"};
@@ -593,6 +550,30 @@ const s = mkState({productId:5,fields:[{field_id:7,name:"顏色",field_type:"sel
         self.assertEqual(out["kept"], 2)
         self.assertEqual(out["refreshCalls"], 0)
         self.assertFalse(out["submitting"])
+
+    def test_duplicate_status_links_to_the_other_row_only_when_it_exists(self):
+        out = self._run(r'''
+const s = mkState({fields:[{field_id:7,name:"顏色",field_type:"select"}],drafts:[
+  {draft_id:"d1",attrs:{"顏色":"黑"},price:null,model_ids:[],barcode:"",store:false},
+  {draft_id:"d2",attrs:{"顏色":"黑"},price:null,model_ids:[],barcode:"",store:false},
+  {draft_id:"d3",attrs:{"顏色":"白"},price:null,model_ids:[],barcode:"",store:false},
+], precheckErrors:{
+  d2:[{code:"duplicate_signature",field_id:null,related_draft_id:"d1",message:"重複"}],
+  d3:[{code:"duplicate_signature",field_id:null,related_draft_id:"gone",message:"重複"}],
+}});
+out.target = s.duplicateTargetId(s.drafts[1]);
+out.statusD2 = s.rowStatus(s.drafts[1]);
+out.removedTarget = s.duplicateTargetId(s.drafts[2]);
+out.statusD3 = s.rowStatus(s.drafts[2]);
+out.cleanTarget = s.duplicateTargetId(s.drafts[0]);
+done();
+''')
+        self.assertEqual(out["target"], "d1")
+        self.assertEqual(out["statusD2"], "與第 1 筆重複")
+        # 對方已被刪除:不給可點連結,免得點了沒反應
+        self.assertIsNone(out["removedTarget"])
+        self.assertEqual(out["statusD3"], "與已移除的一筆重複")
+        self.assertIsNone(out["cleanTarget"])
 
     def test_existing_variant_text_explains_unavailable_variant(self):
         out = self._run(r'''
@@ -749,7 +730,11 @@ out.longSelect = logic.columnWidth(
   {key:"f1", label:"款式", kind:"select", samples:["黑色巨牆磁吸支架(附掛環扣)"]});
 out.shortSelect = logic.columnWidth({key:"f2", label:"版型", kind:"select", samples:["滿版"]});
 out.statusFloor = logic.columnWidth(
-  {key:"__status", label:"狀態", kind:"text", min:130, max:200, samples:["可建立"]});
+  {key:"__status", label:"狀態", kind:"text", min:96, max:108, samples:["可建立"]});
+// 狀態欄壓窄後,長字串以上限收斂(CSS 讓它折成兩行)
+out.statusCapped = logic.columnWidth(
+  {key:"__status", label:"狀態", kind:"text", min:96, max:108,
+   samples:["請修正 2 項問題", "與第 12 筆重複"]});
 // 適用型號整串會超過上限,以上限收斂(保留省略號,滑鼠移上顯示全文)
 out.modelCapped = logic.columnWidth({key:"__models", label:"適用型號", kind:"button",
   samples:["iPhone 16 Plus、iPhone 15 Plus、iPhone 14 Pro Max"]});
@@ -763,14 +748,15 @@ done();
 """)
         self.assertGreater(out["longSelect"], out["shortSelect"])
         self.assertGreaterEqual(out["longSelect"], 220)
-        self.assertEqual(out["statusFloor"], 130)
+        self.assertEqual(out["statusFloor"], 96)
+        self.assertEqual(out["statusCapped"], 108)
         self.assertEqual(out["modelCapped"], 240)
         self.assertEqual(out["resolved"]["a"], 80)
         self.assertEqual(out["resolved"]["b"], 210)
         self.assertEqual(out["tooSmall"], out["min"])
         self.assertEqual(out["total"], 290)
 
-    def test_column_defs_cover_visible_columns_and_survive_diff_toggle(self):
+    def test_column_defs_cover_visible_columns(self):
         out = self._run(r"""
 const fields = [
   {field_id:1, name:"材質", field_type:"multi"},
@@ -796,9 +782,10 @@ out.total = s.tableWidth;
 done();
 """)
         self.assertEqual(out["keys"],
-                         ["__actions", "f1", "f2", "f9", "__models",
+                         ["__seq", "__actions", "f1", "f2", "f9", "__models",
                           "__price", "__barcode", "__status"])
-        self.assertEqual(out["widths"]["__actions"], 88)
+        self.assertEqual(out["widths"]["__seq"], 44)
+        self.assertEqual(out["widths"]["__actions"], 72)
         self.assertGreaterEqual(out["widths"]["__barcode"], 165)
         self.assertEqual(out["total"], sum(out["widths"].values()))
 
@@ -881,10 +868,10 @@ done();
         # 表頭改為依 columnDefs 逐欄輸出(含 colgroup 欄寬),不再逐欄寫死
         self.assertIn('<th v-for="col in columnDefs"', html)
         self.assertIn('<td v-if="featureField"', html)
-        # 只看差異的切換已移除,差異仍以 cell-diff 底色標示
+        # 差異高亮整套移除:儲存格底色只表示「這格要修」
         self.assertNotIn("showDiffOnly", html)
-        self.assertIn(
-            "'cell-diff':diffFields.has(featureField.name)", html)
+        self.assertNotIn("cell-diff", html)
+        self.assertNotIn("diffFields", html)
         self.assertIn(
             "fieldOptionInactive(f,value) ? '（停用，將重新啟用）' : ''",
             html,
@@ -1058,10 +1045,9 @@ state.$refs = {batchPage:{
         self.assertEqual(store_check.get("min-width"), "0")
         self.assertEqual(store_check.get("white-space"), "nowrap")
         self.assertEqual(store_check.get("overflow"), "hidden")
-        self.assertEqual(status.get("white-space"), "nowrap")
+        # 狀態欄是唯一允許折行的欄(欄寬壓窄,「與第 N 筆重複」要放得下)
+        self.assertEqual(status.get("white-space"), "normal")
         self.assertEqual(status.get("overflow"), "hidden")
-        self.assertEqual(status.get("text-overflow"), "ellipsis")
-        self.assertNotEqual(status.get("overflow-wrap"), "anywhere")
         self.assertIn('<td v-if="modelMode===\'required\'" class="batch-cell-model"', html)
         self.assertIn('<td class="batch-cell-price"', html)
         self.assertIn('<td class="batch-cell-barcode"', html)

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>款式修改</title>
-<link rel="stylesheet" href="css/pos.css?v=177">
-<link rel="stylesheet" href="css/dialog-theme.css?v=177">
+<link rel="stylesheet" href="css/pos.css?v=191">
+<link rel="stylesheet" href="css/dialog-theme.css?v=191">
 </head>
 <body>
 <div id="variant-editor" v-cloak>
@@ -22,7 +22,8 @@
 
         <section class="dialog-section" v-if="usesModel">
           <h2>適用手機型號</h2>
-          <model-picker :models="models" v-model:model_ids="modelIds"></model-picker>
+          <model-picker :models="models" :usage="modelUsage"
+                        v-model:model_ids="modelIds"></model-picker>
         </section>
 
         <section class="dialog-section">
@@ -66,13 +67,13 @@
     </footer>
   </form>
 </div>
-<script src="js/vue.global.prod.js?v=177"></script>
-<script src="js/api.js?v=177"></script>
-<script src="js/confirm.js?v=177"></script>
-<script src="js/catalogfields.js?v=177"></script>
-<script src="js/modelpicker.js?v=177"></script>
-<script src="js/optpicker.js?v=177"></script>
-<script src="js/attrfields.js?v=177"></script>
-<script src="js/variant_editor.js?v=177"></script>
+<script src="js/vue.global.prod.js?v=191"></script>
+<script src="js/api.js?v=191"></script>
+<script src="js/confirm.js?v=191"></script>
+<script src="js/catalogfields.js?v=191"></script>
+<script src="js/modelpicker.js?v=191"></script>
+<script src="js/optpicker.js?v=191"></script>
+<script src="js/attrfields.js?v=191"></script>
+<script src="js/variant_editor.js?v=191"></script>
 </body>
 </html>

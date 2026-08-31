@@ -144,7 +144,7 @@ class VariantBatchService:
         # 必填檢查(cf.required=1 的可輸入欄)——軟性:容錯建立以 missing_required 記錄
         for f in writable.values():
             if f["required"] and f["field_id"] not in provided:
-                errors.append(_err("missing_required", f"必填規格「{f['name']}」未填",
+                errors.append(_err("missing_required", f"「{f['name']}」未填",
                                    field_id=f["field_id"]))
                 missing_field_ids.append(f["field_id"])
         # 適用型號
@@ -155,7 +155,7 @@ class VariantBatchService:
                 fail_hard("model_not_found", f"型號(id={mid})不存在")
         model_required_missing = model_mode == "required" and not model_ids
         if model_required_missing:
-            errors.append(_err("missing_models", "此種類須指定適用型號"))
+            errors.append(_err("missing_models", "需指定型號"))
         for mid in model_ids:
             sig.add(("m", mid))
         # 條碼
@@ -165,9 +165,13 @@ class VariantBatchService:
             code = code.strip() if isinstance(code, str) else code
             source = bc.get("source") or ("factory" if code else "store")
             if has_store_barcode_prefix(code):
-                fail_hard("store_prefix_barcode", "TL 開頭條碼僅供系統自動產生")
+                fail_hard("store_prefix_barcode", "TL 不得作為自訂開頭條碼")
                 continue
             barcodes.append({"barcode": code or None, "source": source})
+        # 每筆至少要有一組條碼:沒有廠商條碼就得配自取碼。軟性錯誤——
+        # 批次建立是全有全無,等於擋住;容錯建立(匯入舊資料)不受影響。
+        if not barcodes:
+            errors.append(_err("missing_barcode", "需填條碼或配自取碼"))
         price = draft.get("price")
         active = 1 if draft.get("active", 1) else 0
         return {
@@ -237,14 +241,14 @@ class VariantBatchService:
                 if code in seen_codes and seen_codes[code][0] != idx:
                     first_idx, first_draft_id = seen_codes[code]
                     r["errors"].append(_err(
-                        "duplicate_barcode", f"條碼「{code}」與第 {first_idx + 1} 筆重複",
+                        "duplicate_barcode", f"此條碼與第 {first_idx + 1} 筆重複",
                         related_draft_id=first_draft_id))
                 else:
                     row = self.conn.execute(
                         "SELECT variant_id FROM Barcode WHERE barcode=?", (code,)).fetchone()
                     if row:
                         r["errors"].append(_err(
-                            "duplicate_barcode", f"條碼「{code}」已存在",
+                            "duplicate_barcode", "此條碼已存在",
                             related_variant_id=row["variant_id"]))
                 seen_codes.setdefault(code, (idx, r["draft_id"]))
         return resolved, {"created": created, "reactivated": reactivated,

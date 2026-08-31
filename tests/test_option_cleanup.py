@@ -49,7 +49,8 @@ class OptionCleanupTests(ConnTestCase):
     def _make_variant(self, color, length="1m"):
         res = self.products.invoke("variants.batch_create", {
             "product_id": self.pid,
-            "drafts": [{"draft_id": "d", "attributes": {"顏色": color, "長度": length}}]})
+            "drafts": [{"draft_id": "d", "attributes": {"顏色": color, "長度": length},
+                        "barcodes": [{"source": "store"}]}]})
         return res["results"][0]["variant_id"]
 
     def test_update_to_zero_usage_auto_deletes(self):

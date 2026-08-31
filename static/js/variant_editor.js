@@ -11,7 +11,7 @@ window.VariantEditorApp = {
       variant: null,
       fields: [],
       fieldUsage: {},
-      models: [],
+      models: [], modelUsage: [],
       attrs: {},
       modelIds: [],
       price: null,
@@ -42,10 +42,12 @@ window.VariantEditorApp = {
         const context = await API.invoke("desktop.child_window.context", {});
         const product = context.context.product;
         const variant = context.context.variant;
-        const [fields, models, categories] = await Promise.all([
+        const [fields, models, categories, modelUsage] = await Promise.all([
           API.categoryFields(product.category_id),
           API.listModels({}),
           API.listCategories({}),
+          API.modelUsage(product.category_id,
+                         window.CatalogFields.usageScope(product)),
         ]);
         // 適用型號是否使用由種類設定決定(與新增款式、商品資料庫一致)
         const cat = categories.find(c => c.category_id === product.category_id);
@@ -60,7 +62,7 @@ window.VariantEditorApp = {
           ...barcode, existing: true,
         }));
         Object.assign(this, {
-          product, variant, fields, models, fieldUsage, attrs,
+          product, variant, fields, models, modelUsage, fieldUsage, attrs,
           modelIds, price: variant.price, barcodes, modelMode,
         });
         this.ready = true;

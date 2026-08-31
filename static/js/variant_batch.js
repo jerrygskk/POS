@@ -11,7 +11,7 @@ window.PosPages["page-variant-batch"] = {
     return {
       categories: [], products: [], models: [],
       catId: null, productId: null,
-      fields: [], fieldUsage: {}, tagUsage: [],
+      fields: [], fieldUsage: {}, tagUsage: [], modelUsage: [],
       input: this.blankInput(),
       drafts: [], skipped: [], precheckErrors: {},
       seq: 0, precheckSeq: 0, _precheckTimer: null, productLoadSeq: 0,
@@ -38,12 +38,11 @@ window.PosPages["page-variant-batch"] = {
     },
     previewCount() { return this.axesInfo.count; },
     inputFormula() { return window.VariantBatchLogic.formulaText(this.axesInfo.axes); },
-    diffFields() {
-      return window.VariantBatchLogic.diffFieldNames(this.drafts, this.fields);
-    },
     columnDefs() {
       const L = window.VariantBatchLogic;
-      const defs = [{ key: "__actions", label: "操作", kind: "text", min: 88, max: 88 }];
+      // 列號欄:重複狀態寫「與第 N 筆重複」,沒有列號使用者得自己數
+      const defs = [{ key: "__seq", label: "#", kind: "text", min: 44, max: 44 },
+                    { key: "__actions", label: "操作", kind: "text", min: 72, max: 72 }];
       for (const field of this.formalFields) {
         defs.push({
           key: "f" + field.field_id,
@@ -73,7 +72,7 @@ window.PosPages["page-variant-batch"] = {
         samples: this.drafts.map(d => d.barcode),
       });
       defs.push({
-        key: "__status", label: "狀態", kind: "text", min: 130, max: 200,
+        key: "__status", label: "狀態", kind: "text", min: 96, max: 108,
         samples: this.drafts.map(d => this.rowStatus(d)),
       });
       return defs;
@@ -161,13 +160,14 @@ window.PosPages["page-variant-batch"] = {
         this.fields = [];
         this.fieldUsage = {};
         this.tagUsage = [];
+        this.modelUsage = [];
         this.input = this.blankInput();
         return;
       }
       const categoryId = this.catId;
       const product = this.product;
       await this.guard(async () => {
-        let fields, fieldUsage, tagUsage;
+        let fields, fieldUsage, tagUsage, modelUsage;
         try {
           fields = await API.categoryFields(categoryId);
           const formalFields = fields.filter(field => field.field_type !== "tags");
@@ -178,6 +178,8 @@ window.PosPages["page-variant-batch"] = {
           const featureField = fields.find(field => field.field_type === "tags") || null;
           tagUsage = featureField
             ? await API.fieldUsage(categoryId, featureField.field_id, scope) : [];
+          modelUsage = this.modelMode === "required"
+            ? await API.modelUsage(categoryId, scope) : [];
         } catch (err) {
           if (loadSeq === this.productLoadSeq) throw err;
           return;
@@ -186,6 +188,7 @@ window.PosPages["page-variant-batch"] = {
         this.fields = fields;
         this.fieldUsage = fieldUsage;
         this.tagUsage = tagUsage;
+        this.modelUsage = modelUsage;
         this.resetInput();
         this.productReady = true;
       });
@@ -222,7 +225,7 @@ window.PosPages["page-variant-batch"] = {
         this.drafts = this.drafts.concat(rows);
         this.doneMsg = "";
         await this.runPrecheck();
-        this.inputCollapsed = true;
+        // 產生後不自動收合組合輸入區:收合與否交給使用者按標題列切換
         this.resetInput();
       } finally {
         this.generating = false;
@@ -397,10 +400,27 @@ window.PosPages["page-variant-batch"] = {
     },
     barcodeErrors(draft) {
       return this.errorsFor(draft).filter(err =>
-        err.code === "duplicate_barcode" || err.code === "store_prefix_barcode");
+        err.code === "duplicate_barcode" || err.code === "store_prefix_barcode"
+        || err.code === "missing_barcode");
     },
     duplicateErrors(draft) {
       return this.errorsFor(draft).filter(err => err.code === "duplicate_signature");
+    },
+    // 「與第 N 筆重複」可點:把對方那列捲進畫面並閃一下,不必自己數
+    duplicateTargetId(draft) {
+      const error = this.duplicateErrors(draft)[0];
+      if (!error || !error.related_draft_id) return null;
+      return this.drafts.some(d => d.draft_id === error.related_draft_id)
+        ? error.related_draft_id : null;
+    },
+    gotoDraft(draftId) {
+      const row = this.$el.querySelector(`tr[data-draft="${draftId}"]`);
+      if (!row) return;
+      row.scrollIntoView({ block: "center", behavior: "smooth" });
+      row.classList.remove("flash");
+      void row.offsetWidth;
+      row.classList.add("flash");
+      setTimeout(() => row.classList.remove("flash"), 1400);
     },
     errorText(errors) {
       return (errors || []).map(err => err.message || "資料有誤").join("；");

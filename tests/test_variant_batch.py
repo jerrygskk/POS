@@ -60,7 +60,7 @@ class VariantBatchTests(ConnTestCase):
         svc = VariantBatchService(conn)
         resolved, _ = svc._validate_batch({"product_id": self.pid, "drafts": [
             {"draft_id": "d1", "attributes": {"顏色": "全新色值X"},
-             "model_ids": [], "barcodes": []}]}, dry=True)
+             "model_ids": [], "barcodes": [{"source": "store"}]}]}, dry=True)
         after = [tuple(r) for r in conn.execute(
             "SELECT option_id,value,active FROM AttributeOption ORDER BY option_id")]
         self.assertEqual(before, after)
@@ -70,7 +70,7 @@ class VariantBatchTests(ConnTestCase):
     def test_errors_are_structured(self):
         try:
             self.facade.invoke("variants.batch_create", {"product_id": self.pid, "drafts": [
-                {"draft_id": "d1", "attributes": {"長度": "1m"}}]})
+                {"barcodes": [{"source": "store"}], "draft_id": "d1", "attributes": {"長度": "1m"}}]})
             self.fail("應整批拒絕")
         except Exception as exc:
             err = exc.details[0]["errors"][0]
@@ -81,8 +81,8 @@ class VariantBatchTests(ConnTestCase):
     def test_duplicate_within_batch_carries_related_draft_id(self):
         try:
             self.facade.invoke("variants.batch_create", {"product_id": self.pid, "drafts": [
-                {"draft_id": "a", "attributes": {"顏色": "紅"}},
-                {"draft_id": "b", "attributes": {"顏色": "紅"}}]})
+                {"barcodes": [{"source": "store"}], "draft_id": "a", "attributes": {"顏色": "紅"}},
+                {"barcodes": [{"source": "store"}], "draft_id": "b", "attributes": {"顏色": "紅"}}]})
             self.fail("應整批拒絕")
         except Exception as exc:
             errs = [e for d in exc.details for e in d["errors"]
@@ -92,12 +92,12 @@ class VariantBatchTests(ConnTestCase):
 
     def test_precheck_reports_without_writing(self):
         self.facade.invoke("variants.batch_create", {"product_id": self.pid, "drafts": [
-            {"draft_id": "base", "attributes": {"顏色": "紅"}}]})
+            {"barcodes": [{"source": "store"}], "draft_id": "base", "attributes": {"顏色": "紅"}}]})
         conn = self._fresh()
         before = self._table_counts(conn)
         res = self.facade.invoke("variants.batch_precheck", {"product_id": self.pid, "drafts": [
-            {"draft_id": "d1", "attributes": {"顏色": "紅"}},
-            {"draft_id": "d2", "attributes": {"顏色": "全新色值Y"}}]})
+            {"barcodes": [{"source": "store"}], "draft_id": "d1", "attributes": {"顏色": "紅"}},
+            {"barcodes": [{"source": "store"}], "draft_id": "d2", "attributes": {"顏色": "全新色值Y"}}]})
         self.assertEqual(self._table_counts(conn), before)
         conn.close()
         self.assertTrue(res["results"][0]["existing_duplicate"])
@@ -109,9 +109,9 @@ class VariantBatchTests(ConnTestCase):
 
     def test_precheck_matches_batch_create_verdict(self):
         ok_payload = {"product_id": self.pid, "drafts": [
-            {"draft_id": "d1", "attributes": {"顏色": "紅"}, "price": 100}]}
+            {"barcodes": [{"source": "store"}], "draft_id": "d1", "attributes": {"顏色": "紅"}, "price": 100}]}
         bad_payload = {"product_id": self.pid, "drafts": [
-            {"draft_id": "d1", "attributes": {"長度": "1m"}}]}
+            {"barcodes": [{"source": "store"}], "draft_id": "d1", "attributes": {"長度": "1m"}}]}
         self.assertEqual(self.facade.invoke(
             "variants.batch_precheck", ok_payload)["summary"]["invalid"], 0)
         self.assertTrue(self.facade.invoke(
@@ -149,8 +149,8 @@ class VariantBatchTests(ConnTestCase):
         try:
             self.facade.invoke("variants.batch_create", {
                 "product_id": self.pid, "drafts": [
-                    {"draft_id": "a", "attributes": {"顏色": "紅"}},
-                    {"draft_id": "b", "attributes": {"長度": "1m"}},  # 缺必填顏色
+                    {"barcodes": [{"source": "store"}], "draft_id": "a", "attributes": {"顏色": "紅"}},
+                    {"barcodes": [{"source": "store"}], "draft_id": "b", "attributes": {"長度": "1m"}},  # 缺必填顏色
                 ]})
             self.fail("應該 raise")
         except Exception as exc:
@@ -168,10 +168,75 @@ class VariantBatchTests(ConnTestCase):
         try:
             self.facade.invoke("variants.batch_create", {
                 "product_id": self.pid,
-                "drafts": [{"draft_id": "a", "attributes": {"顏色": "紅"}}]})
+                "drafts": [{"barcodes": [{"source": "store"}], "draft_id": "a", "attributes": {"顏色": "紅"}}]})
             self.fail("應該 raise")
         except Exception as exc:
             self.assertTrue(getattr(exc, "details", None))
+
+    def test_batch_create_requires_a_barcode_or_store_code(self):
+        """每筆至少要有一組條碼:沒有廠商條碼就得配自取碼。"""
+        no_code = {"product_id": self.pid, "drafts": [
+            {"draft_id": "a", "attributes": {"顏色": "紅"}, "barcodes": []}]}
+        res = self.facade.invoke("variants.batch_precheck", no_code)
+        self.assertEqual([e["code"] for e in res["results"][0]["errors"]],
+                         ["missing_barcode"])
+        with self.assertRaises(Exception):
+            self.facade.invoke("variants.batch_create", no_code)
+        conn = self._fresh()
+        self.assertEqual(self._variant_count(conn), 0)
+        conn.close()
+        # 只勾自取碼即可通過
+        self.facade.invoke("variants.batch_create", {"product_id": self.pid, "drafts": [
+            {"draft_id": "a", "attributes": {"顏色": "紅"},
+             "barcodes": [{"source": "store"}]}]})
+        conn = self._fresh()
+        self.assertEqual(self._variant_count(conn), 1)
+        conn.close()
+
+    def test_model_usage_marks_lead_by_product_then_brand(self):
+        """型號候選前排:這個產品用過的優先,產品沒紀錄退回同廠牌用過的。"""
+        from lib.product_data import model_usage_in_category
+        conn = self._fresh()
+        pb = conn.execute("INSERT INTO PhoneBrand(name) VALUES('iPhone')").lastrowid
+        m1 = conn.execute("INSERT INTO PhoneModel(phone_brand_id,name) VALUES(?,?)",
+                          (pb, "15")).lastrowid
+        m2 = conn.execute("INSERT INTO PhoneModel(phone_brand_id,name) VALUES(?,?)",
+                          (pb, "16")).lastrowid
+        m3 = conn.execute("INSERT INTO PhoneModel(phone_brand_id,name) VALUES(?,?)",
+                          (pb, "17")).lastrowid
+        bid = conn.execute("INSERT INTO Brand(name) VALUES('某廠')").lastrowid
+        conn.execute("UPDATE Product SET brand_id=? WHERE product_id=?", (bid, self.pid))
+        other = conn.execute(
+            "INSERT INTO Product(name,category_id,brand_id) VALUES(?,?,?)",
+            ("同廠牌另一個產品", self.cid, bid)).lastrowid
+        v1 = conn.execute("INSERT INTO Variant(product_id) VALUES(?)", (self.pid,)).lastrowid
+        conn.execute("INSERT INTO VariantModel(variant_id,model_id) VALUES(?,?)", (v1, m1))
+        v2 = conn.execute("INSERT INTO Variant(product_id) VALUES(?)", (other,)).lastrowid
+        conn.execute("INSERT INTO VariantModel(variant_id,model_id) VALUES(?,?)", (v2, m2))
+        conn.commit()
+
+        by_product = {r["model_id"]: r for r in
+                      model_usage_in_category(conn, self.cid, brand_id=bid,
+                                              product_id=self.pid)}
+        self.assertTrue(by_product[m1]["lead"])
+        self.assertFalse(by_product[m2]["lead"])   # 產品有紀錄就不退回廠牌
+        self.assertFalse(by_product[m3]["lead"])
+        self.assertEqual(by_product[m2]["usage_count"], 1)  # 種類次數仍算得到
+
+        # 全新產品(自己沒紀錄)退回同廠牌用過的型號
+        fresh = conn.execute(
+            "INSERT INTO Product(name,category_id,brand_id) VALUES(?,?,?)",
+            ("全新產品", self.cid, bid)).lastrowid
+        by_brand = {r["model_id"]: r for r in
+                    model_usage_in_category(conn, self.cid, brand_id=bid,
+                                            product_id=fresh)}
+        self.assertTrue(by_brand[m1]["lead"] and by_brand[m2]["lead"])
+        self.assertFalse(by_brand[m3]["lead"])
+
+        # 都沒有紀錄時不指定前排(前端全部展開)
+        none_lead = model_usage_in_category(conn, self.cid)
+        self.assertFalse(any(r["lead"] for r in none_lead))
+        conn.close()
 
     # ---- C 規則重複判定 ----
 
@@ -179,8 +244,8 @@ class VariantBatchTests(ConnTestCase):
         try:
             self.facade.invoke("variants.batch_create", {
                 "product_id": self.pid, "drafts": [
-                    {"draft_id": "a", "attributes": {"顏色": "紅"}},
-                    {"draft_id": "b", "attributes": {"顏色": "紅"}},  # 同簽章
+                    {"barcodes": [{"source": "store"}], "draft_id": "a", "attributes": {"顏色": "紅"}},
+                    {"barcodes": [{"source": "store"}], "draft_id": "b", "attributes": {"顏色": "紅"}},  # 同簽章
                 ]})
             self.fail("應該 raise")
         except Exception as exc:
@@ -192,11 +257,11 @@ class VariantBatchTests(ConnTestCase):
     def test_duplicate_against_db(self):
         self.facade.invoke("variants.batch_create", {
             "product_id": self.pid,
-            "drafts": [{"draft_id": "a", "attributes": {"顏色": "紅"}}]})
+            "drafts": [{"barcodes": [{"source": "store"}], "draft_id": "a", "attributes": {"顏色": "紅"}}]})
         try:
             self.facade.invoke("variants.batch_create", {
                 "product_id": self.pid,
-                "drafts": [{"draft_id": "b", "attributes": {"顏色": "紅"}}]})
+                "drafts": [{"barcodes": [{"source": "store"}], "draft_id": "b", "attributes": {"顏色": "紅"}}]})
             self.fail("應該 raise")
         except Exception as exc:
             self.assertTrue(getattr(exc, "details", None))
@@ -209,8 +274,8 @@ class VariantBatchTests(ConnTestCase):
         try:
             self.facade.invoke("variants.batch_create", {
                 "product_id": self.pid, "drafts": [
-                    {"draft_id": "a", "attributes": {"顏色": "紅", "特性詞條": ["A"]}, "price": 100},
-                    {"draft_id": "b", "attributes": {"顏色": "紅", "特性詞條": ["B"]}, "price": 200},
+                    {"barcodes": [{"source": "store"}], "draft_id": "a", "attributes": {"顏色": "紅", "特性詞條": ["A"]}, "price": 100},
+                    {"barcodes": [{"source": "store"}], "draft_id": "b", "attributes": {"顏色": "紅", "特性詞條": ["B"]}, "price": 200},
                 ]})
             self.fail("應該 raise")
         except Exception as exc:
@@ -225,8 +290,8 @@ class VariantBatchTests(ConnTestCase):
         # 同規格但不同型號 → 不重複
         res = self.facade.invoke("variants.batch_create", {
             "product_id": self.pid, "drafts": [
-                {"draft_id": "a", "attributes": {"顏色": "紅"}, "model_ids": [m1]},
-                {"draft_id": "b", "attributes": {"顏色": "紅"}, "model_ids": [m2]},
+                {"barcodes": [{"source": "store"}], "draft_id": "a", "attributes": {"顏色": "紅"}, "model_ids": [m1]},
+                {"barcodes": [{"source": "store"}], "draft_id": "b", "attributes": {"顏色": "紅"}, "model_ids": [m2]},
             ]})
         self.assertEqual(len(res["results"]), 2)
 
@@ -235,7 +300,7 @@ class VariantBatchTests(ConnTestCase):
     def test_new_option_created_and_used(self):
         res = self.facade.invoke("variants.batch_create", {
             "product_id": self.pid,
-            "drafts": [{"draft_id": "a", "attributes": {"顏色": "褐色"}}]})
+            "drafts": [{"barcodes": [{"source": "store"}], "draft_id": "a", "attributes": {"顏色": "褐色"}}]})
         self.assertEqual(len(res["created_option_ids"]), 1)
         conn = self._fresh()
         row = conn.execute("SELECT option_id,active FROM AttributeOption WHERE field_id=? AND value='褐色'",
@@ -251,7 +316,7 @@ class VariantBatchTests(ConnTestCase):
         conn.commit(); conn.close()
         res = self.facade.invoke("variants.batch_create", {
             "product_id": self.pid,
-            "drafts": [{"draft_id": "a", "attributes": {"顏色": "灰"}}]})
+            "drafts": [{"barcodes": [{"source": "store"}], "draft_id": "a", "attributes": {"顏色": "灰"}}]})
         self.assertEqual(res["reactivated_option_ids"], [oid])
         conn = self._fresh()
         self.assertTrue(conn.execute("SELECT active FROM AttributeOption WHERE option_id=?",
@@ -271,7 +336,7 @@ class VariantBatchTests(ConnTestCase):
             self.facade.invoke("variants.batch_create", {
                 "product_id": self.pid, "drafts": [
                     {"draft_id": "a", "attributes": {"顏色": "灰"}, "barcodes": [{"source": "store"}]},
-                    {"draft_id": "b", "attributes": {"顏色": "灰"}},  # 與 a 重複 → 整批失敗
+                    {"barcodes": [{"source": "store"}], "draft_id": "b", "attributes": {"顏色": "灰"}},  # 與 a 重複 → 整批失敗
                 ]})
             self.fail("應該 raise")
         except Exception:
@@ -321,7 +386,7 @@ class VariantBatchTests(ConnTestCase):
         try:
             self.facade.invoke("variants.batch_create", {
                 "product_id": self.pid,
-                "drafts": [{"draft_id": "a", "attributes": {"顏色": "紅"}}]})
+                "drafts": [{"barcodes": [{"source": "store"}], "draft_id": "a", "attributes": {"顏色": "紅"}}]})
             self.fail("應該 raise")
         except Exception as exc:
             self.assertEqual(exc.code, "validation_error")
@@ -332,9 +397,9 @@ class VariantBatchTests(ConnTestCase):
         # 紅用 2 次、藍用 1 次
         self.facade.invoke("variants.batch_create", {
             "product_id": self.pid,
-            "drafts": [{"draft_id": "a", "attributes": {"顏色": "紅", "長度": "1m"}},
-                       {"draft_id": "b", "attributes": {"顏色": "紅", "長度": "2m"}},
-                       {"draft_id": "c", "attributes": {"顏色": "藍"}}]})
+            "drafts": [{"barcodes": [{"source": "store"}], "draft_id": "a", "attributes": {"顏色": "紅", "長度": "1m"}},
+                       {"barcodes": [{"source": "store"}], "draft_id": "b", "attributes": {"顏色": "紅", "長度": "2m"}},
+                       {"barcodes": [{"source": "store"}], "draft_id": "c", "attributes": {"顏色": "藍"}}]})
         usage = self.facade.invoke("variants.field_usage", {
             "category_id": self.cid, "field_id": self.color_fid})
         by = {u["value"]: u["usage_count"] for u in usage}

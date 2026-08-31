@@ -111,12 +111,29 @@ const s={models:[
  {model_id:1,brand_name:"Apple",series:"Pro",name:"A"},
  {model_id:2,brand_name:"Apple",series:"Air",name:"B"},
  {model_id:3,brand_name:"Apple",series:"Pro",name:"C"},
- {model_id:4,brand_name:"Samsung",series:null,name:"D"}], model_ids:[3,1]};
+ {model_id:4,brand_name:"Samsung",series:null,name:"D"}], model_ids:[3,1], query:"",
+ usage:[], showMore:false};
+s.leadIds=c.computed.leadIds.call(s);
+s.matchedModels=c.computed.matchedModels.call(s);
+s.visibleModels=c.computed.visibleModels.call(s);
 const groups=c.computed.filteredGroups.call(s);
+// 搜尋比對名稱／別名／系列/廠牌
+const hit={...s, query:"pro"};
+hit.matchedModels=c.computed.matchedModels.call(hit);
+hit.visibleModels=c.computed.visibleModels.call(hit);
+// 有前排資料時,收合狀態只顯示前排＋已選;搜尋中一律搜全部
+const lead={...s, usage:[{model_id:2,lead:true}], model_ids:[], showMore:false};
+lead.leadIds=c.computed.leadIds.call(lead);
+lead.matchedModels=c.computed.matchedModels.call(lead);
+lead.visibleModels=c.computed.visibleModels.call(lead);
+lead.hiddenCount=c.computed.hiddenCount.call(lead);
 const selected=c.computed.selectedModels.call(s);
 process.stdout.write(JSON.stringify({
  sections:groups.map(g=>[g.brand,g.sections.map(x=>[x.series,x.items.map(m=>m.model_id)])]),
- selected:selected.map(m=>m.model_id)}));
+ selected:selected.map(m=>m.model_id),
+ searched:hit.matchedModels.map(m=>m.model_id),
+ leadVisible:lead.visibleModels.map(m=>m.model_id),
+ hidden:lead.hiddenCount}));
 '''
         result = subprocess.run(
             ["node", "-e", script, str(MODEL_JS)], cwd=ROOT,
@@ -126,6 +143,9 @@ process.stdout.write(JSON.stringify({
             "sections": [["Apple", [["Pro", [1]], ["Air", [2]], ["Pro", [3]]]],
                          ["Samsung", [["", [4]]]]],
             "selected": [1, 3],
+            "searched": [1, 3],
+            "leadVisible": [2],
+            "hidden": 3,
         })
 
     def test_checkbox_box_is_exactly_18_square_in_real_dom_layout(self):
@@ -209,6 +229,7 @@ API.invoke = async action => ({
   },
 });
 API.categoryFields = async () => [{field_id:11,name:"顏色",field_type:"select"}];
+API.modelUsage = async () => [];
 API.listCategories = async () => [{category_id:5, model_mode:"required"}];
 API.listModels = async () => [
   {model_id:21,name:"iPhone 17 Pro",alias:"17 Pro",brand_name:"iPhone"},
@@ -266,6 +287,7 @@ API.listModels = async () => {
   if (failure === "models") throw new Error("models failed");
   return [];
 };
+API.modelUsage = async () => [];
 API.listCategories = async () => {
   if (failure === "categories") throw new Error("categories failed");
   return [{category_id:5, model_mode:"required"}];

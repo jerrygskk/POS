@@ -120,7 +120,8 @@ body { background: #ffffff; color: #1c1c1e; }
 .dialog-barcode-add { display: grid; grid-template-columns: minmax(160px, 1fr) auto auto;
   gap: 8px; align-items: center; }
 
-.dialog-shell .attr-row { display: grid; grid-template-columns: 7em minmax(0, 1fr);
+.dialog-shell .attr-row { display: grid;
+  grid-template-columns: var(--label-w, 7em) minmax(0, 1fr);
   align-items: start; gap: 12px; margin-bottom: 12px; padding: 12px;
   border: 1px solid #e5e5ea; border-radius: 6px; background: #fafafa;
   text-align: right; }
@@ -135,7 +136,7 @@ body { background: #ffffff; color: #1c1c1e; }
 .dialog-shell .tag-selector { border: 0; border-radius: 0; padding: 0;
   background: transparent; max-width: none; }
 .dialog-shell .chip-box { gap: 8px; }
-.dialog-shell .mp-selected { max-width: none; margin-bottom: 8px; }
+.dialog-shell .mp-selected { max-width: none; }
 .dialog-shell .tag-chip,
 .dialog-shell .mp-selected .chip,
 .dialog-shell .chip-box > .chip-wrap .chip.on {

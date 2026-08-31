@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>新增款式</title>
-<link rel="stylesheet" href="css/pos.css?v=177">
-<link rel="stylesheet" href="css/dialog-theme.css?v=177">
+<link rel="stylesheet" href="css/pos.css?v=191">
+<link rel="stylesheet" href="css/dialog-theme.css?v=191">
 </head>
 <body>
 <div id="variant-batch-window" v-cloak>
@@ -61,7 +61,7 @@
             <small v-if="f.field_type==='select'" class="field-kind-note">可複選以產生組合</small>
             <small v-else-if="f.field_type==='multi'" class="apply-all-note">套用至每一筆</small>
             <span v-if="f.field_type==='select' && optionCount(f.name)>=2" class="expand-badge">
-              已選擇 {{ optionCount(f.name) }} 個（{{ f.name }}）
+              已選擇 {{ optionCount(f.name) }} 個{{ f.name }}
             </span>
           </div>
           <div v-if="f.field_type==='select'" class="batch-input-control">
@@ -94,7 +94,8 @@
             適用手機型號
             <small class="apply-all-note">套用至每一筆</small>
           </div>
-          <model-picker :models="models" v-model:model_ids="input.model_ids"></model-picker>
+          <model-picker :models="models" :usage="modelUsage"
+                        v-model:model_ids="input.model_ids"></model-picker>
         </div>
 
         <div class="batch-price-barcode">
@@ -140,6 +141,7 @@
         <button type="button" class="dialog-small dialog-confirm" @click="closeFixedEditor">完成</button>
       </div>
       <model-picker v-if="fixedEditor.fieldName==='__models'" :models="models"
+                    :usage="modelUsage"
                     v-model:model_ids="fixedDraft.model_ids"></model-picker>
       <tag-selector v-else-if="fixedField && fixedField.field_type==='tags'"
                     v-model="fixedDraft.attrs[fixedField.name]" :usage="tagUsage"></tag-selector>
@@ -151,7 +153,7 @@
 
     <section v-if="drafts.length" class="batch-preview">
       <div class="batch-toolbar">
-        <strong>預覽工作表（{{ drafts.length }} 筆）</strong>
+        <strong>產品組合預覽（共 {{ drafts.length }} 筆）</strong>
         <button v-if="lastDeleted" type="button" class="dialog-small"
                 @click="undoDelete">復原刪除</button>
       </div>
@@ -173,8 +175,9 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(d,i) in drafts" :key="d.draft_id"
-                :class="{invalid:errorsFor(d).length,duplicate:duplicateErrors(d).length}">
+            <tr v-for="(d,i) in drafts" :key="d.draft_id" :data-draft="d.draft_id"
+                :class="{duplicate:duplicateErrors(d).length}">
+              <td class="batch-seq">{{ i + 1 }}</td>
               <td class="batch-row-actions">
                 <button type="button" class="dialog-icon" title="複製此列"
                         aria-label="複製此列" @click="duplicateRowAt(i)">⧉</button>
@@ -182,7 +185,7 @@
                         aria-label="刪除此列" @click="removeDraft(i)">✕</button>
               </td>
               <template v-for="f in formalFields" :key="f.field_id">
-                <td :class="{'cell-diff':diffFields.has(f.name),'cell-error':fieldErrors(d,f).length}"
+                <td :class="{'cell-error':fieldErrors(d,f).length}"
                     :title="errorText(fieldErrors(d,f))">
                   <select v-if="f.field_type==='select'" v-model="d.attrs[f.name]"
                           @change="schedulePrecheck">
@@ -203,7 +206,7 @@
                 </td>
               </template>
               <td v-if="featureField"
-                  :class="{'cell-diff':diffFields.has(featureField.name)}">
+                  >
                 <button type="button" class="batch-cell-button"
                         :title="draftTags(d) || '—'"
                         @click="openFixedEditor(d.draft_id,featureField.name)">
@@ -211,7 +214,7 @@
                 </button>
               </td>
               <td v-if="modelMode==='required'" class="batch-cell-model"
-                  :class="{'cell-diff':diffFields.has('__models'),'cell-error':modelErrors(d).length}"
+                  :class="{'cell-error':modelErrors(d).length}"
                   :title="errorText(modelErrors(d))">
                 <button type="button" class="batch-cell-button"
                         :title="draftModels(d) || '尚未選擇型號'"
@@ -222,23 +225,26 @@
                   {{ err.message }}
                 </small>
               </td>
-              <td class="batch-cell-price" :class="{'cell-diff':diffFields.has('__price')}">
+              <td class="batch-cell-price">
                 <input type="number" min="0" v-model.number="d.price" @change="schedulePrecheck">
               </td>
               <td class="batch-cell-barcode"
-                  :class="{'cell-diff':diffFields.has('__barcode'),'cell-error':barcodeErrors(d).length}"
+                  :class="{'cell-error':barcodeErrors(d).length}"
                   :title="errorText(barcodeErrors(d))">
                 <input v-model="d.barcode" @change="schedulePrecheck" placeholder="原廠條碼">
                 <label class="batch-store-check">
                   <input type="checkbox" v-model="d.store" @change="schedulePrecheck"> 配自取碼
-                  <small v-if="!d.barcode && d.store" class="dialog-hint">（建立後產生）</small>
                 </label>
                 <small v-for="(err,ei) in barcodeErrors(d)" :key="ei" class="cell-error-text">
                   {{ err.message }}
                 </small>
               </td>
               <td class="batch-status" :class="{'cell-error':errorsFor(d).length}"
-                  :title="errorText(errorsFor(d))">{{ rowStatus(d) }}</td>
+                  :title="errorText(errorsFor(d))">
+                <button v-if="duplicateTargetId(d)" type="button" class="batch-status-link"
+                        @click="gotoDraft(duplicateTargetId(d))">{{ rowStatus(d) }}</button>
+                <template v-else>{{ rowStatus(d) }}</template>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -263,15 +269,15 @@
 </div>
 </template>
 
-<script src="js/vue.global.prod.js?v=177"></script>
-<script src="js/api.js?v=177"></script>
-<script src="js/confirm.js?v=177"></script>
-<script src="js/pos_shared.js?v=177"></script>
-<script src="js/catalogfields.js?v=177"></script>
-<script src="js/modelpicker.js?v=177"></script>
-<script src="js/optpicker.js?v=177"></script>
-<script src="js/variant_batch_logic.js?v=177"></script>
-<script src="js/variant_batch.js?v=177"></script>
-<script src="js/variant_batch_window.js?v=177"></script>
+<script src="js/vue.global.prod.js?v=191"></script>
+<script src="js/api.js?v=191"></script>
+<script src="js/confirm.js?v=191"></script>
+<script src="js/pos_shared.js?v=191"></script>
+<script src="js/catalogfields.js?v=191"></script>
+<script src="js/modelpicker.js?v=191"></script>
+<script src="js/optpicker.js?v=191"></script>
+<script src="js/variant_batch_logic.js?v=191"></script>
+<script src="js/variant_batch.js?v=191"></script>
+<script src="js/variant_batch_window.js?v=191"></script>
 </body>
 </html>

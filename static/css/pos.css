@@ -273,19 +273,15 @@ button.primary:active { background: var(--primary-active); transform: translateY
 .chip-box .chip-wrap { max-height: 100px; overflow-y: auto; }
 .chip-box input { max-width: 100%; }
 
-/* 已選型號即時列表(選取清單上方) */
-.mp-selected { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-  min-height: 30px; max-width: 350px; }
-
-/* 變體編輯:型號選取清單(廠牌分組收合,固定高度可捲動) */
+/* 型號選取器:外觀比照 opt-picker(共用 .tag-selector／.tag-picked／.chip)。
+   已選區在最上、其次搜尋框、再來候選;廠牌不收合,全部展開。
+   ⚠️ 候選區仍保留固定高度可捲:型號上百個,全展開不捲會把整個視窗撐爛。 */
+.mp-selected { max-width: 350px; }
 .model-picker { max-height: 200px; overflow-y: auto; border: 1px solid var(--border);
-  border-radius: 8px; padding: 6px 8px; margin-top: 6px; max-width: 350px; }
-.mp-brand { display: flex; align-items: center; gap: 6px; cursor: pointer;
-  font-weight: bold; color: var(--text); padding: 4px 2px; user-select: none; }
-.mp-caret { width: 1em; display: inline-block; text-align: center; color: var(--text-2); }
-.mp-has-sel { color: var(--primary-hover); }
+  border-radius: 8px; padding: 6px 8px; max-width: 350px; }
+.mp-brand { font-weight: bold; color: var(--text); padding: 4px 2px; }
 .mp-series { font-size: 12px; color: var(--text-3); padding: 4px 0 0 18px; }
-.mp-items { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 8px 18px; }
+.mp-items { padding: 2px 0 8px 18px; }
 
 /* 編輯中的變體列:淡藍灰底 */
 .sub tr.editing > td { background: var(--accent-soft); }
@@ -437,11 +433,11 @@ button.primary.danger:hover { filter: brightness(0.92); }
 /* ⚠️ 四個區塊(已選／候選／搜尋框／搜尋結果)高度固定,不隨內容出現消失而上下跳:
    已選與搜尋結果空的時候仍保留一行 chip 的高度(28px = chip 4+4 padding
    ＋line-height 18＋上下框線 2)。候選 chip 選走後也留在原位只換樣式。 */
-/* 搜尋結果區高度寫死兩行(28×2＋列距 6):結果多寡不影響版面,超過自己捲。
-   已選區最少一行、最多兩行,選很多也不會把下面的欄位一路往下推。 */
+/* 搜尋結果區保留一行(28px)高度,結果多就往下長(維護者裁示:不要捲軸,
+   寧可把下面的欄位往下推)。已選區最少一行、最多兩行。 */
 .tag-picked { min-height: 28px; max-height: 62px; overflow-y: auto;
   align-content: flex-start; }
-.tag-matches { height: 62px; overflow-y: auto; align-content: flex-start; }
+.tag-matches { min-height: 28px; align-content: flex-start; }
 .tag-empty { color: var(--text-3); font-size: 13px; line-height: 28px; }
 .tag-search { display: flex; gap: 6px; align-items: center; }
 .tag-search input { flex: 1; }
@@ -468,13 +464,15 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .batch-input-head h2 { pointer-events: none; }
 .batch-input.collapsed { padding: 10px 16px; }
 .batch-input.collapsed .batch-input-head h2 { position: static; padding: 0; }
-.batch-input-body { flex: 0 0 auto; min-height: 0; padding: 2px; }
+/* 標籤欄比 dialog 公版寬:這區的標籤要放「已選擇 N 個○○」徽章,7em 會把它折行
+   (欄名最長的是「產品型號」,量到徽章約 7.4em) */
+.batch-input-body { flex: 0 0 auto; min-height: 0; padding: 2px; --label-w: 8em; }
 .batch-input-control { min-width: 0; }
 .field-kind-note, .apply-all-note { display: block; margin-top: 2px; color: #636366;
   font-size: 10pt; font-weight: normal; }
 .expand-badge { display: inline-block; margin-top: 6px; padding: 2px 7px;
   border: 1px solid #9fc7dc; border-radius: 4px; color: #176b92; background: #eef7fb;
-  font-size: 10pt; }
+  font-size: 10pt; white-space: nowrap; }
 /* ⚠️ 條碼欄的「請於預覽表逐筆掃描」提示會隨筆數出現／消失。它若佔版面,
    這排是底部對齊,一出現就把售價與自取碼往下推、條碼自己往上跳(實測位移
    17px 與 7px)。故提示改絕對定位、該排預留一行高度,出現與否版面不動。 */
@@ -523,12 +521,14 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .batch-table { flex: 0 0 auto; min-width: 0;
   overflow-x: auto; overflow-y: clip; }
 .batch-table .dialog-table { min-width: 100%; table-layout: fixed; }
+/* 表頭文字置中;左右各留 14px,右邊那份是給拖曳握把,不留會壓到欄名 */
 .batch-table .dialog-table th { position: sticky; top: 0; z-index: 2; background: #f7f7f9;
-  padding-right: 14px; }
+  padding-left: 14px; padding-right: 14px; text-align: center; }
 .batch-table .dialog-table th, .batch-table .dialog-table td { min-width: 0;
   box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 11pt; vertical-align: top; }
-.batch-col-label { display: block; overflow: hidden; text-overflow: ellipsis; }
+.batch-col-label { display: block; overflow: hidden; text-overflow: ellipsis;
+  text-align: center; }
 .batch-col-grip { position: absolute; top: 0; right: 0; width: 9px; height: 100%;
   cursor: col-resize; }
 .batch-col-grip::after { content: ""; position: absolute; top: 6px; bottom: 6px; right: 4px;
@@ -536,7 +536,9 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .batch-col-grip:hover::after { border-right-color: #4977b1; }
 .batch-table input, .batch-table select, .batch-table button {
   min-width: 0; max-width: 100%; box-sizing: border-box; white-space: nowrap; }
-.batch-row-actions { white-space: nowrap; }
+/* 置中三欄一律寫成 .batch-table .dialog-table td.x:dialog 公版的
+   `.dialog-table td { text-align: left }` 權重比單一類別高,只寫類別會被壓回去 */
+.batch-table .dialog-table td.batch-row-actions { white-space: nowrap; text-align: center; }
 .dialog-shell .dialog-icon { min-width: 28px; width: 28px; height: 28px; padding: 0;
   border: 0; background: transparent; font-weight: normal; }
 .dialog-shell .dialog-icon:hover { background: #e5e5ea; }
@@ -549,21 +551,31 @@ button.primary.danger:hover { filter: brightness(0.92); }
   box-sizing: border-box; margin-top: 6px; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
 .batch-store-check input { flex: 0 0 auto; }
-/* 「（建立後產生）」隨勾選出現,擠在同一行不換行、放不下就省略號 */
-.batch-store-check .dialog-hint { flex: 0 1 auto; min-width: 0; margin-left: 4px;
-  color: var(--danger);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cell-diff { background: #eaf3fb; }
-.dialog-shell .dialog-table td.cell-diff { background: #eaf3fb; }
+/* ⚠️ 儲存格底色只表示「這格要修」。原本還有一套藍底表示「這欄各列不一樣」,
+   兩套搶同一個底色:改好型號後紅底退場、藍底補上,看起來像在亂跳。
+   差異提示資訊量低(看內容就知道),整套移除。 */
 .dialog-shell .dialog-table tr.duplicate > td { border-top: 2px solid #c0392b;
   border-bottom-color: #c0392b; }
 .dialog-shell .dialog-table td.cell-error { background: #fdf3f2; }
 .dialog-shell .dialog-table td.cell-error input,
 .dialog-shell .dialog-table td.cell-error select { border-color: #c0392b; }
 .cell-error-text { display: block; margin-top: 4px; color: #c0392b; font-size: 9.5pt; }
-.batch-status { color: #287548; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; }
+/* ⚠️ 預覽表不用 dialog 公版的整列紅底(.dialog-table tr.invalid):整列刷紅時,
+   已經填好的欄位也是紅的,看起來像每一格都有問題。只有出錯的那一格標紅底＋
+   紅字說明,狀態欄再寫一次,問題在哪一眼就看得到。 */
+/* 狀態欄不重要,欄寬壓窄、文字改成可折兩行(其餘欄仍是不折行＋省略號) */
+.batch-status { color: #287548; white-space: normal; line-height: 1.35;
+  overflow: hidden; }
+.batch-table .dialog-table td.batch-status { text-align: center; }
 .batch-status.cell-error { color: #c0392b; }
+/* 「與第 N 筆重複」可點,跳到對方那列 */
+.dialog-shell .batch-status-link { padding: 0; border: 0; background: transparent;
+  color: inherit; font: inherit; text-align: center; white-space: normal;
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.dialog-shell .batch-status-link:hover { color: #7f1d1d; }
+.batch-table .dialog-table td.batch-seq { color: var(--text-3); text-align: center; }
+@keyframes batch-row-flash { from { background: #fde9b8; } to { background: transparent; } }
+.dialog-shell .dialog-table tr.flash > td { animation: batch-row-flash 1.4s ease-out; }
 .batch-footer { position: relative; z-index: 3; }
 
 @media (max-width: 760px) {

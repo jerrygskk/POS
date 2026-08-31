@@ -61,28 +61,6 @@
     return copy;
   }
 
-  function sameValue(left, right) {
-    return JSON.stringify(left) === JSON.stringify(right);
-  }
-
-  function diffFieldNames(rows, formalFields) {
-    const changed = new Set();
-    if (!rows || rows.length < 2) return changed;
-    const first = rows[0];
-    for (const field of (formalFields || [])) {
-      if (rows.some(row => !sameValue(row.attrs && row.attrs[field.name],
-        first.attrs && first.attrs[field.name]))) changed.add(field.name);
-    }
-    const shared = [["__price", "price"], ["__models", "model_ids"]];
-    for (const entry of shared) {
-      if (rows.some(row => !sameValue(row[entry[1]], first[entry[1]]))) changed.add(entry[0]);
-    }
-    const firstBarcode = [first.barcode, !!first.store];
-    if (rows.some(row => !sameValue([row.barcode, !!row.store], firstBarcode)))
-      changed.add("__barcode");
-    return changed;
-  }
-
   function partitionPrecheck(rows, precheckResults) {
     const byDraftId = new Map();
     for (const result of (precheckResults || [])) byDraftId.set(result.draft_id, result);
@@ -133,7 +111,8 @@
       ? (text => measure(text)) : (text => halfWidth(text) * HALF_CHAR_PX);
     const widest = samples.reduce((max, text) => Math.max(max, textWidth(text)), 0);
     const wanted = Math.ceil(widest) + CELL_PADDING_PX + (KIND_EXTRA_PX[kind] || 0);
-    const floor = Math.max(COLUMN_MIN_PX, (column || {}).min || 0);
+    // 明確指定 min 的欄(列號 44、操作 88)照它走;沒指定才吃全域最小寬
+    const floor = (column || {}).min > 0 ? column.min : COLUMN_MIN_PX;
     const ceiling = Math.max(floor, (column || {}).max || KIND_MAX_PX[kind] || 260);
     return Math.min(Math.max(wanted, floor), ceiling);
   }
@@ -166,7 +145,6 @@
     formulaText,
     expandRows,
     duplicateRow,
-    diffFieldNames,
     partitionPrecheck,
     dupRefText,
     halfWidth,

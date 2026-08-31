@@ -137,6 +137,7 @@ ACTION_CONTRACTS = {
     "variants.delete": schema([I("id", required=True)]),
     "variants.batch_create": schema([I("product_id", required=True), field("drafts", "list[Draft]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), S("drafts[].draft_id", nullable=True), M("drafts[].attributes", normalization="field names normalize_key; display values normalize_display; duplicate values removed"), I("drafts[].price", nullable=True), I("drafts[].active", nullable=True, default=1, normalization="truthy becomes 1, falsy becomes 0"), LI("drafts[].model_ids", default=[], normalization="deduplicate preserving order"), field("drafts[].barcodes", "list[Barcode]", default=[], wrong="x", list_element={"expect":"reject","value":"x"}), S("drafts[].barcodes[].barcode", nullable=True, default=None, normalization="trim; blank becomes None"), S("drafts[].barcodes[].source", default="store", normalization="falsy becomes factory for supplied code, store for generated code")], notes=("Desktop-only action.",)),
     "variants.field_usage": schema([I("category_id", required=True), I("field_id", required=True), I("brand_id", nullable=True), I("product_id", nullable=True)], notes=("Desktop-only action.", "brand_id/product_id 決定候選前排範圍(廠牌→產品→無)。")),
+    "variants.model_usage": schema([I("category_id", required=True), I("brand_id", nullable=True), I("product_id", nullable=True)], notes=("Desktop-only action.", "型號候選前排範圍(產品→廠牌→無);其餘型號收進「更多…」。")),
     "variants.activate": schema([I("id", required=True)], notes=("Desktop-only action.",)),
     "variants.issues": schema([], notes=("Desktop-only action.",)),
     "barcodes.scan": schema([S("code", required=True, blank="accept")]),
@@ -177,7 +178,7 @@ SETTINGS_CONTRACT_ACTIONS = {
 }
 PRODUCT_CONTRACT_ACTIONS = {
     "products.create","products.list","products.update","products.delete","catalog.list",
-    "variants.create","variants.update","variants.set_models","variants.update_details","variants.update_editor","variants.delete","variants.batch_create","variants.batch_precheck","variants.field_usage","variants.activate","variants.issues",
+    "variants.create","variants.update","variants.set_models","variants.update_details","variants.update_editor","variants.delete","variants.batch_create","variants.batch_precheck","variants.field_usage","variants.model_usage","variants.activate","variants.issues",
     "barcodes.scan","barcodes.add","barcodes.delete",
 }
 TARGET_BY_ACTION = {
@@ -460,7 +461,7 @@ class ActionContractTests(FacadeTestCase):
             "models.list":{}, "models.create":{"phone_brand_id":self.phone_brand_id,"name":"新增型號"}, "models.update":{"id":self.model_id,"fields":{}}, "models.delete":{"id":self.delete_model_id}, "models.sort":{"ids":[]},
             "fields.list":{}, "fields.create":{"name":"尺寸"}, "fields.update":{"id":self.field_id,"fields":{}}, "options.list":{"field_id":self.field_id}, "options.create":{"field_id":self.field_id,"value":"白"}, "options.update":{"id":self.option_id,"fields":{}}, "options.delete":{"id":self.delete_option_id}, "options.models":{"id":self.option_id}, "options.set_models":{"id":self.option_id,"model_ids":[]}, "options.cleanup":{},
             "products.create":{"name":"新增商品","category_id":self.category_id,"variants":[{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"new-code","source":"store"}]}]}, "products.list":{}, "products.update":{"id":self.product_id,"fields":{}}, "products.delete":{"id":self.delete_product_id}, "catalog.list":{},
-            "variants.create":{"product_id":self.product_id,"fields":{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"variant-new","source":"store"}]}}, "variants.update":{"id":self.variant_id,"fields":{}}, "variants.set_models":{"id":self.variant_id,"model_ids":[]}, "variants.update_details":{"id":self.variant_id,"fields":{},"model_ids":[]}, "variants.update_editor":{"id":self.variant_id,"fields":{},"model_ids":[],"deleted_barcodes":[],"factory_barcodes":[],"store_barcode_count":0}, "variants.delete":{"id":self.delete_variant_id}, "variants.batch_create":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"batch-new","source":"store"}]}]}, "variants.field_usage":{"category_id":self.category_id,"field_id":self.field_id}, "variants.activate":{"id":self.variant_id}, "variants.issues":{},
+            "variants.create":{"product_id":self.product_id,"fields":{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"variant-new","source":"store"}]}}, "variants.update":{"id":self.variant_id,"fields":{}}, "variants.set_models":{"id":self.variant_id,"model_ids":[]}, "variants.update_details":{"id":self.variant_id,"fields":{},"model_ids":[]}, "variants.update_editor":{"id":self.variant_id,"fields":{},"model_ids":[],"deleted_barcodes":[],"factory_barcodes":[],"store_barcode_count":0}, "variants.delete":{"id":self.delete_variant_id}, "variants.batch_create":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"batch-new","source":"store"}]}]}, "variants.field_usage":{"category_id":self.category_id,"field_id":self.field_id}, "variants.model_usage":{"category_id":self.category_id}, "variants.activate":{"id":self.variant_id}, "variants.issues":{},
             "variants.batch_precheck":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"precheck-new","source":"store"}]}]},
             "barcodes.scan":{"code":"contract-1"}, "barcodes.add":{"variant_id":self.variant_id,"barcode":"contract-2"}, "barcodes.delete":{"code":"contract-1"}, "stock.receive":{"variant_id":self.variant_id,"qty":1}, "stock.detail":{"variant_id":self.variant_id},
             "stocktake.create":{}, "stocktake.list":{}, "stocktake.detail":{"session_id":self.session_id}, "stocktake.scan":{"session_id":self.session_id,"variant_id":self.variant_id,"qty":1}, "stocktake.set_counted":{"session_id":self.session_id,"variant_id":self.variant_id,"counted_qty":1}, "stocktake.close":{"session_id":self.session_id},
@@ -486,7 +487,7 @@ class ActionContractTests(FacadeTestCase):
         direct = set().union(self.facade.settings.ACTIONS, self.facade.products.ACTIONS,
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
                              self.facade.stocktake.ACTIONS, self.facade.printing.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 68)
+        self.assertEqual(len(ACTION_CONTRACTS), 69)
         self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
@@ -802,7 +803,8 @@ class ActionContractTests(FacadeTestCase):
 
         batch = self.invoke("variants.batch_create", {
             "product_id":self.product_id,
-            "drafts":[{"draft_id":"default-active", "attributes":{"顏色":"白"}}],
+            "drafts":[{"draft_id":"default-active", "attributes":{"顏色":"白"},
+                       "barcodes":[{"source":"store"}]}],
         })
         with get_conn(self.db) as conn:
             self.assertEqual(conn.execute(

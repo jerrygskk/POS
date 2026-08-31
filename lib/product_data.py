@@ -247,6 +247,44 @@ def option_usage_in_category(conn, field_id, category_id, brand_id=None,
     return out
 
 
+def _model_scope_counts(conn, column, value):
+    """回傳 {model_id: 次數}:型號在指定範圍(廠牌或產品)內被幾個子產品用過。"""
+    rows = conn.execute(
+        "SELECT vm.model_id, COUNT(DISTINCT vm.variant_id) c "
+        "FROM VariantModel vm "
+        "JOIN Variant v ON v.variant_id=vm.variant_id "
+        "JOIN Product p ON p.product_id=v.product_id "
+        "WHERE p." + column + "=? GROUP BY vm.model_id", (value,)).fetchall()
+    return {r["model_id"]: r["c"] for r in rows}
+
+
+def model_usage_in_category(conn, category_id, brand_id=None, product_id=None):
+    """型號的候選前排資料,與 option_usage_in_category 同一套規則。
+
+    使用次數=該種類內綁到此型號的子產品數;前排(lead)三層退路:
+    該產品用過 → 該廠牌用過 → 都沒有則不指定(前端就全部展開)。
+    ⚠️ 型號候選上百個,全部攤開太擠;前排只放這個產品／廠牌真的賣過的機型,
+    其餘收進「更多…」,搜尋仍搜得到全部。"""
+    rows = conn.execute(
+        "SELECT m.model_id, COUNT(DISTINCT vm.variant_id) usage_count "
+        "FROM PhoneModel m "
+        "LEFT JOIN VariantModel vm ON vm.model_id=m.model_id "
+        "AND vm.variant_id IN (SELECT v.variant_id FROM Variant v "
+        "JOIN Product p ON v.product_id=p.product_id WHERE p.category_id=?) "
+        "GROUP BY m.model_id", (category_id,)).fetchall()
+    lead = {}
+    if product_id is not None:
+        lead = _model_scope_counts(conn, "product_id", product_id)
+    if not lead and brand_id is not None:
+        lead = _model_scope_counts(conn, "brand_id", brand_id)
+    out = []
+    for r in rows:
+        count = lead.get(r["model_id"], 0)
+        out.append({"model_id": r["model_id"], "usage_count": r["usage_count"],
+                    "lead_count": count, "lead": bool(lead) and count > 0})
+    return out
+
+
 def stock_of(conn, vid): return conn.execute("SELECT COALESCE(SUM(qty),0) s FROM StockMovement WHERE variant_id=?",(vid,)).fetchone()["s"]
 def has_records(conn, ids):
     if not ids:return False
