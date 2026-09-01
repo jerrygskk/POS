@@ -16,6 +16,18 @@ window.PosMixin = {
         else if (typeof this.reload === "function") await this.reload();
       } catch (e) { this.showError(e.message); }
     },
+    async openChildWindow(options) {
+      const {page, context, title} = options;
+      window.PosDesktopLock.lock();
+      try {
+        const payload = {page, context};
+        if (title !== undefined) payload.title = title;
+        await API.invoke("desktop.child_window.open", payload);
+      } catch (error) {
+        window.PosDesktopLock.unlock();
+        this.showError(error.message);
+      }
+    },
     attrText(row, fallback) {
       const s = window.fmtAttr(row);
       return (s === "" && fallback !== undefined) ? fallback : s;

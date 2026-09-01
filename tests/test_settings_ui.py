@@ -22,18 +22,24 @@ const context = {
 };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);  // api.js
-vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);  // settings.js
+vm.runInContext("window.__testAPI = API;", context);
+vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);  // pos_shared.js
+vm.runInContext(fs.readFileSync(process.argv[3], "utf8"), context);  // settings.js
 const window = context.window;
+const API = window.__testAPI;
 const page = window.PosPages["page-settings"];
 
 function mkState(extra) {
   // guard／guardReload 由全域 mixin(pos_shared.js)提供,測試給等效替身
-  const s = { showError: () => {},
+  const errors = [];
+  const s = { showError: message => errors.push(message),
               guard: async (fn) => { try { return await fn(); } catch (e) {} },
               guardReload: async (fn) => { try { await fn(); await s.reloadAll(); } catch (e) {} } };
+  Object.assign(s, window.PosMixin.methods);
   for (const k of Object.keys(page.methods)) s[k] = page.methods[k].bind(s);
   Object.assign(s, page.data.call(s));
   Object.assign(s, extra || {});
+  s._errors = errors;
   return s;
 }
 const out = {};
@@ -42,7 +48,7 @@ BODY
 '''.replace("BODY", body)
         result = subprocess.run(
             ["node", "-e", script, str(STATIC / "js" / "api.js"),
-             str(STATIC / "js" / "settings.js")],
+             str(STATIC / "js" / "pos_shared.js"), str(STATIC / "js" / "settings.js")],
             cwd=ROOT, text=True, capture_output=True, encoding="utf-8")
         if result.returncode != 0:
             self.fail(result.stderr)
@@ -124,6 +130,84 @@ done();
 ''')
         self.assertFalse(out["before"])
         self.assertTrue(out["after"])
+
+    def test_field_editor_uses_shared_child_window_options_and_keeps_invalid_return(self):
+        out = self._run(r'''
+const events = [];
+window.PosDesktopLock = {
+  lock: () => events.push("lock"), unlock: () => events.push("unlock")};
+let reject = false;
+API.invoke = async (action, payload) => {
+  events.push(action); out.payload = payload;
+  if (reject) throw new Error("開啟失敗");
+};
+const s = mkState({selCatId:7, hasOptions:f => f.field_type !== "text"});
+s.showError = message => { out.error = message; };
+(async () => {
+  await s.openFieldPopup(null);
+  await s.openFieldPopup({field_id:3, field_type:"text"});
+  await s.openFieldPopup({field_id:4, field_type:"select"});
+  out.afterSuccess = events.slice();
+  reject = true;
+  await s.openFieldPopup({field_id:5, field_type:"select"});
+  out.afterFailure = events.slice();
+  done();
+})();
+''')
+        self.assertEqual(out["afterSuccess"], ["lock", "desktop.child_window.open"])
+        self.assertEqual(out["payload"], {
+            "page": "field_editor", "title": "規格選項",
+            "context": {"category_id": 7, "field_id": 5},
+        })
+        self.assertEqual(out["afterFailure"], [
+            "lock", "desktop.child_window.open", "lock", "desktop.child_window.open", "unlock"])
+        self.assertEqual(out["error"], "開啟失敗")
+
+    def test_late_brand_failure_does_not_continue_or_affect_new_editor(self):
+        out = self._run(r'''
+const pending = [];
+API.listBrands = ({category_id}) => new Promise((resolve, reject) => pending.push({category_id, resolve, reject}));
+const s = mkState({categories:[{category_id:1}, {category_id:2}]});
+const errors = [];
+s.showError = message => errors.push(message);
+const old = s.openBrandEditor({brand_id:1, name:"舊廠牌"});
+const newer = s.openBrandEditor({brand_id:2, name:"新廠牌"});
+const waitForRequest = async index => {
+  while (!pending[index]) await Promise.resolve();
+};
+(async () => {
+  await waitForRequest(1);
+  pending[1].resolve([{brand_id:2}]);
+  await waitForRequest(2);
+  pending[2].resolve([]);
+  await newer;
+  out.afterNew = [s.openBrand, s.openBrandName, s.brandCatChecked];
+  pending[0].reject(new Error("舊廠牌讀取失敗"));
+  await old;
+  out.afterOldFailure = [s.openBrand, s.openBrandName, s.brandCatChecked];
+  out.requests = pending.map(x => x.category_id);
+  out.errors = errors;
+  done();
+})();
+''')
+        self.assertEqual(out["afterNew"], [2, "新廠牌", {"1": True}])
+        self.assertEqual(out["afterOldFailure"], [2, "新廠牌", {"1": True}])
+        self.assertEqual(out["requests"], [1, 1, 2])
+        self.assertEqual(out["errors"], [])
+
+    def test_current_brand_load_failure_shows_error(self):
+        out = self._run(r'''
+API.listBrands = () => Promise.reject(new Error("廠牌讀取失敗"));
+const s = mkState({categories:[{category_id:1}]});
+s.showError = message => { out.error = message; };
+(async () => {
+  await s.openBrandEditor({brand_id:2, name:"新廠牌"});
+  out.editor = [s.openBrand, s.openBrandName, s.brandCatChecked];
+  done();
+})();
+''')
+        self.assertEqual(out["editor"], [2, "新廠牌", {}])
+        self.assertEqual(out["error"], "廠牌讀取失敗")
 
 
 if __name__ == "__main__":

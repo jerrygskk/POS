@@ -88,19 +88,75 @@ const s = mkState({cart:[{variant_id:1, qty:1, unit_price:100, discount:0}], pai
 
 
 class ConfirmAndResourceContractTests(unittest.TestCase):
-    def test_input_dialog_supports_validation_and_keyboard_cancellation(self):
-        source = (STATIC / "js" / "confirm.js").read_text(encoding="utf-8")
-        for token in ("input(options)", "options.inputType", "options.validate",
-                      "error.textContent", 'event.key === "Escape"',
-                      'event.key === "Enter"', "close(null)"):
-            self.assertIn(token, source)
+    def test_input_dialog_renders_validates_and_handles_close_interactions(self):
+        script = r'''
+const fs = require("fs"), vm = require("vm");
+class Element {
+  constructor(tag) { this.tagName = tag; this.children = []; this.listeners = {}; this.parent = null; }
+  appendChild(child) { child.parent = this; this.children.push(child); return child; }
+  remove() { if (!this.parent) return; const i = this.parent.children.indexOf(this); if (i >= 0) this.parent.children.splice(i, 1); this.parent = null; }
+  addEventListener(type, listener) { (this.listeners[type] = this.listeners[type] || []).push(listener); }
+  focus() { this.focused = true; }
+  select() { this.selected = true; }
+  fire(type, event) { for (const listener of this.listeners[type] || []) listener(event || {target:this}); }
+}
+const document = {
+  body: new Element("body"), listeners: {},
+  createElement: tag => new Element(tag),
+  addEventListener(type, listener) { (this.listeners[type] = this.listeners[type] || []).push(listener); },
+  removeEventListener(type, listener) { this.listeners[type] = (this.listeners[type] || []).filter(x => x !== listener); },
+  key(key) { for (const listener of this.listeners.keydown || []) listener({key, preventDefault() {}}); },
+};
+const context = { window: {}, document, console };
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
+const confirm = context.window.PosConfirm, out = {};
+const overlay = () => document.body.children[0];
+const parts = () => { const box = overlay().children[0], actions = box.children[3]; return {box, title:box.children[0], message:box.children[1], field:box.children[2], error:actions.children[0], cancel:actions.children[1], ok:actions.children[2]}; };
+(async () => {
+  let settled = false;
+  const value = confirm.input({title:"輸入售價", message:"請輸入整數", value:"12", inputType:"number", validate:v => /^\d+$/.test(v) ? null : "請輸入整數"}).then(v => { settled = true; return v; });
+  let p = parts();
+  out.rendered = {title:p.title.textContent, message:p.message.textContent, value:p.field.value, inputType:p.field.type};
+  p.field.value = "bad";
+  document.key("Enter");
+  out.invalid = {settled, overlays:document.body.children.length, error:p.error.textContent};
+  p.field.value = "34";
+  document.key("Enter");
+  out.enter = {value:await value, overlays:document.body.children.length};
+  const esc = confirm.input({}); document.key("Escape"); out.esc = {value:await esc, overlays:document.body.children.length};
+  const outside = confirm.input({}); overlay().fire("mousedown", {target:overlay()}); out.overlay = {value:await outside, overlays:document.body.children.length};
+  let boxSettled = false;
+  const inside = confirm.input({}).then(v => { boxSettled = true; return v; });
+  const box = overlay().children[0]; box.fire("mousedown", {target:box});
+  out.box = {settledAfterClick:boxSettled, overlaysAfterClick:document.body.children.length};
+  document.key("Escape"); out.box.value = await inside; out.box.overlaysAfterEscape = document.body.children.length;
+  process.stdout.write(JSON.stringify(out));
+})();
+'''
+        result = subprocess.run(
+            ["node", "-e", script, str(STATIC / "js" / "confirm.js")],
+            cwd=ROOT, text=True, capture_output=True, encoding="utf-8",
+        )
+        if result.returncode != 0:
+            self.fail(result.stderr)
+        out = json.loads(result.stdout)
+        self.assertEqual(out["rendered"], {
+            "title": "輸入售價", "message": "請輸入整數", "value": "12", "inputType": "number"})
+        self.assertEqual(out["invalid"], {"settled": False, "overlays": 1, "error": "請輸入整數"})
+        self.assertEqual(out["enter"], {"value": "34", "overlays": 0})
+        self.assertEqual(out["esc"], {"value": None, "overlays": 0})
+        self.assertEqual(out["overlay"], {"value": None, "overlays": 0})
+        self.assertEqual(out["box"], {
+            "settledAfterClick": False, "overlaysAfterClick": 1,
+            "value": None, "overlaysAfterEscape": 0})
 
-    def test_shared_resource_versions_are_192(self):
+    def test_shared_resource_versions_are_193(self):
         for name in ("index.html", "variant_editor.html", "variant_batch.html",
                      "field_editor.html"):
             source = (STATIC / name).read_text(encoding="utf-8")
-            versions = set(re.findall(r"\\?v=(\\d+)", source))
-            self.assertEqual(versions, {"192"}, f"{name} 版號不一致: {versions}")
+            versions = set(re.findall(r"\?v=(\d+)", source))
+            self.assertEqual(versions, {"193"}, f"{name} 版號不一致: {versions}")
 
 
 if __name__ == "__main__":

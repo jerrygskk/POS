@@ -172,25 +172,19 @@ window.PosPages["page-catalog"] = {
       return window.groupVariantsByModel(p.variants, this.modelOrder);
     },
 
-    // 款式修改與新增款式共用同一個子視窗機制:開窗前先鎖主視窗,
-    // 開窗失敗要自己解鎖(成功時由關窗事件解鎖)。
-    async openChildWindow(page, context) {
-      window.PosDesktopLock.lock();
-      try {
-        await API.invoke("desktop.child_window.open", {page, context});
-      } catch (error) {
-        window.PosDesktopLock.unlock();
-        this.showError(error.message);
-      }
-    },
     async openVariantEditor(product, variant) {
-      await this.openChildWindow("variant_editor", {product, variant});
+      await this.openChildWindow({
+        page: "variant_editor", context: {product, variant},
+      });
     },
     // product 為 null=不指定產品(由子視窗自己選)
     async openAddVariant(product) {
-      await this.openChildWindow("variant_batch", product ? {
-        category_id: product.category_id, product_id: product.product_id,
-      } : {});
+      await this.openChildWindow({
+        page: "variant_batch",
+        context: product ? {
+          category_id: product.category_id, product_id: product.product_id,
+        } : {},
+      });
     },
     async onChildWindowClosed(event) {
       if (event && event.detail && event.detail.saved) await this.reload();

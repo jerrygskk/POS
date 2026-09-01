@@ -192,9 +192,15 @@ class SettingsLayersTests(unittest.TestCase):
         self.assertIn("await API.deleteCategoryField(this.selCatId, f.field_id)", source)
         # 規格編輯改開子視窗:原本的網頁遮罩對話框已移除
         self.assertIn('page: "field_editor"', source)
+        self.assertIn("this.openChildWindow({", source)
         self.assertNotIn("fieldPopup", source)
         self.assertNotIn("fieldPopup", html)
-        self.assertIn("window.PosDesktopLock.lock()", source)
+        shared = (Path(__file__).parents[1] / "static/js/pos_shared.js").read_text(
+            encoding="utf-8")
+        self.assertIn("window.PosDesktopLock.lock()", shared)
+        self.assertIn("window.PosDesktopLock.unlock()", shared)
+        self.assertIn('API.invoke("desktop.child_window.open", payload)', shared)
+        self.assertIn("this.showError(error.message)", shared)
 
     def test_field_editor_child_window_is_registered_and_self_contained(self):
         from lib.child_window import CHILD_PAGES

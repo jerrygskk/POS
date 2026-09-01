@@ -22,7 +22,8 @@ const fs = require("fs"), vm = require("vm");
 const context = {window: {PosPages: {}, PosDesktopLock: {lock(){}, unlock(){}}},
   API: {}, console, setTimeout, clearTimeout};
 vm.createContext(context);
-vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);  // pos_shared.js
+vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);  // catalog.js
 const window = context.window;
 const page = window.PosPages["page-catalog"];
 
@@ -36,6 +37,7 @@ function mkState(extra) {
       catch (error) { errors.push(error.message); }
     },
   };
+  Object.assign(s, window.PosMixin.methods);
   Object.assign(s, page.data.call(s));
   for (const [name, method] of Object.entries(page.methods)) s[name] = method.bind(s);
   for (const [name, getter] of Object.entries(page.computed || {}))
@@ -50,7 +52,8 @@ function done() { process.stdout.write(JSON.stringify(out)); }
 BODY
 '''.replace("BODY", body)
         result = subprocess.run(
-            ["node", "-e", script, str(STATIC / "js" / "catalog.js")],
+            ["node", "-e", script, str(STATIC / "js" / "pos_shared.js"),
+             str(STATIC / "js" / "catalog.js")],
             cwd=ROOT, text=True, capture_output=True, encoding="utf-8",
         )
         if result.returncode != 0:
@@ -96,20 +99,25 @@ done();
         self.assertEqual(out["2"], expected)
         self.assertEqual(out["3"], expected)
 
-    def test_open_editor_locks_before_bridge_and_unlocks_only_on_failure(self):
+    def test_catalog_child_windows_use_shared_options_and_lock_lifecycle(self):
         out = self._run(r'''
 const order = [];
+const payloads = [];
 window.PosDesktopLock = {
   lock: () => order.push("lock"), unlock: () => order.push("unlock")};
 API.invoke = async (action, payload) => {
   order.push(action);
+  payloads.push(payload);
   out.payload = payload;
-  if (payload.context.variant.variant_id === 9) throw new Error("開啟失敗");
+  if (payload.page === "variant_editor" && payload.context.variant.variant_id === 9)
+    throw new Error("開啟失敗");
 };
 const s = mkState();
 (async () => {
   await s.openVariantEditor({product_id:1}, {variant_id:2});
+  await s.openAddVariant({product_id:5, category_id:3});
   out.successOrder = order.slice();
+  out.successPayloads = payloads.slice();
   await s.openVariantEditor({product_id:1}, {variant_id:9});
   out.failureOrder = order.slice();
   out.errors = s._errors;
@@ -117,9 +125,14 @@ const s = mkState();
 })();
 ''')
         self.assertEqual(out["successOrder"], [
-            "lock", "desktop.child_window.open"])
+            "lock", "desktop.child_window.open", "lock", "desktop.child_window.open"])
+        self.assertEqual(out["successPayloads"], [
+            {"page": "variant_editor",
+             "context": {"product": {"product_id": 1}, "variant": {"variant_id": 2}}},
+            {"page": "variant_batch", "context": {"category_id": 3, "product_id": 5}},
+        ])
         self.assertEqual(out["failureOrder"], [
-            "lock", "desktop.child_window.open",
+            "lock", "desktop.child_window.open", "lock", "desktop.child_window.open",
             "lock", "desktop.child_window.open", "unlock"])
         self.assertEqual(out["payload"], {
             "page": "variant_editor",

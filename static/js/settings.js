@@ -35,7 +35,7 @@ window.PosPages["page-settings"] = {
       // 產品 popup(單層)
       prodPopup: null,
       // 廠牌經營種類
-      openBrand: null, openBrandName: "", brandCatChecked: {},
+      openBrand: null, openBrandName: "", brandCatChecked: {}, brandLoadSeq: 0,
       snap: {},   // 載入時的名稱快照,用來判斷哪幾筆被改過(提醒條與批次儲存共用)
       pendingSort: {},       // kind → 拖過但還沒儲存的新順序(廠牌、手機品牌)
       pendingModelSort: {},  // 品牌 → 該品牌型號拖過但還沒儲存的新順序
@@ -309,24 +309,14 @@ window.PosPages["page-settings"] = {
       });
     },
     // 選項維護開 pywebview 子視窗(可拖、可縮):名稱／型態／必填／啟用／排序都在列上,
-    // 視窗只負責選項清單與建檔預設帶入值。開窗前鎖主視窗,開窗失敗自己解鎖。
+    // 視窗只負責選項清單與建檔預設帶入值。
     async openFieldPopup(f) {
       if (!f || !this.hasOptions(f)) return;   // 文字欄沒有選項可維護
       if (this.selCatId == null) return;
-      window.PosDesktopLock.lock();
-      try {
-        await API.invoke("desktop.child_window.open", {
-          page: "field_editor",
-          title: "規格選項",
-          context: {
-            category_id: this.selCatId,
-            field_id: f.field_id,
-          },
-        });
-      } catch (error) {
-        window.PosDesktopLock.unlock();
-        this.showError(error.message);
-      }
+      await this.openChildWindow({
+        page: "field_editor", title: "規格選項",
+        context: { category_id: this.selCatId, field_id: f.field_id },
+      });
     },
     async onChildWindowClosed(event) {
       const saved = !!(event && event.detail && event.detail.saved);
@@ -537,7 +527,12 @@ window.PosPages["page-settings"] = {
                                 { danger: true })) return;
       await this.keepEdits(kind, () => this.guard(async () => {
         await API[m.delete](item[m.id]);
-        if (this.openBrand === item[m.id]) this.openBrand = null;
+        if (this.openBrand === item[m.id]) {
+          this.brandLoadSeq++;
+          this.openBrand = null;
+          this.openBrandName = "";
+          this.brandCatChecked = {};
+        }
         await this.reloadAll();
       }));
     },
@@ -610,16 +605,29 @@ window.PosPages["page-settings"] = {
 
     // ==== 廠牌經營種類 ====
     async openBrandEditor(b) {
-      if (this.openBrand === b.brand_id) { this.openBrand = null; return; }
-      this.openBrand = b.brand_id; this.openBrandName = b.name;
+      const seq = ++this.brandLoadSeq;
+      if (this.openBrand === b.brand_id) {
+        this.openBrand = null;
+        this.openBrandName = "";
+        this.brandCatChecked = {};
+        return;
+      }
+      this.openBrand = b.brand_id;
+      this.openBrandName = b.name;
+      this.brandCatChecked = {};
       const checked = {};
-      await this.guard(async () => {
+      try {
         for (const c of this.categories) {
           const list = await API.listBrands({ category_id: c.category_id });
+          if (seq !== this.brandLoadSeq || this.openBrand !== b.brand_id) return;
           if (list.some(x => x.brand_id === b.brand_id)) checked[c.category_id] = true;
         }
+        if (seq !== this.brandLoadSeq || this.openBrand !== b.brand_id) return;
         this.brandCatChecked = checked;
-      });
+      } catch (e) {
+        if (seq !== this.brandLoadSeq || this.openBrand !== b.brand_id) return;
+        this.showError(e.message);
+      }
     },
     async toggleBrandCat(c) {
       const checked = Object.assign({}, this.brandCatChecked);
