@@ -27,5 +27,6 @@ tests/test_import_excel.py
 
 # 執行期產物(與 exe 同層)
 pos.db
+pos.db.bak-*
 error.log
 backups/

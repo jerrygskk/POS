@@ -4,7 +4,8 @@ window.PosPages["page-checkout"] = {
   inject: ["showError"],
   data() {
     return { scanCode: "", searchQ: "", searchResults: [], cart: [],
-             payments: [], payment: "現金", orderDiscount: 0, paid: 0, doneMsg: "" };
+             payments: [], payment: "現金", orderDiscount: 0, paid: 0, doneMsg: "",
+             submitting: false };
   },
   computed: {
     total() {
@@ -27,13 +28,16 @@ window.PosPages["page-checkout"] = {
   },
   unmounted() { document.removeEventListener("click", this._refocus); },
   methods: {
-    addItem(r) {
+    async addItem(r) {
       let price = r.price;
       if (price === null) {
-        const s = prompt(`「${r.name}」尚未定價，請輸入成交單價:`);
+        const s = await PosConfirm.input({
+          title: "未定價商品", message: `「${r.name}」尚未定價，請輸入成交單價：`,
+          inputType: "number",
+          validate: value => /^\d+$/.test(value) ? null : "價格必須是非負整數",
+        });
         if (s === null) return;
-        price = parseInt(s, 10);
-        if (isNaN(price) || price < 0) { this.showError("價格輸入不正確"); return; }
+        price = Number(s);
       }
       const dup = this.cart.find(i => i.variant_id === r.variant_id);
       if (dup) dup.qty += 1;
@@ -47,7 +51,7 @@ window.PosPages["page-checkout"] = {
       await this.guard(async () => {  // 查無條碼:保留輸入
         const query = await API.barcodeQuery(this.scanCode);
         if (!query) return;
-        this.addItem(query.data);
+        await this.addItem(query.data);
         this.scanCode = "";
       });
     },
@@ -56,16 +60,22 @@ window.PosPages["page-checkout"] = {
       this.searchResults = await API.listProducts({q: this.searchQ.trim()});
     },
     async checkout() {
-      await this.guard(async () => {
-        const r = await API.checkout({
-          payment: this.payment, order_discount: this.orderDiscount,
-          paid: this.paid,
-          items: this.cart.map(i => ({ variant_id: i.variant_id, qty: i.qty,
-            unit_price: i.unit_price, discount: i.discount })) });
-        this.doneMsg = `結帳完成，找零 ${r.change} 元(交易編號 ${r.sale_id})`;
-        this.cart = []; this.orderDiscount = 0; this.paid = 0;
-        setTimeout(() => this.doneMsg = "", 5000);
-      });
+      if (this.submitting) return;
+      this.submitting = true;
+      try {
+        await this.guard(async () => {
+          const r = await API.checkout({
+            payment: this.payment, order_discount: this.orderDiscount,
+            paid: this.paid,
+            items: this.cart.map(i => ({ variant_id: i.variant_id, qty: i.qty,
+              unit_price: i.unit_price, discount: i.discount })) });
+          this.doneMsg = `結帳完成，找零 ${r.change} 元(交易編號 ${r.sale_id})`;
+          this.cart = []; this.orderDiscount = 0; this.paid = 0;
+          setTimeout(() => this.doneMsg = "", 5000);
+        });
+      } finally {
+        this.submitting = false;
+      }
     },
   },
 };

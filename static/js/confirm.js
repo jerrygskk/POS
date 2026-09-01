@@ -4,6 +4,7 @@
 // 用法:
 //   if (!await PosConfirm.ask("確定刪除?")) return;
 //   await PosConfirm.notify("已完成。");
+//   const value = await PosConfirm.input({ title:"輸入", value:"" });
 // 主視窗與子視窗共用(各自的 html 都要載入本檔)。
 window.PosConfirm = {
   // options:{ title, confirmText, cancelText, danger }
@@ -13,6 +14,72 @@ window.PosConfirm = {
   notify(message, options) {
     return this._open(message, Object.assign(
       { cancel: false, confirmText: "確定" }, options || {}));
+  },
+  // options:{ title, message, value, inputType, validate }
+  input(options) {
+    options = options || {};
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.className = "modal-overlay modal-centered";
+      const box = document.createElement("div");
+      box.className = "modal confirm-box";
+      if (options.title) {
+        const title = document.createElement("div");
+        title.className = "confirm-title";
+        title.textContent = options.title;
+        box.appendChild(title);
+      }
+      if (options.message) {
+        const message = document.createElement("div");
+        message.className = "confirm-text";
+        message.textContent = options.message;
+        box.appendChild(message);
+      }
+      const field = document.createElement("input");
+      field.type = options.inputType || "text";
+      field.value = options.value == null ? "" : options.value;
+      box.appendChild(field);
+      const actions = document.createElement("div");
+      actions.className = "modal-actions";
+      const error = document.createElement("div");
+      error.className = "modal-warn";
+      actions.appendChild(error);
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.textContent = "取消";
+      actions.appendChild(cancelBtn);
+      const okBtn = document.createElement("button");
+      okBtn.type = "button";
+      okBtn.className = "primary";
+      okBtn.textContent = "確定";
+      actions.appendChild(okBtn);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+
+      const close = (result) => {
+        document.removeEventListener("keydown", onKey, true);
+        overlay.remove();
+        resolve(result);
+      };
+      const submit = () => {
+        const message = options.validate ? options.validate(field.value) : null;
+        if (message) { error.textContent = message; return; }
+        close(field.value);
+      };
+      const onKey = (event) => {
+        if (event.key === "Escape") { event.preventDefault(); close(null); }
+        else if (event.key === "Enter") { event.preventDefault(); submit(); }
+      };
+      okBtn.addEventListener("click", submit);
+      cancelBtn.addEventListener("click", () => close(null));
+      overlay.addEventListener("mousedown", (event) => {
+        if (event.target === overlay) close(null);
+      });
+      document.addEventListener("keydown", onKey, true);
+      document.body.appendChild(overlay);
+      field.focus();
+      field.select();
+    });
   },
   _open(message, opts) {
     return new Promise((resolve) => {
