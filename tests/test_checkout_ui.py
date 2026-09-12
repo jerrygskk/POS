@@ -151,12 +151,17 @@ const parts = () => { const box = overlay().children[0], actions = box.children[
             "settledAfterClick": False, "overlaysAfterClick": 1,
             "value": None, "overlaysAfterEscape": 0})
 
-    def test_shared_resource_versions_are_193(self):
+    def test_shared_resource_versions_are_consistent(self):
+        # 只驗「四個頁面共用同一個版號」,不寫死數字:
+        # 寫死會讓每次 bump ?v= 都要回頭改測試(踩過)。
+        seen = {}
         for name in ("index.html", "variant_editor.html", "variant_batch.html",
                      "field_editor.html"):
             source = (STATIC / name).read_text(encoding="utf-8")
             versions = set(re.findall(r"\?v=(\d+)", source))
-            self.assertEqual(versions, {"193"}, f"{name} 版號不一致: {versions}")
+            self.assertEqual(len(versions), 1, f"{name} 版號不一致: {versions}")
+            seen[name] = versions.pop()
+        self.assertEqual(len(set(seen.values())), 1, f"四個頁面版號不一致: {seen}")
 
 
 if __name__ == "__main__":

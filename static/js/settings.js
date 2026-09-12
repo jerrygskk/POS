@@ -630,13 +630,21 @@ window.PosPages["page-settings"] = {
       }
     },
     async toggleBrandCat(c) {
+      // 與 openBrandEditor 同一套競態保護:送出後若已切換廠牌或重新載入,
+      // 晚回來的成功／失敗都不得寫回目前的勾選狀態。
+      const seq = this.brandLoadSeq;
+      const brandId = this.openBrand;
       const checked = Object.assign({}, this.brandCatChecked);
       checked[c.category_id] = !checked[c.category_id];
       const ids = this.categories.filter(x => checked[x.category_id]).map(x => x.category_id);
-      await this.guard(async () => {
-        await API.setBrandCategories(this.openBrand, ids);
+      try {
+        await API.setBrandCategories(brandId, ids);
+        if (seq !== this.brandLoadSeq || this.openBrand !== brandId) return;
         this.brandCatChecked = checked;
-      });
+      } catch (e) {
+        if (seq !== this.brandLoadSeq || this.openBrand !== brandId) return;
+        this.showError(e.message);
+      }
     },
   },
 };

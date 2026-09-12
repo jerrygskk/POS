@@ -195,6 +195,70 @@ const waitForRequest = async index => {
         self.assertEqual(out["requests"], [1, 1, 2])
         self.assertEqual(out["errors"], [])
 
+    def test_late_brand_category_toggle_does_not_affect_new_editor(self):
+        out = self._run(r"""
+API.listBrands = () => Promise.resolve([]);
+let pending = null;
+API.setBrandCategories = (brand_id, ids) =>
+  new Promise((resolve, reject) => { pending = {brand_id, ids, resolve, reject}; });
+const s = mkState({categories:[{category_id:1}, {category_id:2}]});
+const errors = [];
+s.showError = message => errors.push(message);
+(async () => {
+  await s.openBrandEditor({brand_id:1, name:"舊廠牌"});
+  const toggling = s.toggleBrandCat({category_id:1});
+  await s.openBrandEditor({brand_id:2, name:"新廠牌"});
+  out.sent = [pending.brand_id, pending.ids];
+  pending.resolve({ok:true});
+  await toggling;
+  out.afterLateSuccess = [s.openBrand, s.openBrandName, s.brandCatChecked];
+  out.errors = errors;
+  done();
+})();
+""")
+        self.assertEqual(out["sent"], [1, [1]])
+        self.assertEqual(out["afterLateSuccess"], [2, "新廠牌", {}])
+        self.assertEqual(out["errors"], [])
+
+    def test_late_brand_category_toggle_failure_does_not_show_error(self):
+        out = self._run(r"""
+API.listBrands = () => Promise.resolve([]);
+let pending = null;
+API.setBrandCategories = (brand_id, ids) =>
+  new Promise((resolve, reject) => { pending = {brand_id, ids, resolve, reject}; });
+const s = mkState({categories:[{category_id:1}]});
+const errors = [];
+s.showError = message => errors.push(message);
+(async () => {
+  await s.openBrandEditor({brand_id:1, name:"舊廠牌"});
+  const toggling = s.toggleBrandCat({category_id:1});
+  await s.openBrandEditor({brand_id:2, name:"新廠牌"});
+  pending.reject(new Error("寫入失敗"));
+  await toggling;
+  out.errors = errors;
+  out.editor = [s.openBrand, s.brandCatChecked];
+  done();
+})();
+""")
+        self.assertEqual(out["errors"], [])
+        self.assertEqual(out["editor"], [2, {}])
+
+    def test_current_brand_category_toggle_failure_shows_error(self):
+        out = self._run(r"""
+API.listBrands = () => Promise.resolve([]);
+API.setBrandCategories = () => Promise.reject(new Error("寫入失敗"));
+const s = mkState({categories:[{category_id:1}]});
+s.showError = message => { out.error = message; };
+(async () => {
+  await s.openBrandEditor({brand_id:1, name:"舊廠牌"});
+  await s.toggleBrandCat({category_id:1});
+  out.checked = s.brandCatChecked;
+  done();
+})();
+""")
+        self.assertEqual(out["error"], "寫入失敗")
+        self.assertEqual(out["checked"], {})
+
     def test_current_brand_load_failure_shows_error(self):
         out = self._run(r'''
 API.listBrands = () => Promise.reject(new Error("廠牌讀取失敗"));
