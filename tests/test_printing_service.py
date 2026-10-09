@@ -29,6 +29,21 @@ class PrintingServiceTests(FacadeTestCase):
         error = self.assert_application_error("validation_error", "printing.barcode", {"variant_id": vid})
         self.assertEqual(error.message, "原廠條碼商品不需列印標籤。")
 
+    @patch("lib.printing_service.LabelPrinter.print")
+    @patch("lib.printing_service.render_label")
+    def test_models_use_alias_and_configured_order(self, render, print_label):
+        vid = self._create_variant(barcode="STORE-MODELS")
+        bid = self.create_phone_brand("測試品牌")
+        first = self.create_model(bid, "測試型號甲")
+        second = self.create_model(bid, "測試型號乙")
+        self.invoke("models.update", {"id": first, "fields": {"alias": "甲", "sort": 2}})
+        self.invoke("models.update", {"id": second, "fields": {"sort": 1}})
+        self.invoke("variants.set_models", {"id": vid, "model_ids": [first, second]})
+        self.invoke("printing.barcode", {"variant_id": vid, "copies": 1})
+        render.assert_called_once_with("玻璃保護貼", "透明", "$590", "STORE-MODELS",
+                                       models=["測試型號乙", "甲"])
+        print_label.assert_called_once_with(render.return_value, 1)
+
     def test_variant_without_barcode_is_rejected(self):
         result = self.invoke("products.create", {"name": "保護殼", "category_id": self.cid,
             "variants": [{"attributes": {"顏色": "透明"}, "price": 100, "barcodes": []}]})

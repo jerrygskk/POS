@@ -1,6 +1,9 @@
 """Label layout behaviour: fixed size, wrapping rules, and print-safe pixels."""
+import hashlib
 import unittest
+from unittest.mock import patch
 
+from lib import label_layout
 from lib.label_layout import _name_lines, _spec_lines, _font, render_label
 from PIL import Image, ImageDraw
 
@@ -16,6 +19,95 @@ def _draw():
 
 
 class LabelLayoutTests(unittest.TestCase):
+    def test_no_models_matches_baseline_pixels(self):
+        # 修改前直接載入基準 commit 836190f 的 label_layout.py 產生，鎖住無型號排版。
+        cases = (
+            (_SHORT_NAME, _SHORT_SPEC, "$590", "5aa21f34ca801b1b819d31887cd849bfc0e21d11f205578478c679020a65963a"),
+            (_LONG_NAME, _LONG_SPEC, "$1290", "257af7a91f4d4ccffccf56a146597dcc37443f1fc937b2406f477dadaa765cc7"),
+            ("超長品名" * 40, _LONG_SPEC, "", "762f4f2b1e10bfab5d50662056bff99d92eaacca5666a916c683e3ae9c07d3ba"),
+        )
+        for name, spec, price, expected in cases:
+            for kwargs in ({}, {"models": ()}):
+                with self.subTest(name=name, kwargs=kwargs):
+                    image = render_label(name, spec, price, _CODE, **kwargs)
+                    self.assertEqual(hashlib.sha256(image.tobytes()).hexdigest(), expected)
+
+    def test_model_line_lists_models_that_fit(self):
+        draw = _draw()
+        font = _font("C:/Windows/Fonts/msjh.ttc", 14)
+        for models, expected in (((), ""), (("i17 ProMax",), "i17 ProMax"),
+                                 (("i17", "i16", "i15"), "i17、i16、i15")):
+            with self.subTest(models=models):
+                self.assertEqual(label_layout._model_line(draw, models, font, 296), expected)
+
+    def test_model_line_keeps_maximum_fitting_prefix_and_total(self):
+        draw = _draw()
+        font = _font("C:/Windows/Fonts/msjh.ttc", 14)
+        models = [f"iPhone {i} Pro Max" for i in range(17, 9, -1)]
+        line = label_layout._model_line(draw, models, font, 296)
+        self.assertTrue(line.endswith(" 等 8 款"))
+        self.assertLessEqual(label_layout._width(draw, line, font), 296)
+        prefix = line.removesuffix(" 等 8 款")
+        count = len(prefix.split("、"))
+        self.assertEqual(prefix, "、".join(models[:count]))
+        self.assertGreater(label_layout._width(draw, "、".join(models[:count + 1]) + " 等 8 款", font), 296)
+
+    def test_overlong_model_keeps_ellipsis_and_total_suffix(self):
+        # 虛構極端型號，確保第一個名稱本身就超過整行寬度。
+        models = ["測試超長型號" * 12] * 8
+        draw = _draw()
+        font = _font("C:/Windows/Fonts/msjh.ttc", 14)
+        line = label_layout._model_line(draw, models, font, 296)
+        self.assertTrue(line.endswith("… 等 8 款"))
+        self.assertLessEqual(label_layout._width(draw, line, font), 296)
+        self.assertGreater(label_layout._width(draw, line.removesuffix("… 等 8 款") + "號… 等 8 款", font), 296)
+
+    def test_single_overlong_model_has_no_total_suffix(self):
+        # 虛構極端型號；單一型號只需刪節號，不顯示款數。
+        draw = _draw()
+        font = _font("C:/Windows/Fonts/msjh.ttc", 14)
+        line = label_layout._model_line(draw, ["測試超長型號" * 12], font, 296)
+        self.assertTrue(line.endswith("…"))
+        self.assertNotIn("等 1 款", line)
+        self.assertLessEqual(label_layout._width(draw, line, font), 296)
+
+    def test_models_keep_bottom_margin_barcode_and_black_white_pixels(self):
+        models = [f"iPhone {i} Pro Max" for i in range(17, 9, -1)]
+        image = render_label(_LONG_NAME, _LONG_SPEC, "$1290", _CODE, models=models).convert("L")
+        self.assertEqual(set(image.crop((0, 154, 320, 160)).get_flattened_data()), {255})
+        self.assertIn(0, image.crop((12, 112, 308, 144)).get_flattened_data())
+        self.assertEqual(set(image.get_flattened_data()) - {0, 255}, set())
+
+    def test_models_sacrifice_second_name_line_before_second_spec_line(self):
+        draw = _draw()
+        price_width = label_layout._width(draw, "$1290", _font("C:/Windows/Fonts/msjhbd.ttc", 22))
+        self.assertEqual(len(_name_lines(draw, _LONG_NAME, price_width)[0]), 2)
+        font = _font("C:/Windows/Fonts/msjh.ttc", 14)
+        spec = _spec_lines(draw, _LONG_SPEC, font, 296 - label_layout._width(draw, _CODE, font) - 8, 296)
+        self.assertEqual(len(spec), 2)
+        original = ImageDraw.ImageDraw.text
+        with patch.object(ImageDraw.ImageDraw, "text", autospec=True, side_effect=original) as text:
+            render_label(_LONG_NAME, _LONG_SPEC, "$1290", _CODE, models=["i17 ProMax"])
+        printed = [(call.args[1], call.args[2]) for call in text.call_args_list]
+        name = label_layout._fit(draw, _LONG_NAME, "C:/Windows/Fonts/msjhbd.ttc", (18,), 296 - price_width - 8)[0]
+        self.assertEqual(printed, [((308 - price_width, 16), "$1290"), ((12, 16), name),
+                                  ((12, 38), "i17 ProMax"), ((12, 56), spec[0]),
+                                  ((308 - label_layout._width(draw, _CODE, font), 56), _CODE),
+                                  ((12, 74), spec[1])])
+
+    def test_single_name_model_spec_lines_leave_at_least_minimum_barcode_height(self):
+        draw = _draw()
+        name_font = _name_lines(draw, _SHORT_NAME, 0)[1]
+        spec_font = _font("C:/Windows/Fonts/msjh.ttc", 14)
+        top = label_layout._TOP + (name_font.size + 4) + 2 * (spec_font.size + 4) + 2
+        self.assertEqual(top, 16 + 30 + 18 + 18 + 2)
+        self.assertEqual(top, 84)
+        self.assertEqual(label_layout._SIZE[1] - label_layout._BOTTOM - top, 68)
+        self.assertGreaterEqual(68, label_layout._BARCODE_MIN)
+        with patch("lib.label_layout._barcode_image", wraps=label_layout._barcode_image) as barcode:
+            render_label(_SHORT_NAME, _SHORT_SPEC, "", _CODE, models=["i17"])
+        barcode.assert_called_once_with(_CODE, 56)
+
     def test_render_label_has_fixed_printer_dimensions(self):
         image = render_label(_SHORT_NAME, _SHORT_SPEC, "$590", _CODE)
         self.assertEqual(image.size, (320, 160))

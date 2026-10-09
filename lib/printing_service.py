@@ -38,8 +38,9 @@ class PrintingService:
     def barcode(self, variant_id, copies):
         data = self.repo.label_data(variant_id)
         data["specification"] = product_data.display_attrs(self.repo.connection, [variant_id]).get(variant_id, "")
+        models = product_data.models_by_variant(self.repo.connection, [variant_id]).get(variant_id, [])
         price = "" if data["price"] is None else f"${data['price']}"
-        image = render_label(data["name"], data["specification"], price, data["barcode"])
+        image = render_label(data["name"], data["specification"], price, data["barcode"], models=models)
         self.printer_factory().print(image, copies)
         return {"ok": True}
 

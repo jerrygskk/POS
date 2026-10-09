@@ -110,6 +110,23 @@ def _spec_lines(draw, text, font, first_max, second_max):
     return lines[:2]
 
 
+def _model_line(draw, models, font, maximum):
+    if not models:
+        return ""
+    text = "、".join(models)
+    if _width(draw, text, font) <= maximum:
+        return text
+    suffix = f" 等 {len(models)} 款" if len(models) > 1 else ""
+    for count in range(len(models) - 1, 0, -1):
+        text = "、".join(models[:count]) + suffix
+        if _width(draw, text, font) <= maximum:
+            return text
+    text = models[0]
+    while text and _width(draw, text + "…" + suffix, font) > maximum:
+        text = text[:-1]
+    return text + "…" + suffix
+
+
 def _barcode_image(value, height):
     output = BytesIO()
     Code128(value, writer=ImageWriter()).write(output, options={
@@ -120,7 +137,9 @@ def _barcode_image(value, height):
     return Image.open(output).convert("RGB").resize((296, height), Image.Resampling.NEAREST)
 
 
-def render_label(name, specification, price, barcode):
+# 有型號的商品靠規格區分款式，規格第二行比品名第二行重要，
+# 所以空間不足時先縮品名；無型號仍沿用原來的犧牲順序與排版。
+def render_label(name, specification, price, barcode, models=()):
     image = Image.new("RGB", _SIZE, "white")
     draw = ImageDraw.Draw(image)
     # 熱感列印只有黑與白：灰階平滑的細筆畫會在二值化時被判成白色而消失，
@@ -136,19 +155,30 @@ def render_label(name, specification, price, barcode):
     code_text = str(barcode or "")
     code_width = _width(draw, code_text, spec_font)
     spec_lines = _spec_lines(draw, specification, spec_font, 296 - code_width - 8, 296)
+    model_line = _model_line(draw, models, spec_font, 296)
 
     def space_left():
         top = _TOP + len(name_lines) * (name_font.size + 4)
         top += len(spec_lines) * (spec_font.size + 4) + 2
+        if models:
+            top += spec_font.size + 4
         return _SIZE[1] - _BOTTOM - top
 
-    # 條碼被壓到掃不動時，先犧牲規格第二行，再犧牲品名第二行；下緣留白絕不動。
-    if space_left() < _BARCODE_MIN and len(spec_lines) > 1:
-        spec_lines = _spec_lines(draw, specification, spec_font, 296 - code_width - 8, 0)
-    if space_left() < _BARCODE_MIN and len(name_lines) > 1:
-        name_font = _font(_BOLD_FONT, 18)
-        name_lines = [_fit(draw, name, _BOLD_FONT, (18,),
-                           296 - price_width - (8 if price else 0))[0]]
+    if models:
+        if space_left() < _BARCODE_MIN and len(name_lines) > 1:
+            name_font = _font(_BOLD_FONT, 18)
+            name_lines = [_fit(draw, name, _BOLD_FONT, (18,),
+                               296 - price_width - (8 if price else 0))[0]]
+        if space_left() < _BARCODE_MIN and len(spec_lines) > 1:
+            spec_lines = _spec_lines(draw, specification, spec_font, 296 - code_width - 8, 0)
+    else:
+        # 條碼被壓到掃不動時，先犧牲規格第二行，再犧牲品名第二行；下緣留白絕不動。
+        if space_left() < _BARCODE_MIN and len(spec_lines) > 1:
+            spec_lines = _spec_lines(draw, specification, spec_font, 296 - code_width - 8, 0)
+        if space_left() < _BARCODE_MIN and len(name_lines) > 1:
+            name_font = _font(_BOLD_FONT, 18)
+            name_lines = [_fit(draw, name, _BOLD_FONT, (18,),
+                               296 - price_width - (8 if price else 0))[0]]
 
     y = _TOP
     if price:
@@ -156,6 +186,9 @@ def render_label(name, specification, price, barcode):
     for line in name_lines:
         draw.text((_LEFT, y), line, font=name_font, fill="black")
         y += name_font.size + 4
+    if models:
+        draw.text((_LEFT, y), model_line, font=spec_font, fill="black")
+        y += spec_font.size + 4
     for index, line in enumerate(spec_lines):
         draw.text((_LEFT, y), line, font=spec_font, fill="black")
         if index == 0 and code_text:
