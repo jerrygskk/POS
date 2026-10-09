@@ -471,11 +471,11 @@ class CatalogTemplateContractTests(unittest.TestCase):
             ".catalog-filter-row { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }",
             self.css,
         )
-        self.assertIn(".catalog-table { min-width: 1240px;", self.css)
+        self.assertIn(".catalog-table { min-width: 1230px;", self.css)
         self.assertIn(".catalog-table .catalog-variant-row > td { vertical-align: top; }", self.css)
         self.assertIn(".catalog-table .catalog-product-row > td { vertical-align: middle;", self.css)
-        self.assertIn(".catalog-col-model { width: 220px; }", self.css)
-        self.assertIn(".catalog-col-spec { width: auto; }", self.css)
+        self.assertIn(".catalog-col-model { width: 130px; }", self.css)
+        self.assertIn(".catalog-col-spec { width: 410px; }", self.css)
         # 型號格一行一個型號:每個型號自己一個 div,分隔號留行尾,單一型號不折行
         self.assertIn('class="catalog-model-line"', self.catalog)
         self.assertIn('v-for="(m, mi) in modelLines(p, v)"', self.catalog)
@@ -496,7 +496,7 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertIn('v-model="q" @keyup.enter="reload"', self.catalog)
         self.assertIn('<button class="primary" @click="reload">', self.catalog)
         self.assertIn(
-            ".catalog-search-input { flex: 1 0 320px; min-width: 320px; }",
+            ".catalog-search-input { flex: 1 1 320px; min-width: 240px; max-width: 420px; }",
             self.css)
         self.assertNotIn("至設定修改", self.catalog)
 
@@ -509,6 +509,61 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertNotIn("種類", info)
         self.assertNotIn("廠牌", info)
         self.assertNotIn("p.active ?", info)
+
+    # 八欄欄寬與白卡寬度互相依賴:欄寬總和 1230 + 左右內距 16x2 = 白卡上限 1262。
+    # 只改其中一邊會讓表格被撐大或在卡片右緣擠出無作用的橫向捲軸,故以測試綁死。
+    CATALOG_COL_WIDTHS = {
+        "catalog-col-model": 130,
+        "catalog-col-spec": 410,
+        "catalog-col-stock": 55,
+        "catalog-col-barcode": 225,
+        "catalog-col-price": 85,
+        "catalog-col-effective-price": 85,
+        "catalog-col-status": 55,
+        "catalog-col-actions": 185,
+    }
+    CATALOG_CONTENT_WIDTH = 1230
+    CATALOG_CARD_PADDING = 16
+    # border-collapse:collapse 會把表格最外圈框線的一半畫在欄寬之外,
+    # 所以表格實際寬度是欄寬總和 +1。白卡少留這 1px 就會溢出,
+    # 瀏覽器為了 1px 長出一條 16px 高的橫向捲軸(實測過)。
+    CATALOG_TABLE_OUTER_BORDER = 1
+
+    def _css_px(self, selector, prop):
+        match = re.search(
+            r"\." + re.escape(selector) + r"\s*\{[^}]*?" + re.escape(prop)
+            + r"\s*:\s*(\d+)px", self.css)
+        self.assertIsNotNone(match, f"找不到 .{selector} 的 {prop}")
+        return int(match.group(1))
+
+    def test_catalog_column_widths_sum_to_card_content_width(self):
+        widths = {name: self._css_px(name, "width")
+                  for name in self.CATALOG_COL_WIDTHS}
+        self.assertEqual(widths, self.CATALOG_COL_WIDTHS)
+        self.assertEqual(sum(widths.values()), self.CATALOG_CONTENT_WIDTH)
+        card = self._css_px("catalog-card", "max-width")
+        self.assertEqual(
+            card,
+            self.CATALOG_CONTENT_WIDTH + self.CATALOG_TABLE_OUTER_BORDER
+            + self.CATALOG_CARD_PADDING * 2)
+
+    def test_catalog_table_min_width_does_not_exceed_card_content(self):
+        self.assertLessEqual(
+            self._css_px("catalog-table", "min-width"),
+            self.CATALOG_CONTENT_WIDTH)
+
+    # 店內最長規格「10000mAh | Qi2 | 磁吸 | 支架 | 鈦原色 | Qi2超薄磁吸支架」
+    # 以 Microsoft JhengHei 15px 量測為 383px,加儲存格內距與框線共 405px。
+    # 規格欄小於這個值,那 43 筆長規格就會折行、該列變高。
+    def test_catalog_spec_column_fits_longest_real_spec(self):
+        self.assertGreaterEqual(self._css_px("catalog-col-spec", "width"), 405)
+
+    def test_catalog_card_wraps_whole_page(self):
+        self.assertIn('<div class="catalog-card">', self.catalog)
+        card = self.catalog.split('<div class="catalog-card">', 1)[1]
+        self.assertIn('class="scan-row catalog-filter-row"', card)
+        self.assertIn('<div class="catalog-table-scroll">', card)
+        self.assertIn("catalog-empty-result", card)
 
     def test_add_variant_entry_is_only_for_active_products_and_uses_ui_term(self):
         # 新增款式一律開子視窗:行內快速新增表單已移除,列上只留入口按鈕

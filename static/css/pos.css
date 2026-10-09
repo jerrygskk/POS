@@ -112,12 +112,23 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .w120 { width: 120px; } .w160 { width: 160px; }
 .chk { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* 商品資料庫整頁收進一張白卡(比照設定頁 .cat-detail):不設上限的話
+   table{width:100%} 會把多出來的寬度全灌進規格欄,資料被拉散、視線要跨過
+   大片空白才找得到庫存與條碼。
+   ⚠️ 上限 1263 = 八欄合計 1230 + 表格外框 1 + 左右內距 16x2。那個 1 不能省:
+   border-collapse:collapse 會把最外圈框線的一半畫在欄寬之外,表格實際是
+   1231px;只留 1262 會溢出 1px,瀏覽器就為這 1px 長出一條 16px 高的橫向
+   捲軸(實測過)。 */
+.catalog-card { background: var(--surface); border-radius: 8px; padding: 16px;
+  max-width: 1263px; }
 .catalog-filter-row { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }
-.catalog-search-input { flex: 1 0 320px; min-width: 320px; }
+/* 卡片收窄後搜尋框不能再無限撐開,否則會把篩選列其餘控制項擠出可視範圍 */
+.catalog-search-input { flex: 1 1 320px; min-width: 240px; max-width: 420px; }
 table.sub { margin: 0; }
 table.sub th, table.sub td { background: var(--surface-alt); font-size: 15px; }
 .catalog-table-scroll { overflow-x: auto; }
-.catalog-table { min-width: 1240px; }
+/* 最小寬度與欄寬總和一致;大於總和會在卡片右緣擠出一條無作用的橫向捲軸 */
+.catalog-table { min-width: 1230px; }
 .catalog-table .catalog-variant-row > td { vertical-align: top; }
 .catalog-table .catalog-product-row > td { vertical-align: middle; background: var(--hover); }
 .catalog-product-info strong { margin-right: 18px; }
@@ -291,14 +302,18 @@ button.primary:active { background: var(--primary-active); transform: translateY
 /* 欄寬全固定(table-layout: fixed):編輯狀態的輸入框不會推擠其他欄,
    避免「狀態」等窄欄被擠到折行、整表列高跳動 */
 table.sub { table-layout: fixed; }
-.catalog-col-model { width: 220px; }
-.catalog-col-spec { width: auto; }
-.catalog-col-stock { width: 60px; }
-.catalog-col-barcode { width: 185px; }
-.catalog-col-price { width: 100px; }
-.catalog-col-effective-price { width: 100px; }
-.catalog-col-status { width: 75px; }
-.catalog-col-actions { width: 190px; }
+/* 欄寬依 pos.db 真實資料以 Microsoft JhengHei 量測後配置,合計 1230px
+   (= .catalog-card 內容寬)。規格欄原為 auto,會吸收視窗所有剩餘寬度,
+   改固定 410 讓最長規格 405px 剛好不折行。條碼欄原 185px 裝不下
+   16~17 碼的外部條碼(店內 5 筆),一併加寬到 225。 */
+.catalog-col-model { width: 130px; }
+.catalog-col-spec { width: 410px; }
+.catalog-col-stock { width: 55px; }
+.catalog-col-barcode { width: 225px; }
+.catalog-col-price { width: 85px; }
+.catalog-col-effective-price { width: 85px; }
+.catalog-col-status { width: 55px; }
+.catalog-col-actions { width: 185px; }
 /* 型號格一行一個型號:分隔號留在行尾,單一型號本身不折行 */
 .catalog-model-cell .catalog-model-line { white-space: nowrap; line-height: 1.45; }
 table.sub th:nth-child(7), table.sub td { overflow-wrap: break-word; }
