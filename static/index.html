@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=196">
+<link rel="stylesheet" href="css/pos.css?v=197">
 </head>
 <body>
 <div id="app">
   <nav>
-    <img class="nav-logo" src="img/logo.png?v=196" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=197" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
-            :class="{active: page===key}" @click="page=key">{{ label }}</button>
+            :class="{active: page===key}" @click="goPage(key)">{{ label }}</button>
   </nav>
   <div class="error-bar" v-if="error">⚠ {{ error }}</div>
   <component :is="'page-' + page"></component>
@@ -215,7 +215,7 @@
             <span v-if="!p.active" class="catalog-inactive-badge">已停用</span>
           </td>
           <td colspan="2" class="catalog-product-actions">
-            <button class="btn-sm" @click="editInSettings">修改規格</button>
+            <button class="btn-sm" @click="editInSettings(p)">修改規格</button>
             <button class="btn-sm" @click="toggleProductActive(p)">{{ p.active ? '停用' : '啟用' }}</button>
             <button class="btn-sm" @click="deleteProduct(p)">刪除</button>
           </td>
@@ -525,23 +525,23 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=196"></script>
-<script src="js/api.js?v=196"></script>
-<script src="js/confirm.js?v=196"></script>
-<script src="js/pos_shared.js?v=196"></script>
-<script src="js/catalogfields.js?v=196"></script>
-<script src="js/checkout.js?v=196"></script>
-<script src="js/receive.js?v=196"></script>
-<script src="js/stocktake.js?v=196"></script>
-<script src="js/records.js?v=196"></script>
-<script src="js/catalog.js?v=196"></script>
-<script src="js/sortable.js?v=196"></script>
-<script src="js/combobox.js?v=196"></script>
-<script src="js/optpicker.js?v=196"></script>
-<script src="js/modelpicker.js?v=196"></script>
-<script src="js/attrfields.js?v=196"></script>
-<script src="js/settings.js?v=196"></script>
-<script src="js/labels.js?v=196"></script>
-<script src="js/app.js?v=196"></script>
+<script src="js/vue.global.prod.js?v=197"></script>
+<script src="js/api.js?v=197"></script>
+<script src="js/confirm.js?v=197"></script>
+<script src="js/pos_shared.js?v=197"></script>
+<script src="js/catalogfields.js?v=197"></script>
+<script src="js/checkout.js?v=197"></script>
+<script src="js/receive.js?v=197"></script>
+<script src="js/stocktake.js?v=197"></script>
+<script src="js/records.js?v=197"></script>
+<script src="js/catalog.js?v=197"></script>
+<script src="js/sortable.js?v=197"></script>
+<script src="js/combobox.js?v=197"></script>
+<script src="js/optpicker.js?v=197"></script>
+<script src="js/modelpicker.js?v=197"></script>
+<script src="js/attrfields.js?v=197"></script>
+<script src="js/settings.js?v=197"></script>
+<script src="js/labels.js?v=197"></script>
+<script src="js/app.js?v=197"></script>
 </body>
 </html>

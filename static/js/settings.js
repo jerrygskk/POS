@@ -18,6 +18,7 @@ const DEFAULT_OWN_FIELDS = [["顏色", "select"], ["款式", "select"]];
 
 window.PosPages["page-settings"] = {
   template: "#tpl-settings",
+  inject: ["takePageContext"],
   // 錯誤訊息顯示在目前這一區塊內(與未儲存提醒條同一個位置),不再跳到整頁最上面
   // ——訊息離發生的地方太遠,店員看不到自己剛剛按的那顆鈕出了什麼事。
   data() {
@@ -110,6 +111,8 @@ window.PosPages["page-settings"] = {
     // 規格設定子視窗存檔後關窗:重讀該種類模板(沒存檔就關掉不白跑一次查詢)
     this._childWindowClosed = (event) => this.onChildWindowClosed(event);
     window.addEventListener("pos-child-window-closed", this._childWindowClosed);
+    const ctx = this.takePageContext?.();
+    if (ctx?.category_id != null) { this.selCatId = ctx.category_id; this.section = "category"; }
     await this.reloadAll();
   },
   unmounted() {

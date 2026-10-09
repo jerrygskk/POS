@@ -351,6 +351,11 @@ window.PosPages["page-variant-batch"] = {
       this.invalidatePrecheck();
       this._precheckTimer = setTimeout(() => this.runPrecheck(), 300);
     },
+    focusNextBarcode(i) {
+      this.schedulePrecheck();
+      const next = this.$el.querySelectorAll(".batch-barcode-input")[i + 1];
+      if (next) { next.focus(); next.select(); }
+    },
     async runPrecheck() {
       const seq = ++this.precheckSeq;
       const rows = this.drafts.slice();

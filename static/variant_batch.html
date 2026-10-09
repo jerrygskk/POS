@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>新增款式</title>
-<link rel="stylesheet" href="css/pos.css?v=196">
-<link rel="stylesheet" href="css/dialog-theme.css?v=196">
+<link rel="stylesheet" href="css/pos.css?v=197">
+<link rel="stylesheet" href="css/dialog-theme.css?v=197">
 </head>
 <body>
 <div id="variant-batch-window" v-cloak>
@@ -231,7 +231,7 @@
               <td class="batch-cell-barcode"
                   :class="{'cell-error':barcodeErrors(d).length}"
                   :title="errorText(barcodeErrors(d))">
-                <input v-model="d.barcode" @change="schedulePrecheck" placeholder="原廠條碼">
+                <input class="batch-barcode-input" v-model="d.barcode" @change="schedulePrecheck" @keydown.enter.prevent="focusNextBarcode(i)" placeholder="原廠條碼">
                 <label class="batch-store-check">
                   <input type="checkbox" v-model="d.store" @change="schedulePrecheck"> 配自取碼
                 </label>
@@ -269,15 +269,15 @@
 </div>
 </template>
 
-<script src="js/vue.global.prod.js?v=196"></script>
-<script src="js/api.js?v=196"></script>
-<script src="js/confirm.js?v=196"></script>
-<script src="js/pos_shared.js?v=196"></script>
-<script src="js/catalogfields.js?v=196"></script>
-<script src="js/modelpicker.js?v=196"></script>
-<script src="js/optpicker.js?v=196"></script>
-<script src="js/variant_batch_logic.js?v=196"></script>
-<script src="js/variant_batch.js?v=196"></script>
-<script src="js/variant_batch_window.js?v=196"></script>
+<script src="js/vue.global.prod.js?v=197"></script>
+<script src="js/api.js?v=197"></script>
+<script src="js/confirm.js?v=197"></script>
+<script src="js/pos_shared.js?v=197"></script>
+<script src="js/catalogfields.js?v=197"></script>
+<script src="js/modelpicker.js?v=197"></script>
+<script src="js/optpicker.js?v=197"></script>
+<script src="js/variant_batch_logic.js?v=197"></script>
+<script src="js/variant_batch.js?v=197"></script>
+<script src="js/variant_batch_window.js?v=197"></script>
 </body>
 </html>

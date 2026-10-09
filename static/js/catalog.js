@@ -167,7 +167,7 @@ window.PosPages["page-catalog"] = {
     async reload() {
       await this.refresh();
     },
-    editInSettings() { this.goPage("settings"); },
+    editInSettings(p) { this.goPage("settings", { category_id: p.category_id }); },
     groupedVariants(p) {
       return window.groupVariantsByModel(p.variants, this.modelOrder);
     },

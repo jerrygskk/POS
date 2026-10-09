@@ -54,6 +54,34 @@ BODY
             self.fail(result.stderr)
         return json.loads(result.stdout)
 
+    def test_mount_consumes_category_context_before_reload_and_falls_back(self):
+        out = self._run(r'''
+window.addEventListener = () => {};
+API.listCategories = async () => [{category_id:1}, {category_id:3}];
+API.listBrands = API.listPhoneBrands = API.listModels = async () => [];
+const loaded = [];
+(async () => {
+  for (const ctx of [{category_id:3}, {category_id:99}, null]) {
+    let reads = 0;
+    const s = mkState({section:"models", takePageContext: () => {reads++; return ctx;},
+      loadCategoryDetail: async function(){ loaded.push(this.selCatId); }});
+    await page.mounted.call(s);
+    (out.states || (out.states = [])).push([s.selCatId, s.section, reads]);
+  }
+  const s = mkState({loadCategoryDetail: async () => {}});
+  await page.mounted.call(s);
+  out.noContextProvider = s.selCatId;
+  out.loaded = loaded;
+  out.injected = page.inject.includes("takePageContext");
+  done();
+})();
+''')
+        self.assertEqual(out["states"], [[3, "category", 1], [1, "category", 1],
+                                          [1, "models", 1]])
+        self.assertEqual(out["loaded"], [3, 1, 1])
+        self.assertEqual(out["noContextProvider"], 1)
+        self.assertTrue(out["injected"])
+
     def _models(self):
         return """
 const models = [

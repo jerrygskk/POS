@@ -71,6 +71,32 @@ BODY
             self.fail(result.stderr)
         return json.loads(result.stdout)
 
+    def test_barcode_enter_prechecks_then_focuses_and_selects_next_without_saving(self):
+        out = self._run(r'''
+const calls = [];
+const inputs = [0, 1, 2].map(i => ({
+  focus: () => calls.push(["focus", i]), select: () => calls.push(["select", i]),
+}));
+const s = mkState({schedulePrecheck: () => calls.push(["precheck"]),
+  commitAll: () => calls.push(["save"]),
+  $el: {querySelectorAll: selector => {
+    calls.push(["query", selector]); return inputs;
+  }}});
+s.focusNextBarcode(0);
+out.first = calls.slice();
+calls.length = 0;
+s.focusNextBarcode(2);
+out.last = calls;
+done();
+''')
+        self.assertEqual(out["first"], [["precheck"], ["query", ".batch-barcode-input"],
+                                        ["focus", 1], ["select", 1]])
+        self.assertEqual(out["last"], [["precheck"], ["query", ".batch-barcode-input"]])
+        html = (STATIC / "variant_batch.html").read_text(encoding="utf-8")
+        self.assertRegex(html, r'<input[^>]*class="batch-barcode-input"[^>]*'
+                         r'v-model="d.barcode"[^>]*'
+                         r'@keydown.enter.prevent="focusNextBarcode\(i\)"')
+
     def test_expand_axes_and_formula(self):
         out = self._run(r'''
 const logic = window.VariantBatchLogic;

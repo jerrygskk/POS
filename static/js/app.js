@@ -59,15 +59,19 @@ window.addEventListener("pos-child-window-closed", () => {
 document.addEventListener("DOMContentLoaded", () => {
   const app = Vue.createApp({
     data() {
-      return { page: "checkout", error: "", pages: [
+      return { page: "checkout", pageContext: null, error: "", pages: [
         ["checkout", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"],
         ["records", "銷售紀錄"], ["catalog", "商品資料庫"], ["labels", "標籤列印"], ["settings", "設定"]] };
     },
     methods: {
       showError(msg) { this.error = msg; setTimeout(() => this.error = "", 5000); },
-      goPage(name) { this.error = ""; this.page = name; },
+      goPage(name, context = null) { this.error = ""; this.pageContext = context; this.page = name; },
     },
-    provide() { return { showError: (m) => this.showError(m), goPage: (n) => this.goPage(n) }; },
+    provide() { return {
+      showError: (m) => this.showError(m), goPage: (n, c) => this.goPage(n, c),
+      // context 只供目標頁讀取一次,避免切回同一頁又被套用。
+      takePageContext: () => { const c = this.pageContext; this.pageContext = null; return c; },
+    }; },
   });
   app.mixin(window.PosMixin);
   for (const [name, comp] of Object.entries(window.PosPages))

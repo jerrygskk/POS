@@ -60,6 +60,51 @@ BODY
             self.fail(result.stderr)
         return json.loads(result.stdout)
 
+    def test_edit_specs_passes_product_category_to_settings(self):
+        out = self._run(r'''
+const calls = [];
+const s = mkState({goPage: (...args) => calls.push(args)});
+s.editInSettings({product_id:5, category_id:3});
+out.calls = calls;
+done();
+''')
+        self.assertEqual(out["calls"], [["settings", {"category_id": 3}]])
+
+    def test_page_context_is_consumed_once_and_navigation_clears_it(self):
+        script = r'''
+const fs = require("fs"), vm = require("vm");
+let root, mounted;
+const app = {mixin(){},component(){},mount(){ mounted = true; }};
+const context = {window:{addEventListener(){}},
+  document:{addEventListener:(name, callback) => callback()},
+  Vue:{createApp: options => {root = options; return app;}},
+  console, setTimeout, clearTimeout};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
+const s = root.data();
+for (const [name, method] of Object.entries(root.methods)) s[name] = method.bind(s);
+const provided = root.provide.call(s);
+s.error = "old";
+provided.goPage("settings", {category_id:3});
+const first = provided.takePageContext();
+const second = provided.takePageContext();
+provided.goPage("settings", {category_id:4});
+s.goPage("checkout");
+process.stdout.write(JSON.stringify({first,second,page:s.page,error:s.error,
+  afterNavigation:provided.takePageContext(),mounted}));
+'''
+        result = subprocess.run(
+            ["node", "-e", script, str(STATIC / "js" / "app.js")],
+            cwd=ROOT, text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {
+            "first": {"category_id": 3}, "second": None, "page": "checkout",
+            "error": "", "afterNavigation": None, "mounted": True,
+        })
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        self.assertIn('@click="goPage(key)"', html)
+
     def test_display_count_sums_variants_and_keyword_filters_empty_groups(self):
         out = self._run(r'''
 const products = [
@@ -458,7 +503,7 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertIn('<col class="catalog-col-spec">', self.catalog)
         self.assertIn('class="catalog-variant-row"', self.catalog)
         self.assertIn(
-            '<button class="btn-sm" @click="editInSettings">修改規格</button>',
+            '<button class="btn-sm" @click="editInSettings(p)">修改規格</button>',
             self.catalog,
         )
         expected = (
