@@ -1,16 +1,18 @@
 window.PosPages = window.PosPages || {};
+// 切頁會卸載收銀元件;購物車放元件外才撐得過切頁。只活在本次開啟程式期間,
+// 不落地——關閉程式後沒結帳的單本來就不該留著。
+window.PosCheckoutDraft = Vue.reactive({ cart: [], orderDiscount: 0, submitting: false });
 window.PosPages["page-checkout"] = {
   template: "#tpl-checkout",
   inject: ["showError"],
   data() {
-    return { scanCode: "", searchQ: "", searchResults: [], cart: [],
-             payments: [], payment: "現金", orderDiscount: 0, paid: 0, doneMsg: "",
-             submitting: false };
+    return { scanCode: "", searchQ: "", searchResults: [], draft: window.PosCheckoutDraft,
+             payments: [], payment: "現金", paid: 0, doneMsg: "" };
   },
   computed: {
     total() {
-      const t = this.cart.reduce((s, i) => s + i.qty * i.unit_price - i.discount, 0)
-        - this.orderDiscount;
+      const t = this.draft.cart.reduce((s, i) => s + i.qty * i.unit_price - i.discount, 0)
+        - this.draft.orderDiscount;
       return Math.max(0, t);
     },
   },
@@ -39,9 +41,9 @@ window.PosPages["page-checkout"] = {
         if (s === null) return;
         price = Number(s);
       }
-      const dup = this.cart.find(i => i.variant_id === r.variant_id);
+      const dup = this.draft.cart.find(i => i.variant_id === r.variant_id);
       if (dup) dup.qty += 1;
-      else this.cart.push({ variant_id: r.variant_id, name: r.name,
+      else this.draft.cart.push({ variant_id: r.variant_id, name: r.name,
         attributes: r.attributes, attr_display: r.attr_display,
         unit_price: price, qty: 1, discount: 0 });
       this.searchResults = [];
@@ -60,21 +62,21 @@ window.PosPages["page-checkout"] = {
       this.searchResults = await API.listProducts({q: this.searchQ.trim()});
     },
     async checkout() {
-      if (this.submitting) return;
-      this.submitting = true;
+      if (this.draft.submitting) return;
+      this.draft.submitting = true;
       try {
         await this.guard(async () => {
           const r = await API.checkout({
-            payment: this.payment, order_discount: this.orderDiscount,
+            payment: this.payment, order_discount: this.draft.orderDiscount,
             paid: this.paid,
-            items: this.cart.map(i => ({ variant_id: i.variant_id, qty: i.qty,
+            items: this.draft.cart.map(i => ({ variant_id: i.variant_id, qty: i.qty,
               unit_price: i.unit_price, discount: i.discount })) });
           this.doneMsg = `結帳完成，找零 ${r.change} 元(交易編號 ${r.sale_id})`;
-          this.cart = []; this.orderDiscount = 0; this.paid = 0;
+          this.draft.cart = []; this.draft.orderDiscount = 0; this.paid = 0;
           setTimeout(() => this.doneMsg = "", 5000);
         });
       } finally {
-        this.submitting = false;
+        this.draft.submitting = false;
       }
     },
   },

@@ -19,6 +19,7 @@ class CheckoutUiTests(unittest.TestCase):
 const fs = require("fs"), vm = require("vm");
 const context = {
   window: { PosPages: {}, PosConfirm: {} }, API: {},
+  Vue: { reactive: x => x },
   console, setTimeout, clearTimeout,
 };
 context.PosConfirm = context.window.PosConfirm;
@@ -47,6 +48,32 @@ BODY
             self.fail(result.stderr)
         return json.loads(result.stdout)
 
+    def test_cart_and_order_discount_survive_new_component_state(self):
+        out = self._run(r'''
+const first = mkState();
+(async () => {
+  await first.addItem({variant_id:7, name:"保護殼", price:300,
+    attributes:{顏色:"黑"}, attr_display:"黑"});
+  first.draft.cart[0].qty = 2;
+  first.draft.cart[0].unit_price = 250;
+  first.draft.cart[0].discount = 30;
+  first.draft.orderDiscount = 50;
+  first.paid = 1000;
+  const second = mkState();
+  out.cart = second.draft.cart;
+  out.orderDiscount = second.draft.orderDiscount;
+  out.paid = second.paid;
+  out.total = page.computed.total.call(second);
+  done();
+})();
+''')
+        self.assertEqual(out["cart"], [{
+            "variant_id": 7, "name": "保護殼", "attributes": {"顏色": "黑"},
+            "attr_display": "黑", "unit_price": 250, "qty": 2, "discount": 30}])
+        self.assertEqual(out["orderDiscount"], 50)
+        self.assertEqual(out["paid"], 0)
+        self.assertEqual(out["total"], 420)
+
     def test_unpriced_item_uses_shared_input_and_cancel_does_not_add(self):
         out = self._run(r'''
 let options;
@@ -57,7 +84,7 @@ const s = mkState();
   out.options = {title:options.title, message:options.message,
     inputType:options.inputType, valid:options.validate("0"),
     negative:options.validate("-1"), decimal:options.validate("1.5")};
-  out.cart = s.cart.length;
+  out.cart = s.draft.cart.length;
   done();
 })();
 ''')
@@ -72,19 +99,85 @@ const s = mkState();
         out = self._run(r'''
 let resolveCheckout, calls = 0;
 API.checkout = () => { calls++; return new Promise(resolve => { resolveCheckout = resolve; }); };
-const s = mkState({cart:[{variant_id:1, qty:1, unit_price:100, discount:0}], paid:100});
+const s = mkState({paid:100});
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
 (async () => {
   const first = s.checkout();
   const second = s.checkout();
-  out.during = {calls, submitting:s.submitting};
+  out.during = {calls, submitting:s.draft.submitting};
   resolveCheckout({change:0, sale_id:9});
   await Promise.all([first, second]);
-  out.after = {calls, submitting:s.submitting, cart:s.cart.length};
+  out.after = {calls, submitting:s.draft.submitting, cart:s.draft.cart.length};
   done();
 })();
 ''')
         self.assertEqual(out["during"], {"calls": 1, "submitting": True})
         self.assertEqual(out["after"], {"calls": 1, "submitting": False, "cart": 0})
+
+    def test_pending_checkout_blocks_new_component_state(self):
+        out = self._run(r'''
+const resolvers = [];
+let calls = 0;
+API.checkout = () => { calls++; return new Promise(resolve => { resolvers.push(resolve); }); };
+const first = mkState({paid:100});
+first.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+(async () => {
+  const pending = first.checkout();
+  const second = mkState({paid:100});
+  const repeated = second.checkout();
+  out.calls = calls;
+  for (const resolve of resolvers) resolve({change:0, sale_id:9});
+  await Promise.all([pending, repeated]);
+  out.submitting = context.window.PosCheckoutDraft.submitting;
+  done();
+})();
+''')
+        self.assertEqual(out["calls"], 1)
+        self.assertFalse(out["submitting"])
+
+    def test_checkout_failure_releases_shared_lock_and_preserves_draft(self):
+        out = self._run(r'''
+API.checkout = async () => { throw new Error("結帳失敗"); };
+const s = mkState({paid:100});
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+s.draft.orderDiscount = 50;
+s.guard = async operation => { try { await operation(); } catch (error) { s.showError(error.message); } };
+(async () => {
+  await s.checkout();
+  out.draft = context.window.PosCheckoutDraft;
+  out.errors = s._errors;
+  out.paid = s.paid;
+  done();
+})();
+''')
+        self.assertEqual(out["draft"], {
+            "cart": [{"variant_id": 1, "qty": 1, "unit_price": 100, "discount": 0}],
+            "orderDiscount": 50, "submitting": False})
+        self.assertEqual(out["errors"], ["結帳失敗"])
+        self.assertEqual(out["paid"], 100)
+
+    def test_successful_checkout_clears_global_draft(self):
+        out = self._run(r'''
+let submitted;
+API.checkout = async value => { submitted = value; return {change:80, sale_id:10}; };
+const s = mkState({paid:500});
+s.draft.cart = [{variant_id:7, qty:2, unit_price:250, discount:30}];
+s.draft.orderDiscount = 50;
+(async () => {
+  await s.checkout();
+  out.submitted = submitted;
+  out.draft = context.window.PosCheckoutDraft;
+  out.paid = s.paid;
+  out.total = page.computed.total.call(mkState());
+  done();
+})();
+''')
+        self.assertEqual(out["submitted"], {
+            "payment": "現金", "order_discount": 50, "paid": 500,
+            "items": [{"variant_id": 7, "qty": 2, "unit_price": 250, "discount": 30}]})
+        self.assertEqual(out["draft"], {"cart": [], "orderDiscount": 0, "submitting": False})
+        self.assertEqual(out["paid"], 0)
+        self.assertEqual(out["total"], 0)
 
 
 class ConfirmAndResourceContractTests(unittest.TestCase):
