@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>規格選項</title>
-<link rel="stylesheet" href="css/pos.css?v=198">
-<link rel="stylesheet" href="css/dialog-theme.css?v=198">
+<link rel="stylesheet" href="css/pos.css?v=199">
+<link rel="stylesheet" href="css/dialog-theme.css?v=199">
 </head>
 <body>
 <div id="field-editor" v-cloak>
@@ -27,6 +27,7 @@
 
         <section class="dialog-section" v-if="hasOptions">
           <h2>選項</h2>
+          <div class="dialog-hint">選項新增、刪除後立即生效。</div>
           <div class="dialog-barcode-add">
             <input v-model="newOption" placeholder="新增選項"
                    @keydown.enter="handleOptionEnter">
@@ -50,17 +51,17 @@
     <footer class="dialog-footer">
       <div v-if="error" class="dialog-error">{{ error }}</div>
       <div class="dialog-actions">
-        <button type="button" class="dialog-cancel" :disabled="saving" @click="cancel">取消</button>
-        <button type="submit" class="dialog-confirm" :disabled="saving || loading">
-          {{ saving ? '儲存中…' : '儲存' }}
+        <button type="button" class="dialog-cancel" :disabled="saving" @click="cancel">關閉</button>
+        <button type="submit" v-if="fieldType==='select'" class="dialog-confirm" :disabled="saving || loading">
+          {{ saving ? '儲存中…' : '儲存預設值' }}
         </button>
       </div>
     </footer>
   </form>
 </div>
-<script src="js/vue.global.prod.js?v=198"></script>
-<script src="js/api.js?v=198"></script>
-<script src="js/confirm.js?v=198"></script>
-<script src="js/field_editor.js?v=198"></script>
+<script src="js/vue.global.prod.js?v=199"></script>
+<script src="js/api.js?v=199"></script>
+<script src="js/confirm.js?v=199"></script>
+<script src="js/field_editor.js?v=199"></script>
 </body>
 </html>

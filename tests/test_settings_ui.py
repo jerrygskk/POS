@@ -302,5 +302,150 @@ s.showError = message => { out.error = message; };
         self.assertEqual(out["error"], "廠牌讀取失敗")
 
 
+@unittest.skipUnless(shutil.which("node"), "Node.js is required")
+class FieldEditorUiTests(unittest.TestCase):
+    def _run(self, body):
+        script = r'''
+const fs = require("fs"), vm = require("vm");
+const calls = [], questions = [];
+const context = {
+  window: {}, document: {addEventListener() {}},
+  API: {invoke: async (action, payload) => { calls.push([action, payload]); return {}; },
+        setCategoryField: async (...args) => { calls.push(["setCategoryField", args]); }},
+  PosConfirm: {ask: async message => { questions.push(message); return false; }},
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
+const page = context.window.FieldEditorApp, API = context.API;
+function mkState(extra) {
+  const s = page.data();
+  for (const key of Object.keys(page.methods)) s[key] = page.methods[key].bind(s);
+  Object.assign(s, {loading:false}, extra || {});
+  return s;
+}
+const out = {};
+function done() { process.stdout.write(JSON.stringify(out)); }
+BODY
+'''.replace("BODY", body)
+        result = subprocess.run(
+            ["node", "-e", script, str(STATIC / "js" / "field_editor.js")],
+            cwd=ROOT, text=True, capture_output=True, encoding="utf-8")
+        if result.returncode != 0:
+            self.fail(result.stderr)
+        return json.loads(result.stdout)
+
+    def test_template_explains_immediate_options_and_select_only_save(self):
+        html = (STATIC / "field_editor.html").read_text(encoding="utf-8")
+        self.assertIn('@click="cancel">關閉</button>', html)
+        self.assertNotIn("取消", html)
+        self.assertIn('<div class="dialog-hint">選項新增、刪除後立即生效。</div>', html)
+        self.assertIn('type="submit" v-if="fieldType===\'select\'"', html)
+        self.assertIn("saving ? '儲存中…' : '儲存預設值'", html)
+        self.assertIn('@submit.prevent="save"', html)
+        self.assertIn('@keydown.enter="handleOptionEnter"', html)
+
+    def test_non_select_save_never_calls_api(self):
+        out = self._run(r'''
+(async () => {
+  for (const fieldType of ["multi", "tags", "text"]) await mkState({fieldType}).save();
+  out.calls = calls;
+  done();
+})();
+''')
+        self.assertEqual(out["calls"], [])
+
+    def test_changed_default_close_requires_confirmation_and_rejection_keeps_window(self):
+        out = self._run(r'''
+(async () => {
+  const s = mkState({_loadedDefaultOptionId:1, defaultOptionId:2});
+  await s.cancel();
+  out.rejectedCalls = calls.slice();
+  context.PosConfirm.ask = async message => { questions.push(message); return true; };
+  await s.cancel();
+  out.questions = questions;
+  out.calls = calls;
+  done();
+})();
+''')
+        self.assertEqual(out["rejectedCalls"], [])
+        self.assertEqual(out["questions"], ["建檔預設帶入值尚未儲存，確定關閉？"] * 2)
+        self.assertEqual(out["calls"], [["desktop.child_window.close", {"saved": False}]])
+
+    def test_escape_uses_same_confirmation_and_saving_prevents_close(self):
+        out = self._run(r'''
+(async () => {
+  const s = mkState({_loadedDefaultOptionId:1, defaultOptionId:null});
+  await s.handleKeydown({key:"Escape"});
+  s.saving = true;
+  await s.cancel();
+  out.questions = questions;
+  out.calls = calls;
+  done();
+})();
+''')
+        self.assertEqual(out["questions"], ["建檔預設帶入值尚未儲存，確定關閉？"])
+        self.assertEqual(out["calls"], [])
+
+    def test_load_snapshot_and_immediate_option_add_do_not_prompt(self):
+        out = self._run(r'''
+(async () => {
+  API.invoke = async (action, payload) => {
+    calls.push([action,payload]);
+    return {context:{category_id:4,field_id:7}};
+  };
+  API.listFields = async () => [{field_id:7,name:"顏色",field_type:"select",default_option_id:3}];
+  const options = [];
+  API.listOptions = async () => options.slice();
+  API.createOption = async payload => { options.push({option_id:8,value:payload.value,active:1}); };
+  const s = mkState();
+  await s.load();
+  out.snapshot = s._loadedDefaultOptionId;
+  s.newOption = "新增選項";
+  await s.addOption();
+  await s.cancel();
+  out.options = s.options;
+  out.questions = questions;
+  out.calls = calls;
+  done();
+})();
+''')
+        self.assertEqual(out["snapshot"], 3)
+        self.assertEqual(out["questions"], [])
+        self.assertEqual(out["options"], [{"option_id": 8, "value": "新增選項", "active": 1}])
+        self.assertEqual(out["calls"][-1], ["desktop.child_window.close", {"saved": False}])
+
+    def test_escape_already_handled_by_confirmation_does_not_prompt_again(self):
+        out = self._run(r'''
+(async () => {
+  const s = mkState({_loadedDefaultOptionId:1, defaultOptionId:2});
+  await s.handleKeydown({key:"Escape", defaultPrevented:true});
+  out.handledQuestions = questions.slice();
+  await s.handleKeydown({key:"Escape", defaultPrevented:false});
+  out.questions = questions;
+  out.calls = calls;
+  done();
+})();
+''')
+        self.assertEqual(out["handledQuestions"], [])
+        self.assertEqual(out["questions"], ["建檔預設帶入值尚未儲存，確定關閉？"])
+        self.assertEqual(out["calls"], [])
+
+    def test_select_save_writes_default_and_closes_as_saved(self):
+        out = self._run(r'''
+(async () => {
+  const s = mkState({categoryId:4,fieldId:7,defaultOptionId:null});
+  await s.save();
+  out.calls = calls;
+  out.saving = s.saving;
+  done();
+})();
+''')
+        self.assertEqual(out["calls"], [
+            ["setCategoryField", [4, 7, {"default_option_id": None}]],
+            ["desktop.child_window.close", {"saved": True}],
+        ])
+        self.assertFalse(out["saving"])
+
+
 if __name__ == "__main__":
     unittest.main()

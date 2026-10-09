@@ -45,6 +45,7 @@ window.FieldEditorApp = {
         this.name = field.name;
         this.fieldType = field.field_type;
         this.defaultOptionId = field.default_option_id ?? null;
+        this._loadedDefaultOptionId = this.defaultOptionId;
         await this.reloadOptions();
       } catch (error) {
         this.error = error.message;
@@ -94,6 +95,7 @@ window.FieldEditorApp = {
       catch (error) { this.error = error.message; }
     },
     async save() {
+      if (this.fieldType !== "select") return;
       if (this.saving || this.loading) return;
       this.saving = true;
       this.error = "";
@@ -109,12 +111,15 @@ window.FieldEditorApp = {
         this.saving = false;
       }
     },
+    // 視窗 X 不經過 cancel，依議定直接放棄未儲存的預設值。
     async cancel() {
       if (this.saving) return;
+      if (this.fieldType === "select" && this.defaultOptionId !== this._loadedDefaultOptionId &&
+          !await PosConfirm.ask("建檔預設帶入值尚未儲存，確定關閉？")) return;
       await API.invoke("desktop.child_window.close", { saved: this.committed });
     },
     async handleKeydown(event) {
-      if (event.key === "Escape") await this.cancel();
+      if (event.key === "Escape" && !event.defaultPrevented) await this.cancel();
     },
   },
 };
