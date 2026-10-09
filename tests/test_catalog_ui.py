@@ -70,6 +70,39 @@ done();
 ''')
         self.assertEqual(out["calls"], [["settings", {"category_id": 3}]])
 
+    def test_print_label_passes_variant_copy_and_product_name(self):
+        out = self._run(r'''
+const calls = [];
+const s = mkState({goPage: (...args) => calls.push(args)});
+const v = {variant_id:8, models:["虛構型號"], barcodes:[{source:"store",barcode:"TL8"}],
+  price:30, attributes:{顏色:"黑"}};
+s.printLabel({name:"虛構商品"}, v);
+out.calls = calls;
+out.originalName = v.name ?? null;
+out.isCopy = calls[0][1].variant !== v;
+done();
+''')
+        self.assertEqual(out["calls"], [["labels", {"variant": {
+            "variant_id": 8, "models": ["虛構型號"],
+            "barcodes": [{"source": "store", "barcode": "TL8"}],
+            "price": 30, "attributes": {"顏色": "黑"}, "name": "虛構商品",
+        }}]])
+        self.assertIsNone(out["originalName"])
+        self.assertTrue(out["isCopy"])
+
+    def test_store_barcode_detection_includes_mixed_sources(self):
+        out = self._run(r'''
+const s = mkState();
+out.values = [
+  {barcodes:[{source:"factory",barcode:"123"}]},
+  {barcodes:[{source:"store",barcode:"TL1"}]},
+  {barcodes:[{source:"factory",barcode:"123"},{source:"store",barcode:"TL1"}]},
+  {barcodes:[]}, {},
+].map(v => s.hasStoreBarcode(v));
+done();
+''')
+        self.assertEqual(out["values"], [False, True, True, False, False])
+
     def test_page_context_is_consumed_once_and_navigation_clears_it(self):
         script = r'''
 const fs = require("fs"), vm = require("vm");
@@ -493,6 +526,20 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertNotIn("editVariant", self.catalog)
         self.assertNotIn("saveVariant", self.catalog)
         self.assertIn('@click="openVariantEditor(p, v)"', self.catalog)
+
+    def test_print_label_button_is_in_barcode_line_only_when_printable(self):
+        line = self.catalog.split('class="bc-line">', 1)[1].split('</td>', 1)[0]
+        self.assertIn('@click="printLabel(p, v)"', line)
+        self.assertIn('class="btn-sm"', line)
+        self.assertIn('v-if="v.active && !(v.issues && v.issues.length) && hasStoreBarcode(v)"', line)
+        self.assertLess(line.index('class="bc-more"'), line.index('printLabel(p, v)'))
+        actions = self.catalog.split("<td>{{ v.issues", 1)[1].split('</tr>', 1)[0]
+        self.assertNotIn("printLabel", actions)
+
+    def test_barcode_number_can_truncate_with_full_title_and_fixed_controls(self):
+        self.assertIn('<span class="bc-number" :title="mainBarcode(v).barcode">{{ mainBarcode(v).barcode }}</span>', self.catalog)
+        self.assertIn('.bc-number { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }', self.css)
+        self.assertIn('.bc-line .bc-tag, .bc-line .bc-more, .bc-line button { flex-shrink: 0; }', self.css)
 
     def test_product_header_and_variant_columns_are_separate(self):
         self.assertIn('<div class="scan-row catalog-filter-row">', self.catalog)

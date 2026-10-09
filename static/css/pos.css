@@ -140,6 +140,8 @@ table.sub th, table.sub td { background: var(--surface-alt); font-size: 15px; }
 .catalog-empty-result button { margin-left: 10px; }
 tr.inactive > td { opacity: 0.55; }
 .bc-line { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; white-space: nowrap; }
+.bc-number { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc-line .bc-tag, .bc-line .bc-more, .bc-line button { flex-shrink: 0; }
 /* 條碼新增區:輸入框在上(寬度對齊上方條碼列刪鈕右緣),新增/自取鈕列在下 */
 .bc-add { display: flex; flex-direction: column; align-items: flex-start;
   gap: 6px; margin-top: 6px; }

@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=197">
+<link rel="stylesheet" href="css/pos.css?v=198">
 </head>
 <body>
 <div id="app">
   <nav>
-    <img class="nav-logo" src="img/logo.png?v=197" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=198" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}</button>
   </nav>
@@ -67,13 +67,14 @@
     <input v-model="query" @keyup.enter="search" placeholder="關鍵字搜尋子產品">
     <button @click="search">搜尋</button>
   </div>
+  <div v-if="searched && !results.length" class="done-msg">查無可列印的商品。標籤僅適用於已建立店內條碼的款式。</div>
   <div v-if="results.length" class="search-pop">
-    <div v-for="r in results" :key="r.variant_id" class="search-item" @click="select(r)">
+    <div v-for="r in results" :key="r.variant_id" class="search-item" :title="modelsTitle(r)" @click="select(r)">
       {{ rowText(r) }}
     </div>
   </div>
   <div v-if="selected" class="label-panel">
-    <div>{{ rowText(selected) }}</div>
+    <div :title="modelsTitle(selected)">{{ rowText(selected) }}</div>
     <label>列印張數 <input type="number" v-model.number="copies" min="1" class="w80"></label>
     <button class="primary" @click="print">列印標籤</button>
   </div>
@@ -237,8 +238,10 @@
           <td :class="{neg: v.stock < 0}">{{ v.stock }}</td>
           <td>
             <span v-if="mainBarcode(v)" class="bc-line">
-              {{ mainBarcode(v).barcode }}<span class="bc-tag">{{ mainBarcode(v).source === 'store' ? '(自)' : '' }}</span><span
+              <span class="bc-number" :title="mainBarcode(v).barcode">{{ mainBarcode(v).barcode }}</span><span class="bc-tag">{{ mainBarcode(v).source === 'store' ? '(自)' : '' }}</span><span
                 v-if="v.barcodes.length > 1" class="bc-more">+{{ v.barcodes.length - 1 }}</span>
+              <button v-if="v.active && !(v.issues && v.issues.length) && hasStoreBarcode(v)"
+                      class="btn-sm" @click="printLabel(p, v)">印標籤</button>
             </span>
             <button v-else class="btn-sm" @click="openVariantEditor(p, v)">管理</button>
           </td>
@@ -525,23 +528,23 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=197"></script>
-<script src="js/api.js?v=197"></script>
-<script src="js/confirm.js?v=197"></script>
-<script src="js/pos_shared.js?v=197"></script>
-<script src="js/catalogfields.js?v=197"></script>
-<script src="js/checkout.js?v=197"></script>
-<script src="js/receive.js?v=197"></script>
-<script src="js/stocktake.js?v=197"></script>
-<script src="js/records.js?v=197"></script>
-<script src="js/catalog.js?v=197"></script>
-<script src="js/sortable.js?v=197"></script>
-<script src="js/combobox.js?v=197"></script>
-<script src="js/optpicker.js?v=197"></script>
-<script src="js/modelpicker.js?v=197"></script>
-<script src="js/attrfields.js?v=197"></script>
-<script src="js/settings.js?v=197"></script>
-<script src="js/labels.js?v=197"></script>
-<script src="js/app.js?v=197"></script>
+<script src="js/vue.global.prod.js?v=198"></script>
+<script src="js/api.js?v=198"></script>
+<script src="js/confirm.js?v=198"></script>
+<script src="js/pos_shared.js?v=198"></script>
+<script src="js/catalogfields.js?v=198"></script>
+<script src="js/checkout.js?v=198"></script>
+<script src="js/receive.js?v=198"></script>
+<script src="js/stocktake.js?v=198"></script>
+<script src="js/records.js?v=198"></script>
+<script src="js/catalog.js?v=198"></script>
+<script src="js/sortable.js?v=198"></script>
+<script src="js/combobox.js?v=198"></script>
+<script src="js/optpicker.js?v=198"></script>
+<script src="js/modelpicker.js?v=198"></script>
+<script src="js/attrfields.js?v=198"></script>
+<script src="js/settings.js?v=198"></script>
+<script src="js/labels.js?v=198"></script>
+<script src="js/app.js?v=198"></script>
 </body>
 </html>
