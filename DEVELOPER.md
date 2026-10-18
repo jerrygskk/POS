@@ -433,14 +433,15 @@ python -m unittest discover -s tests
 
 ```powershell
 Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
-Remove-Item -Force POS.spec -ErrorAction SilentlyContinue
-pyinstaller --clean --onefile --noconsole --version-file version_info.txt --icon "assets/POS.ico" --name POS --add-data "static;static" main.py
+python -m PyInstaller --clean --noconfirm POS.spec
 ```
 
-本節是完整打包命令的唯一真實來源。上列命令先清除舊 `build/`、`dist/`、`POS.spec`，
-再以 `--clean --onefile` 打包 static 與版本資訊，並以 `assets/POS.ico` 作為執行檔圖示；Desktop-only runtime 不需要 uvicorn hidden-import。
-`--noconsole` 讓 exe 啟動時不另開命令列視窗（GUI 程式不需要主控台）；因此程式不得依賴
+本節是完整打包命令的唯一真實來源。打包設定檔 `POS.spec` 入庫（比照公文系統、539），不再每次刪除重產；
+上列命令先清除舊 `build/`、`dist/`，再依 spec 以 onefile 打包 static 與版本資訊，並以 `assets/POS.ico` 作為執行檔圖示；Desktop-only runtime 不需要 uvicorn hidden-import。
+`console=False` 讓 exe 啟動時不另開命令列視窗（GUI 程式不需要主控台）；因此程式不得依賴
 stdout／stderr 顯示訊息，錯誤一律寫入 exe 同層的 `error.log`（`main.py` 已如此處理）。
+spec 另外：排除 `tkinter`、`pytest`；剔除打包機器 PATH 上 Git for Windows 混進來的 OpenSSL DLL；
+`upx=False`（UPX 壓縮容易被防毒誤判，公文系統、539 同樣關閉）。
 產出 `dist/POS.exe`。執行前須將既有 `pos.db` 放在 exe 同層；備份寫入同層的 `backups/`。
 
 標籤列印新增的三個相依（`pyserial`、`pillow`、`python-barcode`）不需額外 hidden-import，

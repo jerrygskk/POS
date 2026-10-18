@@ -5,7 +5,6 @@ data/*
 !data/pos_empty.db
 build/
 dist/
-*.spec
 # 由 tools/bump_version.py 自動產生,build 時才需要
 version_info.txt
 
