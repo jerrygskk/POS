@@ -1,8 +1,106 @@
-# 給接手者（Codex 請先讀這節）
+# 給接手者（Claude／Codex 請先讀這節）
 
-**開始工作前先讀取 `CLAUDE.md`。**
+## 通用工作習慣在維護者的全域設定
 
-**再讀全域協作規則 `%USERPROFILE%/.claude/CLAUDE.md`**（不在版控內，找不到就跳過）。
+跨專案共通的規則（回覆風格、台灣用語、先計畫再寫 code、公版樣板、commit／push 鐵則等）
+放在維護者的 Claude 全域設定 **`C:\Users\user\.claude\CLAUDE.md`**，本檔不重複。
 
+- **Claude**：該檔與本檔每次對話皆自動載入（Claude Code 在專案內沒有 `CLAUDE.md` 時直接讀本檔），不必另外開檔。⚠️ 專案內不得再放 `CLAUDE.md`／`CLAUDE.local.md`，否則 Claude 只讀那份、不讀本檔
+- **Codex／其他工具**：開始工作前**自行讀取該檔**（讀不到就照本檔做，不要臆測內容）。
 
-以下不再鏡像：專案背景、任務對照表、協作偏好、版本／Git／發布鐵則**一律以 `CLAUDE.md` 為唯一來源**，本檔不維護副本。
+⚠️ 這是本檔唯一允許指向庫外檔案的地方，代價已知：該檔不隨專案版控，換機器就沒有。
+因此**專案作業本身的規則一律留在本檔**（下方 A／B／C 節），全域檔只放通用習慣——
+讀不到全域檔時，頂多少掉風格偏好，不會做錯專案的事。
+
+## 讀檔編碼（所有工具適用）
+
+**讀取中文文字檔一律明確指定 UTF-8。**
+
+- PowerShell 執行前先將 `$OutputEncoding` 與 `[Console]::OutputEncoding` 設為 UTF-8，不依賴系統預設編碼
+- 若出現亂碼，立即改用 UTF-8 重新讀取；不得依據亂碼內容判斷
+
+## 協作規則
+
+維護者最看重的部分。違反這些會直接消耗信任與時間。
+
+> **新對話開始工作前**：完整讀取 `docs/handover.md`（不入庫）、`AGENTS.md`（本檔）、`DEVELOPER.md`、`PITFALLS.md`；交接表記錄目前進度、待辦與已議定決策。
+
+## 這是什麼
+
+- **技術棧**：Python + SQLite ＋ Vue 3 無建置前端（prod 版）＋ pywebview Desktop-only 桌面程式；不提供 HTTP adapter；使用者為手機配件行店員
+- **目標環境**：Windows；PyInstaller `--onefile` 打包
+- **文件分工**：`README.md`＝使用者門面；`DEVELOPER.md`＝技術文件（架構／慣例／測試／打包／版號／版本記錄）；`PITFALLS.md`＝踩雷速查表（症狀→解法）；`AGENTS.md`＝協作規則（本檔）；`docs/handover.md`＝跨對話交接（不入庫）
+
+## 任務對照表（動手前先讀哪裡）
+
+依任務對照下表（皆在 DEVELOPER.md 與 PITFALLS.md）。寫過的雷再踩會被直接點名。
+
+| 要做的事 | 動手前先讀 |
+|----------|------------|
+| 改 schema／migration／種子 | DEVELOPER §2 慣例（現行 schema DDL 唯一來源 `db_schema.py`；v1–v13 凍結 migration DDL 在 `legacy_migrations.py`；未來 schema 變更仍須新增 migration）；PITFALLS SQL 組 |
+| 商品／規格欄／選項邏輯 | DEVELOPER §2 慣例（規格值正規化、選項生命週期、限定型號） |
+| 條碼／自取碼 | DEVELOPER §2 慣例（條碼混合、TL 保留字頭、交易語意） |
+| 前端版面／樣式／JS | DEVELOPER §2 UI 風格規範；PITFALLS VUE 組 |
+| 設定頁 | DEVELOPER §2 設定頁結構；PITFALLS VUE-1（v-if 動態 `:key` 雷） |
+| 測試 | DEVELOPER §3；PITFALLS TEST 組 |
+| 打包 | DEVELOPER §4；PITFALLS PKG 組 |
+| 版號／發布 | DEVELOPER §5＋本檔 C 節 |
+| Shell／commit 操作 | PITFALLS PS 組 |
+
+## A. 溝通與節奏
+
+- **先思考再動手**：任何寫 code 的任務，先發想方案、整理成計畫給我看，經核可才寫 code；不要做完才說「其實有更好做法」。複雜或破壞性改動（多檔／改結構／改資料）先盤點影響範圍列清單。
+- **基於專業判斷給建議**，適時提供業界主流做法。反感「見風轉舵」——我說 A 就立刻倒向 A 還包裝成你的判斷，會被點名；有不同意見誠實講，講完理由讓我決定。
+- **找得到就別問**：文件／code／資料裡有答案的不要問；但**沒寫進文件的設計決策**一定要問，不要憑空假設。
+- **委派規格要完整**：派工時一併交代工作目錄、執行環境、測試指令、暫存資料來源、限制與完成標準，避免執行者自行猜測；小型單檔工作由主會話直接處理，不必為委派而拆分。
+- **回覆風格**：直接切入重點，無客套話、無開場白與結尾總結；列點、短句、最少字數。對話累積過長時，回覆結尾加「[提示：對話已長，建議備份摘要並開啟新對話]」。
+- **一律台灣用語**（對話／文件／UI）：軟體、程式、預設、滑鼠、檔案、資料夾、登入/登出、視窗、回傳、字串、迴圈、品質、網路、硬碟…
+
+## B. 產出（程式與檔案）
+
+- 直接修改本地端 code；**code 不主動整段貼出來**，我要看才給；不必逐一告知改了什麼 function（同檔名檔案如 `__init__.py` 須說明在哪個資料夾）。
+- **文件不主動改**（README／技術文件），我要才改；例外：「發布版本」流程要更新 DEVELOPER.md 技術章節與 §6 版本記錄。入庫文件不得依賴未入庫文件才能成立；`docs/handover.md` 只補充當輪進度，長期有效的規則與技術決策要回寫正式文件。
+- **省 token**：先讀完相關檔案再動手，字串替換範圍精準。⚠️ 精準替換容易吃掉相鄰的函式定義——改完確認上下相鄰函式定義還在（插入／刪除方法時最易發生）。
+- 改完**先 `py_compile` 驗證語法**，並主動自我迭代驗證：能單測就單測、能模擬（演算法／SQL round-trip）就跑一輪再交付。單純字串修正（改字、文案）不必跑。
+- **單元測試放 `tests/`**：`python -m unittest discover -s tests`，檔名 `test_*.py`。動到可單測的純邏輯（解析／資料 round-trip／狀態計算／權限判斷）**一併新增或更新測試**；交付前以此指令作為正式測試 gate，完整測試須全數通過，不得將缺少未入庫工具造成的失敗視為預期。
+- ⚠️ **權限／存取控制是每個新功能必檢項**：「受限身分不可做」的操作，只靠停用按鈕不夠——雙擊、行內編輯、Enter、右鍵、拖拉等替代路徑會繞過。① **所有**進入點補 guard（用便捷判斷函式，勿字串比較）② 以受限身分逐路徑驗證 ③ 刪除、覆寫等破壞性操作若經確認視窗延後執行，實際執行前再次檢查權限與目標狀態。
+- **UI 文字正式**不口語（「儲存目前排序後繼續編輯？」而非「要存嗎？」）。
+- **UI 從簡是硬性要求**：不新增分頁、無巢狀對話框、逐層解鎖；「一排喔，不要搞成兩排（除非有操作）」。
+- **前端目視 preview 可用 bridge 模擬工具**（launch 名 `pos`，port 8737），不要用 Bash 起 server；該模擬不是正式 runtime，最終行為驗證仍須跑真實 pywebview。css／js 有改就 bump `index.html` 的 `?v=`（css、全部 js 共用同一版號，一起 bump）。
+- ⚠️ PowerShell 5.1：多行 python 寫 scratchpad 檔再跑；中文輸出寫 UTF-8 檔再讀。
+
+## C. 版本 / Git / 發布 / 打包
+
+### 版本號
+
+- 定義於 `lib/version.py`，日常只進第三碼；進位與否我決定。進版一律跑 `python tools/bump_version.py {版號}`（同時改 `version.py`、產 `version_info.txt`），**勿手改 `version.py`**。
+
+### 用語約定（我會用簡稱，要對上）
+
+- **「進版」「發布版本」「出一版」**＝走完整發布流程做到底才算結束，別只做 bump＋tag＋版本記錄就回報完成。其中「bump_version＋`git tag v{版號}`＋DEVELOPER §6 補一列」這組機械動作另稱**「版號進版」**。
+- **「push上去」「推上去」**＝commit + push。
+
+### Git
+
+- **push＝commit + push**。**逐檔 add**（不要一次全加，跳過資料庫檔／含個資檔）；**叫你推才推**，沒說不要問。
+- **commit 訊息須完整列出改動**：第一行寫精簡主旨，空一行後以條列逐項說明本次實際修改內容；不得只用一行摘要帶過。修復非直覺問題時，正文寫明「症狀、根因、修正方式」；可重複發生的雷同步整理至 `PITFALLS.md`。
+- ⚠️ 多行 commit 訊息用 Bash heredoc（`git commit -F - <<'EOF' … EOF`），**不要用 PowerShell here-string**（`@` 會黏進 subject）。
+- ⚠️ **公開 repo**（https://github.com/jerrygskk/POS）：push 前必確認無真實人名／個資（測試 fixture、文件範例、資料庫檔）；所有 xlsm/xlsx 已 gitignore，**絕不入庫**。
+### 發布
+
+- release note＝給 .md 檔（`release_note_v{版號}.md`，不入庫），不要打在對話裡；內容寫給使用者看，技術細節留 DEVELOPER.md。
+- **發布版本標準流程（照順序做到底）**：
+  1. 寫文件內文：技術章節補進 DEVELOPER.md；使用者有感的改動 README 也同步
+  2. 寫 handover（需跨對話交接才寫）
+  3. 寫 release note
+  4. 版號進版
+  5. 推上去 + `git tag v{版號}` + push tag
+  6. build：onefile 全新 build，回報成功/失敗
+- 發布順序鐵則：**文件／release note 要在「版號進版 commit」之前寫好**，tag 才指向含完整文件的 commit；先打 tag 事後補文件＝退版重做。
+- ⚠️ tag 已 push 後要移動：本地 `git tag -f` 後，遠端**先刪再推**（`git push origin :refs/tags/v{版號}` 再 push）。
+
+### 打包（PyInstaller）
+
+- 只用 onefile，不要問打包方式；每次砍掉舊 `build/`、`dist/` 全新 build；打包設定檔 `POS.spec` 入庫，不再刪除重產。
+- ⚠️ `DEVELOPER.md` §4 是完整打包命令的唯一來源，直接依該節執行。
+- 可直接本機執行 build，完成只回報成功/失敗（失敗才貼錯誤末段）。
