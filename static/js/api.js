@@ -27,7 +27,7 @@ const API = {
       "variants.batch_create", "variants.batch_precheck", "variants.field_usage", "variants.model_usage", "variants.activate", "variants.issues",
       "barcodes.scan", "barcodes.add", "barcodes.delete", "stock.receive", "stock.detail",
       "stocktake.create", "stocktake.list", "stocktake.detail", "stocktake.scan", "stocktake.set_counted", "stocktake.close",
-      "payments.list", "sales.checkout", "sales.list", "sales.summary", "sales.export_save", "printing.barcode",
+      "payments.list", "sales.checkout", "sales.list", "sales.summary", "sales.export_save", "printing.barcode", "printing.preview", "printing.check",
       "desktop.child_window.open", "desktop.child_window.context", "desktop.child_window.close"
     ]);
     if (!allowed.has(action)) throw new Error("不支援的桌面操作");
@@ -76,7 +76,9 @@ const API = {
     return this.invoke("variants.update_editor", payload);
   },
   exportSales(payload) { return this.invoke("sales.export_save", payload); },
-  printBarcode(variant_id, copies = 1) { return this.invoke("printing.barcode", {variant_id, copies}); },
+  printBarcode(variant_id, barcode, copies) { return this.invoke("printing.barcode", {variant_id, barcode, copies}); },
+  previewLabel(variant_id, barcode) { return this.invoke("printing.preview", {variant_id, barcode}); },
+  checkLabels(items) { return this.invoke("printing.check", {items}); },
 };
 
 window.parseTagList = function (v) {

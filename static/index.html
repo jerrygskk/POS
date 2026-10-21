@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=199">
+<link rel="stylesheet" href="css/pos.css?v=202">
 </head>
 <body>
 <div id="app">
   <nav>
-    <img class="nav-logo" src="img/logo.png?v=199" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=202" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}</button>
   </nav>
@@ -64,21 +64,49 @@
 <template id="tpl-labels">
 <div class="page">
   <div class="scan-row">
-    <input v-model="query" @keyup.enter="search" placeholder="關鍵字搜尋子產品">
-    <button @click="search">搜尋</button>
+    <input v-model="query" @keyup.enter="submitInput" :disabled="q.printing"
+           placeholder="掃描條碼或輸入關鍵字" class="scan-input">
+    <button @click="submitInput" :disabled="q.printing">加入</button>
   </div>
-  <div v-if="searched && !results.length" class="done-msg">查無可列印的商品。標籤僅適用於已建立店內條碼的款式。</div>
+  <div v-if="searched && !results.length" class="notice-bar">查無此條碼或商品。</div>
   <div v-if="results.length" class="search-pop">
-    <div v-for="r in results" :key="r.variant_id" class="search-item" :title="modelsTitle(r)" @click="select(r)">
-      {{ rowText(r) }}
+    <div v-for="r in results" :key="r.variant_id" class="search-item"
+         :title="modelsTitle(r)" @click="pick(r)">{{ rowText(r) }}</div>
+  </div>
+  <div v-if="q.notice" class="notice-bar">{{ q.notice }}</div>
+  <div v-if="q.rows.length" class="label-queue">
+    <table>
+      <thead><tr><th>品名</th><th>規格</th><th>價格</th><th>條碼</th>
+        <th>張數</th><th>狀態</th><th></th></tr></thead>
+      <tbody>
+        <tr v-for="row in q.rows" :key="row.key" :class="{on: row.key === q.selectedKey}"
+            @click="selectRow(row.key)">
+          <td :title="(row.label.models || []).join('、') || null">{{ row.label.name }}</td>
+          <td>{{ row.label.specification }}</td>
+          <td>{{ row.label.price }}</td>
+          <td>{{ row.barcode }}</td>
+          <td><input type="number" min="1" class="w60" :value="row.copies"
+                     :disabled="q.printing" @click.stop
+                     @change="setCopies(row, $event.target.value)"></td>
+          <td :class="{neg: row.status === 'verify' || row.status === 'invalid'}">{{ statusText(row) }}</td>
+          <td>
+            <button v-if="row.status === 'verify'" class="btn-sm" :disabled="q.printing"
+                    @click.stop="confirmCopies(row)">確認張數</button>
+            <button class="btn-sm danger" :disabled="q.printing"
+                    @click.stop="removeRow(row)">移除</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="label-preview">
+      <img v-if="q.previewUrl" :src="q.previewUrl" alt="標籤預覽">
     </div>
   </div>
-  <div v-if="selected" class="label-panel">
-    <div :title="modelsTitle(selected)">{{ rowText(selected) }}</div>
-    <label>列印張數 <input type="number" v-model.number="copies" min="1" class="w80"></label>
-    <button class="primary" @click="print">列印標籤</button>
+  <div v-if="q.rows.length" class="label-panel">
+    <button class="primary" :disabled="q.printing" @click="printAll">
+      {{ q.printing ? '列印中…' : `全部列印（共 ${totalCopies()} 張）` }}</button>
+    <button :disabled="q.printing" @click="clearAll">清空清單</button>
   </div>
-  <div v-if="doneMsg" class="done-msg">{{ doneMsg }}</div>
 </div>
 </template>
 <template id="tpl-receive">
@@ -91,6 +119,8 @@
     <div>{{ hit.name }}|{{ attrText(hit) }}|目前庫存 {{ hit.stock }}</div>
     <label>進貨數量 <input type="number" v-model.number="qty" min="1" class="w80"></label>
     <button class="primary" @click="doReceive">入庫</button>
+    <button v-if="labelQty" :disabled="labelBusy" @click="addToLabels">加入列印清單（{{ labelQty }} 張）</button>
+    <span v-if="labelMsg">{{ labelMsg }}</span>
   </div>
   <div v-if="notFound" class="pay-panel">
     <div>查無條碼「{{ notFound }}」。進貨不建立產品，請先至商品設定建立產品與子產品。</div>
@@ -240,7 +270,7 @@
             <span v-if="mainBarcode(v)" class="bc-line">
               <span class="bc-number" :title="mainBarcode(v).barcode">{{ mainBarcode(v).barcode }}</span><span class="bc-tag">{{ mainBarcode(v).source === 'store' ? '(自)' : '' }}</span><span
                 v-if="v.barcodes.length > 1" class="bc-more">+{{ v.barcodes.length - 1 }}</span>
-              <button v-if="v.active && !(v.issues && v.issues.length) && hasStoreBarcode(v)"
+              <button v-if="v.active && !(v.issues && v.issues.length)"
                       class="btn-sm" @click="printLabel(p, v)">印標籤</button>
             </span>
             <button v-else class="btn-sm" @click="openVariantEditor(p, v)">管理</button>
@@ -528,23 +558,23 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=199"></script>
-<script src="js/api.js?v=199"></script>
-<script src="js/confirm.js?v=199"></script>
-<script src="js/pos_shared.js?v=199"></script>
-<script src="js/catalogfields.js?v=199"></script>
-<script src="js/checkout.js?v=199"></script>
-<script src="js/receive.js?v=199"></script>
-<script src="js/stocktake.js?v=199"></script>
-<script src="js/records.js?v=199"></script>
-<script src="js/catalog.js?v=199"></script>
-<script src="js/sortable.js?v=199"></script>
-<script src="js/combobox.js?v=199"></script>
-<script src="js/optpicker.js?v=199"></script>
-<script src="js/modelpicker.js?v=199"></script>
-<script src="js/attrfields.js?v=199"></script>
-<script src="js/settings.js?v=199"></script>
-<script src="js/labels.js?v=199"></script>
-<script src="js/app.js?v=199"></script>
+<script src="js/vue.global.prod.js?v=202"></script>
+<script src="js/api.js?v=202"></script>
+<script src="js/confirm.js?v=202"></script>
+<script src="js/pos_shared.js?v=202"></script>
+<script src="js/catalogfields.js?v=202"></script>
+<script src="js/checkout.js?v=202"></script>
+<script src="js/receive.js?v=202"></script>
+<script src="js/stocktake.js?v=202"></script>
+<script src="js/records.js?v=202"></script>
+<script src="js/catalog.js?v=202"></script>
+<script src="js/sortable.js?v=202"></script>
+<script src="js/combobox.js?v=202"></script>
+<script src="js/optpicker.js?v=202"></script>
+<script src="js/modelpicker.js?v=202"></script>
+<script src="js/attrfields.js?v=202"></script>
+<script src="js/settings.js?v=202"></script>
+<script src="js/labels.js?v=202"></script>
+<script src="js/app.js?v=202"></script>
 </body>
 </html>

@@ -90,19 +90,6 @@ done();
         self.assertIsNone(out["originalName"])
         self.assertTrue(out["isCopy"])
 
-    def test_store_barcode_detection_includes_mixed_sources(self):
-        out = self._run(r'''
-const s = mkState();
-out.values = [
-  {barcodes:[{source:"factory",barcode:"123"}]},
-  {barcodes:[{source:"store",barcode:"TL1"}]},
-  {barcodes:[{source:"factory",barcode:"123"},{source:"store",barcode:"TL1"}]},
-  {barcodes:[]}, {},
-].map(v => s.hasStoreBarcode(v));
-done();
-''')
-        self.assertEqual(out["values"], [False, True, True, False, False])
-
     def test_page_context_is_consumed_once_and_navigation_clears_it(self):
         script = r'''
 const fs = require("fs"), vm = require("vm");
@@ -531,7 +518,8 @@ class CatalogTemplateContractTests(unittest.TestCase):
         line = self.catalog.split('class="bc-line">', 1)[1].split('</td>', 1)[0]
         self.assertIn('@click="printLabel(p, v)"', line)
         self.assertIn('class="btn-sm"', line)
-        self.assertIn('v-if="v.active && !(v.issues && v.issues.length) && hasStoreBarcode(v)"', line)
+        self.assertIn('v-if="v.active && !(v.issues && v.issues.length)"', line)
+        self.assertNotIn('hasStoreBarcode', self.catalog)
         self.assertLess(line.index('class="bc-more"'), line.index('printLabel(p, v)'))
         actions = self.catalog.split("<td>{{ v.issues", 1)[1].split('</tr>', 1)[0]
         self.assertNotIn("printLabel", actions)

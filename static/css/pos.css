@@ -88,6 +88,15 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .label-panel { display: flex; gap: 16px; align-items: center; margin-top: 14px;
   flex-wrap: nowrap; white-space: nowrap; overflow-x: auto; background: var(--surface);
   padding: 14px; border-radius: 8px; }
+/* 標籤列印清單:左表格、右預覽 */
+.label-queue { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px;
+  align-items: start; margin-top: 10px; }
+.label-queue tr { cursor: pointer; }
+.label-queue tr.on td { background: var(--hover); }
+.label-queue td:last-child { white-space: nowrap; }
+.label-preview { min-height: 170px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 10px; }
+.label-preview img { width: 320px; height: 160px; image-rendering: pixelated; background: #fff; }
 .total { font-size: 22px; font-weight: bold; }
 .done-msg { margin-top: 10px; padding: 12px; background: var(--success); color: #fff;
   border-radius: 8px; font-size: 18px; }

@@ -210,9 +210,6 @@ window.PosPages["page-catalog"] = {
       await this.guardReload(() => API.deleteVariant(v.variant_id));
     },
 
-    hasStoreBarcode(v) {
-      return (v.barcodes || []).some(b => b.source === "store");
-    },
     // 條碼(瀏覽只顯示一條:優先原廠碼,其次自取碼;管理進編輯)
     mainBarcode(v) {
       if (!v.barcodes || !v.barcodes.length) return null;

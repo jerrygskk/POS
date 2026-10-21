@@ -157,7 +157,9 @@ ACTION_CONTRACTS = {
     "sales.list": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")]),
     "sales.summary": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept"), S("date", default="", constraint="empty|YYYY-MM-DD", blank="reject", normalization="copied to date_from/date_to when both absent")]),
     "sales.export_save": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")], notes=("Transport-only; forwards unchanged to sales.export.",)),
-    "printing.barcode": schema([I("variant_id", required=True), I("copies", default=1, constraint=">=1")]),
+    "printing.barcode": schema([I("variant_id", required=True), S("barcode", required=True, blank="reject"), I("copies", default=1, constraint=">=1")]),
+    "printing.preview": schema([I("variant_id", required=True), S("barcode", required=True, blank="reject")]),
+    "printing.check": schema([field("items", "list[LabelItem]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), S("items[].barcode", required=True, blank="reject")]),
 }
 
 ACTION_CONTRACTS["variants.batch_precheck"] = copy.deepcopy(
@@ -198,6 +200,8 @@ TARGET_BY_ACTION = {
     "sales.summary":"lib.sales_service.SalesFacade._prepare_payload -> _filters",
     "sales.export_save":"lib.desktop_bridge.DesktopBridge._export_sales -> lib.sales_service.SalesFacade._prepare_payload",
     "printing.barcode":"lib.printing_service.PrintingFacade._prepare_payload -> _validate",
+    "printing.preview":"lib.printing_service.PrintingFacade._prepare_payload -> _validate",
+    "printing.check":"lib.printing_service.PrintingFacade._prepare_payload -> _validate",
     "sales.export":"lib.sales_service.SalesFacade._prepare_payload -> _filters",
 }
 for _action, _contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items():
@@ -465,14 +469,16 @@ class ActionContractTests(FacadeTestCase):
             "variants.batch_precheck":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"precheck-new","source":"store"}]}]},
             "barcodes.scan":{"code":"contract-1"}, "barcodes.add":{"variant_id":self.variant_id,"barcode":"contract-2"}, "barcodes.delete":{"code":"contract-1"}, "stock.receive":{"variant_id":self.variant_id,"qty":1}, "stock.detail":{"variant_id":self.variant_id},
             "stocktake.create":{}, "stocktake.list":{}, "stocktake.detail":{"session_id":self.session_id}, "stocktake.scan":{"session_id":self.session_id,"variant_id":self.variant_id,"qty":1}, "stocktake.set_counted":{"session_id":self.session_id,"variant_id":self.variant_id,"counted_qty":1}, "stocktake.close":{"session_id":self.session_id},
-            "payments.list":{}, "sales.checkout":{"payment":"現金","paid":100,"items":[{"variant_id":self.variant_id,"qty":1,"unit_price":100}]}, "sales.list":{}, "sales.summary":{}, "sales.export_save":{}, "printing.barcode":{"variant_id":self.variant_id,"copies":1},
+            "payments.list":{}, "sales.checkout":{"payment":"現金","paid":100,"items":[{"variant_id":self.variant_id,"qty":1,"unit_price":100}]}, "sales.list":{}, "sales.summary":{}, "sales.export_save":{}, "printing.barcode":{"variant_id":self.variant_id,"barcode":"contract-1","copies":1},
+            "printing.preview":{"variant_id":self.variant_id,"barcode":"contract-1"},
+            "printing.check":{"items":[{"variant_id":self.variant_id,"barcode":"contract-1"}]},
         }
         return values[action]
 
     def _prepare(self, action, payload):
         if action == "sales.export_save":
             return self.facade.sales._prepare_payload("sales.export", payload)
-        if action == "printing.barcode":
+        if action in self.facade.printing.ACTIONS:
             return self.facade.printing._prepare_payload(action, payload)
         for facade in (self.facade.settings, self.facade.products, self.facade.stock,
                        self.facade.sales, self.facade.stocktake):
@@ -487,7 +493,7 @@ class ActionContractTests(FacadeTestCase):
         direct = set().union(self.facade.settings.ACTIONS, self.facade.products.ACTIONS,
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
                              self.facade.stocktake.ACTIONS, self.facade.printing.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 69)
+        self.assertEqual(len(ACTION_CONTRACTS), 71)
         self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
@@ -619,12 +625,16 @@ class ActionContractTests(FacadeTestCase):
         payload = self.valid_payload("sales.checkout")
         payload["items"][0]["unexpected"] = 1
         cases.append(("sales.checkout", payload, "items[]"))
+        payload = self.valid_payload("printing.check")
+        payload["items"][0]["unexpected"] = 1
+        cases.append(("printing.check", payload, "items[]"))
         for action, candidate, location in cases:
             with self.subTest(action=action, location=location):
                 with self.assertRaises(ValidationError): self._prepare(action, candidate)
 
-        for printing_payload in ({}, {"variant_id":self.variant_id, "copies":0},
-                                 {"variant_id":"wrong", "unexpected":True}):
+        for printing_payload in ({"barcode":"contract-1"},
+                                 {"variant_id":self.variant_id, "barcode":"contract-1", "copies":0},
+                                 {"variant_id":"wrong", "barcode":"contract-1", "unexpected":True}):
             with self.subTest(printing_payload=printing_payload):
                 with self.assertRaises(ValidationError):
                     self.invoke("printing.barcode", printing_payload)
