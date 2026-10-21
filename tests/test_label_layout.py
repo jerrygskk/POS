@@ -20,11 +20,11 @@ def _draw():
 
 class LabelLayoutTests(unittest.TestCase):
     def test_no_models_matches_baseline_pixels(self):
-        # 修改前直接載入基準 commit 836190f 的 label_layout.py 產生，鎖住無型號排版。
+        # 條碼固定在底部、號碼在條碼下方後重新產生（已目視確認），鎖住無型號排版。
         cases = (
-            (_SHORT_NAME, _SHORT_SPEC, "$590", "5aa21f34ca801b1b819d31887cd849bfc0e21d11f205578478c679020a65963a"),
-            (_LONG_NAME, _LONG_SPEC, "$1290", "257af7a91f4d4ccffccf56a146597dcc37443f1fc937b2406f477dadaa765cc7"),
-            ("超長品名" * 40, _LONG_SPEC, "", "762f4f2b1e10bfab5d50662056bff99d92eaacca5666a916c683e3ae9c07d3ba"),
+            (_SHORT_NAME, _SHORT_SPEC, "$590", "da2b3debdc0c0b7c8f0d13a9b7cf664ef1b7138139763b3e56d27c78bf87b998"),
+            (_LONG_NAME, _LONG_SPEC, "$1290", "42e0cb7b643de48d14222a5a5890957d78e5a792fc85a0636499577702414e9c"),
+            ("超長品名" * 40, _LONG_SPEC, "", "5c6dfde5048e8f66c2618b84b97ec27e621d0b579fd22a02a929a9af0613dec7"),
         )
         for name, spec, price, expected in cases:
             for kwargs in ({}, {"models": ()}):
@@ -83,7 +83,7 @@ class LabelLayoutTests(unittest.TestCase):
         price_width = label_layout._width(draw, "$1290", _font("C:/Windows/Fonts/msjhbd.ttc", 22))
         self.assertEqual(len(_name_lines(draw, _LONG_NAME, price_width)[0]), 2)
         font = _font("C:/Windows/Fonts/msjh.ttc", 14)
-        spec = _spec_lines(draw, _LONG_SPEC, font, 296 - label_layout._width(draw, _CODE, font) - 8, 296)
+        spec = _spec_lines(draw, _LONG_SPEC, font, 296, 296)
         self.assertEqual(len(spec), 2)
         original = ImageDraw.ImageDraw.text
         with patch.object(ImageDraw.ImageDraw, "text", autospec=True, side_effect=original) as text:
@@ -92,21 +92,36 @@ class LabelLayoutTests(unittest.TestCase):
         name = label_layout._fit(draw, _LONG_NAME, "C:/Windows/Fonts/msjhbd.ttc", (18,), 296 - price_width - 8)[0]
         self.assertEqual(printed, [((308 - price_width, 16), "$1290"), ((12, 16), name),
                                   ((12, 38), "i17 ProMax"), ((12, 56), spec[0]),
-                                  ((308 - label_layout._width(draw, _CODE, font), 56), _CODE),
-                                  ((12, 74), spec[1])])
+                                  ((12, 74), spec[1]),
+                                  # 條碼固定頂 86、高 50;號碼置中、貼條碼下 2 點(字頂自帶 5 點空白)
+                                  (((320 - label_layout._width(draw, _CODE, font)) // 2, 86 + 50 + 2 - 5), _CODE)])
 
-    def test_single_name_model_spec_lines_leave_at_least_minimum_barcode_height(self):
-        draw = _draw()
-        name_font = _name_lines(draw, _SHORT_NAME, 0)[1]
+    def test_barcode_position_is_fixed_regardless_of_content(self):
+        """條碼固定在底部:內容多寡不影響條碼位置與高度。"""
+        self.assertEqual((label_layout._BARCODE_TOP, label_layout._BARCODE_HEIGHT), (86, 50))
+        self.assertEqual(label_layout._BARCODE_TOP + label_layout._BARCODE_HEIGHT + label_layout._CODE_AREA,
+                         160 - label_layout._BOTTOM)
+        cases = (("短", "", "", ()), (_SHORT_NAME, _SHORT_SPEC, "$590", ()),
+                 (_LONG_NAME, _LONG_SPEC, "$1290", ()), (_LONG_NAME, _LONG_SPEC, "$1290", ["i17"]),
+                 ("超長品名" * 40, _LONG_SPEC + "｜超長規格段落", "", [f"iPhone {i}" for i in range(17, 9, -1)]))
+        for name, spec, price, models in cases:
+            with self.subTest(name=name[:10], spec=spec):
+                with patch.object(Image.Image, "paste", autospec=True, side_effect=Image.Image.paste) as paste:
+                    with patch("lib.label_layout._barcode_image", wraps=label_layout._barcode_image) as barcode:
+                        render_label(name, spec, price, _CODE, models=models)
+                barcode.assert_called_once_with(_CODE, 50)
+                self.assertEqual(paste.call_args.args[2], (12, 86))
+
+    def test_minimal_content_after_sacrifice_fits_above_barcode(self):
+        """最精簡內容(最大字品名一行＋型號一行＋規格一行)一定排得進條碼上方 2 點以外。"""
         spec_font = _font("C:/Windows/Fonts/msjh.ttc", 14)
-        top = label_layout._TOP + (name_font.size + 4) + 2 * (spec_font.size + 4) + 2
-        self.assertEqual(top, 16 + 30 + 18 + 18 + 2)
-        self.assertEqual(top, 84)
-        self.assertEqual(label_layout._SIZE[1] - label_layout._BOTTOM - top, 68)
-        self.assertGreaterEqual(68, label_layout._BARCODE_MIN)
-        with patch("lib.label_layout._barcode_image", wraps=label_layout._barcode_image) as barcode:
-            render_label(_SHORT_NAME, _SHORT_SPEC, "", _CODE, models=["i17"])
-        barcode.assert_called_once_with(_CODE, 56)
+        self.assertLessEqual(label_layout._TOP + (26 + 4) + 2 * (spec_font.size + 4), label_layout._TEXT_LIMIT)
+
+    def test_barcode_bars_fill_reserved_height(self):
+        """條碼產生器預設上下各留空白,歸零後黑條要佔滿預留高度。"""
+        image = label_layout._barcode_image(_CODE, 50).convert("L")
+        self.assertIn(0, image.crop((0, 0, 296, 1)).get_flattened_data())
+        self.assertIn(0, image.crop((0, 49, 296, 50)).get_flattened_data())
 
     def test_render_label_has_fixed_printer_dimensions(self):
         image = render_label(_SHORT_NAME, _SHORT_SPEC, "$590", _CODE)
@@ -125,6 +140,20 @@ class LabelLayoutTests(unittest.TestCase):
         """熱感列印只有黑白：灰階筆畫會在二值化時消失，筆畫密的字會缺半邊。"""
         image = render_label(_LONG_NAME, "MOD NX｜深湖藍｜含邊框", "$1290", _CODE).convert("L")
         self.assertEqual(set(image.get_flattened_data()) - {0, 255}, set())
+
+    def test_number_sits_centered_below_barcode_above_margin(self):
+        draw, font = _draw(), _font("C:/Windows/Fonts/msjh.ttc", 14)
+        for code in (_CODE, "4711866050639", "FACTORY-LONG-ABC-123456789"):
+            with self.subTest(code=code):
+                original = ImageDraw.ImageDraw.text
+                with patch.object(ImageDraw.ImageDraw, "text", autospec=True, side_effect=original) as text:
+                    image = render_label(_LONG_NAME, _LONG_SPEC, "$1290", code, models=["i17"]).convert("L")
+                (x, y), last = text.call_args_list[-1].args[1:3]
+                self.assertEqual(last, code)
+                self.assertEqual(x, (320 - label_layout._width(draw, code, font)) // 2)
+                bottom = y + draw.textbbox((0, 0), code, font=font)[3]
+                self.assertLessEqual(bottom, 160 - label_layout._BOTTOM)
+                self.assertEqual(set(image.crop((0, 152, 320, 160)).get_flattened_data()), {255})
 
     def test_bottom_margin_is_never_consumed(self):
         for name, spec in ((_SHORT_NAME, _SHORT_SPEC), (_LONG_NAME, _LONG_SPEC)):

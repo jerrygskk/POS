@@ -11,8 +11,15 @@ _TOP = 16
 _BOTTOM = 8
 _SEPARATOR = "｜"
 _SPEC_SIZE = 14  # 規格字級固定，不隨內容長短變動
-_BARCODE_MAX = 56
-_BARCODE_MIN = 40
+# 條碼與號碼固定釘在標籤底部，不隨文字多寡上下移動：
+# 號碼區 16 點＝與條碼間隔 2 點＋英數字墨跡最高到最低 14 點（含 Q、g、y 等下伸筆畫，
+# 號碼不論含哪些字元都不會壓進下緣留白）；條碼固定 50 點，頂端固定在第 86 點。
+# 文字排在 84 點以上（與條碼至少隔 2 點），放不下就依犧牲順序減行；
+# 最精簡的品名一行＋型號一行＋規格一行只到 82 點，所以文字保證不會壓到條碼。
+_CODE_AREA = 16
+_BARCODE_HEIGHT = 50
+_BARCODE_TOP = _SIZE[1] - _BOTTOM - _CODE_AREA - _BARCODE_HEIGHT  # 86
+_TEXT_LIMIT = _BARCODE_TOP - 2  # 84
 _BOLD_FONT = "C:/Windows/Fonts/msjhbd.ttc"
 _REGULAR_FONT = "C:/Windows/Fonts/msjh.ttc"
 
@@ -132,6 +139,8 @@ def _barcode_image(value, height):
     Code128(value, writer=ImageWriter()).write(output, options={
         "module_width": 0.23, "module_height": height / 8, "quiet_zone": 1.0,
         "font_size": 0, "text_distance": 0, "write_text": False, "dpi": 203,
+        # 產生器預設上下各留約 5 點空白，會讓黑條比預留高度矮一截；版面已自行留白，故歸零。
+        "margin_top": 0, "margin_bottom": 0,
     })
     output.seek(0)
     return Image.open(output).convert("RGB").resize((296, height), Image.Resampling.NEAREST)
@@ -150,11 +159,13 @@ def render_label(name, specification, price, barcode, models=()):
     price_width = _width(draw, price, bold) if price else 0
     name_lines, name_font = _name_lines(draw, name, price_width)
 
-    # 號碼靠右擠進規格第一行，省下整整一行的高度給條碼。
+    # 號碼印在條碼正下方（一般商品標籤慣例），規格兩行都能用整行寬度。
     spec_font = _font(_REGULAR_FONT, _SPEC_SIZE)
     code_text = str(barcode or "")
     code_width = _width(draw, code_text, spec_font)
-    spec_lines = _spec_lines(draw, specification, spec_font, 296 - code_width - 8, 296)
+    # 字型上方自帶約 5 點空白，以實際墨跡上緣對齊，貼著條碼下方 2 點。
+    code_top = draw.textbbox((0, 0), code_text, font=spec_font)[1] if code_text else 0
+    spec_lines = _spec_lines(draw, specification, spec_font, 296, 296)
     model_line = _model_line(draw, models, spec_font, 296)
 
     def space_left():
@@ -162,20 +173,20 @@ def render_label(name, specification, price, barcode, models=()):
         top += len(spec_lines) * (spec_font.size + 4) + 2
         if models:
             top += spec_font.size + 4
-        return _SIZE[1] - _BOTTOM - top
+        return _TEXT_LIMIT - top
 
     if models:
-        if space_left() < _BARCODE_MIN and len(name_lines) > 1:
+        if space_left() < 0 and len(name_lines) > 1:
             name_font = _font(_BOLD_FONT, 18)
             name_lines = [_fit(draw, name, _BOLD_FONT, (18,),
                                296 - price_width - (8 if price else 0))[0]]
-        if space_left() < _BARCODE_MIN and len(spec_lines) > 1:
-            spec_lines = _spec_lines(draw, specification, spec_font, 296 - code_width - 8, 0)
+        if space_left() < 0 and len(spec_lines) > 1:
+            spec_lines = _spec_lines(draw, specification, spec_font, 296, 0)
     else:
-        # 條碼被壓到掃不動時，先犧牲規格第二行，再犧牲品名第二行；下緣留白絕不動。
-        if space_left() < _BARCODE_MIN and len(spec_lines) > 1:
-            spec_lines = _spec_lines(draw, specification, spec_font, 296 - code_width - 8, 0)
-        if space_left() < _BARCODE_MIN and len(name_lines) > 1:
+        # 文字超過條碼頂端時，先犧牲規格第二行，再犧牲品名第二行；條碼位置與下緣留白絕不動。
+        if space_left() < 0 and len(spec_lines) > 1:
+            spec_lines = _spec_lines(draw, specification, spec_font, 296, 0)
+        if space_left() < 0 and len(name_lines) > 1:
             name_font = _font(_BOLD_FONT, 18)
             name_lines = [_fit(draw, name, _BOLD_FONT, (18,),
                                296 - price_width - (8 if price else 0))[0]]
@@ -189,13 +200,12 @@ def render_label(name, specification, price, barcode, models=()):
     if models:
         draw.text((_LEFT, y), model_line, font=spec_font, fill="black")
         y += spec_font.size + 4
-    for index, line in enumerate(spec_lines):
+    for line in spec_lines:
         draw.text((_LEFT, y), line, font=spec_font, fill="black")
-        if index == 0 and code_text:
-            draw.text((320 - _LEFT - code_width, y), code_text, font=spec_font, fill="black")
         y += spec_font.size + 4
-    y += 2
 
-    height = min(_BARCODE_MAX, _SIZE[1] - _BOTTOM - y)
-    image.paste(_barcode_image(barcode, height), (_LEFT, y))
+    image.paste(_barcode_image(barcode, _BARCODE_HEIGHT), (_LEFT, _BARCODE_TOP))
+    if code_text:
+        draw.text(((_SIZE[0] - code_width) // 2, _BARCODE_TOP + _BARCODE_HEIGHT + 2 - code_top),
+                  code_text, font=spec_font, fill="black")
     return image
