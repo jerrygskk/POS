@@ -51,6 +51,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `static/js/confirm.js` | 確認／通知視窗公版 `PosConfirm.ask()`／`notify()`（取代瀏覽器內建 confirm／alert） |
 | `static/css/dialog-theme.css` | 子視窗對話框外觀（`.dialog-*` 公版，沿用 §2 UI 風格色票） |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
+| `tools/make_standard_db.py` | 產生標準資料庫:最新格式＋商品與設定,不含營業紀錄(見 §2 標準資料庫) |
 | `tests/` | 單元測試（`tests/base.py` 共用 `ConnTestCase`／`FacadeTestCase` 與 fixture helper） |
 
 ## 2. 慣例
@@ -397,6 +398,32 @@ v15 `_mig_split_shared_fields` 拆其餘所有跨種類共用欄(顏色、框色
 列印中拒絕);進貨頁入庫後出現「加入列印清單(N 張)」,N 為該品項累計入庫量,
 條碼用進貨時掃的那一個,加入後不跳頁,可接著掃下一個。
 前端取資料走 `catalog.list`(**`products.list` 不回傳 `barcodes`**)。
+
+### 標準資料庫(`tools/make_standard_db.py`)
+
+用途:產生「只有商品與設定、沒有營業紀錄」的資料庫,供交付新店或把開發用 `pos.db` 清乾淨。
+以 `init_db` 建全新空資料庫(最新格式,不是拿舊檔一路升級),再從來源逐表原樣複製(編號不變)。
+
+- **複製**:種類、規格欄、種類規格對應、選項、選項限定型號、廠牌、廠牌種類對應、手機廠牌、
+  手機型號、商品、款式、款式規格值、款式型號對應、條碼、待處理異常;設定的付款方式與
+  `next_store_barcode`(**必須帶**,否則新產生的店內條碼會與既有條碼撞號)。
+- **不複製**:銷售、銷售明細、進出貨、盤點、盤點明細。庫存由進出貨推算,故全部為 0。
+- **防漏**:每張資料表都必須歸在工具內的「複製」或「不複製」清單;新增資料表而未歸類、
+  來源有未歸類的設定鍵、來源格式不是最新版、欄位不一致,工具一律停止且不留半成品。
+  ⚠️ 新增資料表或設定鍵時,要同步決定它在這支工具裡屬於哪一邊。
+- **檢查**:每張表筆數與來源一致、外鍵與完整性檢查、最後以正式啟動流程再開一次。
+  不覆蓋任何既有檔案(輸出已存在或與來源相同即停止);來源以唯讀方式開啟。
+
+**母版**:預設來源是 `docs/standard_db/pos_standard.db`(Windows 唯讀屬性)。`docs/` 不入庫,
+母版只存在本機,換機器要自行複製;遺失時從整理好的資料庫重建:
+
+```
+python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_standard.db
+```
+
+**把 `pos.db` 清乾淨**:關掉 POS → `python tools/make_standard_db.py`(由母版產生根目錄的
+`pos_standard.db`,已列入 `.gitignore`)→ 自行把舊 `pos.db` 改名或刪除,再把新檔改名為 `pos.db`。
+工具刻意不直接覆蓋 `pos.db`。
 
 ### UI 風格規範(源自維護者 theme_guide,Apple HIG 風;定義於 `static/css/pos.css` 檔頭)
 

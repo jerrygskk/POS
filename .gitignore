@@ -1,8 +1,7 @@
 __pycache__/
 *.pyc
-# data 目錄整批忽略,僅允許程式產生的空資料庫範本(無業務資料)
+# data 目錄整批忽略
 data/*
-!data/pos_empty.db
 build/
 dist/
 # 由 tools/bump_version.py 自動產生,build 時才需要
@@ -27,5 +26,7 @@ tests/test_import_excel.py
 # 執行期產物(與 exe 同層)
 pos.db
 pos.db.bak-*
+# tools/make_standard_db.py 的預設產出(含商品資料,不入庫)
+pos_standard.db
 error.log
 backups/
