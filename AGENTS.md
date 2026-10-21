@@ -67,6 +67,7 @@
 - **UI 文字正式**不口語（「儲存目前排序後繼續編輯？」而非「要存嗎？」）。
 - **UI 從簡是硬性要求**：不新增分頁、無巢狀對話框、逐層解鎖；「一排喔，不要搞成兩排（除非有操作）」。
 - **前端目視 preview 可用 bridge 模擬工具**（launch 名 `pos`，port 8737），不要用 Bash 起 server；該模擬不是正式 runtime，最終行為驗證仍須跑真實 pywebview。css／js 有改就 bump `index.html` 的 `?v=`（css、全部 js 共用同一版號，一起 bump）。
+- ⚠️ **Codex 沙盒內跑不起 pywebview**：2026-10-20 本機實測，以 unelevated 沙盒搭配預設資料夾、專案內資料夾、`--no-sandbox` 等設定，Edge WebView2 都無法啟動（跳出「無法建立資料目錄」、逾時或初始化失敗）；elevated 模式未能完成測試。跑真實 pywebview 走查時，**該指令直接申請在沙盒外執行**（需維護者同意），不要在沙盒內反覆嘗試或想辦法繞過；走查一律用暫存資料庫，暫存資料夾用完即刪。
 - ⚠️ PowerShell 5.1：多行 python 寫 scratchpad 檔再跑；中文輸出寫 UTF-8 檔再讀。
 
 ## C. 版本 / Git / 發布 / 打包
