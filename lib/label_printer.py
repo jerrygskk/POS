@@ -205,7 +205,9 @@ class LabelPrinter:
             # 只送一頁卻等頁數累加到張數，會等到逾時並把工作留在未收工狀態。
             for page in range(copies):
                 self._request(0x03, b"\x01")
-                self._request(0x13, struct.pack(">HH", image.height, image.width))
+                # 頁面尺寸必須用 6 位元組（列數、寬度、張數）：B1 收到 4 位元組格式時，
+                # 重插 USB／開機後的第一頁會被丟棄，只走紙不印字（實機證實，見 PITFALLS LBL-11）。
+                self._request(0x13, struct.pack(">HHH", image.height, image.width, 1))
                 self._request(0x15, struct.pack(">H", 1))
                 self._send_image(image)
                 self._end_page_print()

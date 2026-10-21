@@ -106,6 +106,22 @@ class LabelPrinterProtocolTests(unittest.TestCase):
         self.assertEqual(sent.count(0x03), 3)
         self.assertEqual(sent.count(0xF3), 1)
 
+    def test_page_size_uses_six_byte_form_with_copies(self):
+        """B1 收到 4 位元組的頁面尺寸時，重插 USB／開機後第一頁會被丟棄（只走紙、全白）。
+
+        實機對照（只改這一道指令）：狀態回應的列印列數 4 位元組時不動，6 位元組時增加一整張。
+        """
+        printer = LabelPrinter(sleep=lambda _: None)
+        sent = []
+        with patch.object(printer, "_open"), patch.object(printer, "_heartbeat"), \
+             patch.object(printer, "_send_image"), patch.object(printer, "_end_page_print"), \
+             patch.object(printer, "_wait_for_completion"), \
+             patch.object(printer, "_request",
+                          side_effect=lambda code, data=b"", *a, **k: sent.append((code, data)) or b"\x01"):
+            printer.print(Image.new("RGB", (320, 160)), 2)
+        page_sizes = [data for code, data in sent if code == 0x13]
+        self.assertEqual(page_sizes, [bytes.fromhex("00a0 0140 0001")] * 2)
+
     def test_wait_for_completion_waits_for_every_copy(self):
         printer = LabelPrinter(sleep=lambda _: None)
         statuses = iter(((0, 0, 0), (1, 100, 100), (2, 100, 100)))
