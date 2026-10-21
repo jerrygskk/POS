@@ -459,9 +459,9 @@ python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_s
 python -m unittest discover -s tests
 ```
 
-目前入庫 584 個測試,涵蓋 schema/migration、Desktop action 契約、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
+目前入庫 725 個測試,涵蓋 schema/migration、Desktop action 契約、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
 ⚠️ `tests/test_import_excel.py` 與 `tools/import_excel.py` 一樣**不入庫**(直接 import 該工具,
-缺檔會 error 而非 skip);兩者仍在使用中的機器上會多跑 13 項,匯入驗收結束後一起刪除。
+缺檔會 error 而非 skip);兩者仍在使用中的機器上會多跑 21 項,匯入驗收結束後一起刪除。
 
 ⚠️ 前端改動的最終驗證一律以真實 pywebview 走查(`RuntimePaths` 指向 `pos.db` 副本＋repo `static/`),
 走查腳本**只能操作 DOM**,不可去抓 Vue 元件實例——prod 版 Vue 沒有 `__vue_app__`／`__vueParentComponent`
@@ -508,3 +508,4 @@ onefile 產出約 32.6 MB，其中 Pillow 為大宗）。`python-barcode` 內附
 | 版本 | 說明 |
 |---|---|
 | 0.1.0 | 首版:收銀/進貨/盤點/銷售紀錄,PyInstaller 單一 exe 打包 |
+| 0.1.1 | 首次進版(累積 0.1.0 之後全部改動):Desktop-only 架構(移除 HTTP adapter)、schema v7–v15(規格值正規化、規格欄依種類專屬)、商品資料庫款式編輯子視窗與多關鍵字搜尋、新增款式組合展開＋批次工作表、設定頁改版、NIIMBOT B1 標籤列印(列印清單、預覽、6 位元組尺寸指令)、自取碼帶檢查碼新格式、標準資料庫工具、打包改用入庫的 `POS.spec` |

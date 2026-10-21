@@ -30,3 +30,6 @@ pos.db.bak-*
 pos_standard.db
 error.log
 backups/
+
+# 發布說明(給使用者看,不入庫;AGENTS.md C 節)
+release_note_v*.md
