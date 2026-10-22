@@ -120,16 +120,18 @@ const rows = [{draft_id:"d1",attrs:{}}, {draft_id:"d2",attrs:{}}];
 const error = {code:"missing_required",field_id:7,message:"必填規格未填"};
 const part = window.VariantBatchLogic.partitionPrecheck(rows, [
   {draft_id:"d1",existing_duplicate:true,related_variant_id:9,errors:[]},
-  {draft_id:"d2",existing_duplicate:false,errors:[error]},
+  {draft_id:"d2",existing_duplicate:false,errors:[error],notices:[{code:"shared_barcode",message:"(已重複)"}]},
 ]);
 out.kept = part.kept.map(row => row.draft_id);
 out.skipped = part.skipped.map(item => [item.row.draft_id, item.related_variant_id]);
 out.errors = part.errorsByDraftId;
+out.notices = part.noticesByDraftId;
 done();
 ''')
         self.assertEqual(out["kept"], ["d2"])
         self.assertEqual(out["skipped"], [["d1", 9]])
         self.assertEqual(out["errors"]["d2"][0]["message"], "必填規格未填")
+        self.assertEqual(out["notices"], {"d2": [{"code": "shared_barcode", "message": "(已重複)"}]})
 
     def test_precheck_race_old_response_discarded(self):
         out = self._run(r'''

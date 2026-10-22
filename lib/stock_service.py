@@ -7,18 +7,27 @@ from lib.product_rules import is_int as _is_int, require_employee
 
 
 def _validate_payload(action, payload):
-    allowed = {"variant_id"} if action == "stock.detail" else {"variant_id", "qty", "note", "employee"}
+    allowed = {"variant_id"} if action == "stock.detail" else {"items", "employee"}
     unknown = set(payload) - allowed
     if unknown:
         raise ValidationError(f"不支援的欄位：{sorted(unknown)[0]}")
-    if not _is_int(payload.get("variant_id")):
-        raise ValidationError("子產品識別碼格式不正確")
     if action == "stock.receive":
-        if not _is_int(payload.get("qty")) or payload["qty"] <= 0:
-            raise ValidationError("進貨數量必須為正整數")
         require_employee(payload.get("employee"))
-        if payload.get("note") is not None and not isinstance(payload["note"], str):
-            raise ValidationError("備註格式不正確")
+        items = payload.get("items")
+        if not isinstance(items, list) or not items:
+            raise ValidationError("進貨明細不可空白")
+        for item in items:
+            if not isinstance(item, Mapping):
+                raise ValidationError("進貨明細格式不正確")
+            unknown = set(item) - {"variant_id", "qty"}
+            if unknown:
+                raise ValidationError(f"不支援的欄位：{sorted(unknown)[0]}")
+            if not _is_int(item.get("variant_id")):
+                raise ValidationError("子產品識別碼格式不正確")
+            if not _is_int(item.get("qty")) or item["qty"] <= 0:
+                raise ValidationError("進貨數量必須為正整數")
+    elif not _is_int(payload.get("variant_id")):
+        raise ValidationError("子產品識別碼格式不正確")
 
 
 class StockRepository(BaseRepository):
@@ -27,10 +36,10 @@ class StockRepository(BaseRepository):
         if row is None:
             raise NotFoundError("找不到指定的子產品")
 
-    def add_purchase(self, variant_id, qty, note, employee):
+    def add_purchase(self, variant_id, qty, employee):
         self.connection.execute(
-            "INSERT INTO StockMovement(variant_id,qty,kind,note,employee) VALUES(?,?,'purchase',?,?)",
-            (variant_id, qty, note, employee),
+            "INSERT INTO StockMovement(variant_id,qty,kind,employee) VALUES(?,?,'purchase',?)",
+            (variant_id, qty, employee),
         )
 
     def movements(self, variant_id):
@@ -44,10 +53,13 @@ class StockService:
     def __init__(self, repository):
         self.repo = repository
 
-    def receive(self, variant_id, qty, employee, note=None):
-        self.repo.require_variant(variant_id)
-        self.repo.add_purchase(variant_id, qty, note, employee)
-        return {"stock": product_data.stock_of(self.repo.connection, variant_id)}
+    def receive(self, items, employee):
+        for item in items:
+            self.repo.require_variant(item["variant_id"])
+            self.repo.add_purchase(item["variant_id"], item["qty"], employee)
+        return {"items": [{"variant_id": item["variant_id"],
+                           "stock": product_data.stock_of(self.repo.connection, item["variant_id"])}
+                          for item in items]}
 
     def detail(self, variant_id):
         self.repo.require_variant(variant_id)
@@ -69,5 +81,5 @@ class StockFacade(BaseFacade):
     def _dispatch(self, action, payload, connection):
         service = StockService(StockRepository(connection))
         if action == "stock.receive":
-            return service.receive(payload["variant_id"], payload["qty"], payload["employee"], payload.get("note"))
+            return service.receive(payload["items"], payload["employee"])
         return service.detail(payload["variant_id"])

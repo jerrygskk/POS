@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>款式修改</title>
-<link rel="stylesheet" href="css/pos.css?v=216">
-<link rel="stylesheet" href="css/dialog-theme.css?v=216">
+<link rel="stylesheet" href="css/pos.css?v=217">
+<link rel="stylesheet" href="css/dialog-theme.css?v=217">
 </head>
 <body>
 <div id="variant-editor" v-cloak>
@@ -38,6 +38,7 @@
           <div class="dialog-barcode-list">
             <div v-for="b in barcodes" :key="b.barcode" class="dialog-barcode-row">
               <span>{{ b.barcode }}</span>
+              <span v-if="b.shared && b.source === 'factory'" class="barcode-shared">(已重複)</span>
               <span class="dialog-hint">{{ b.source === 'store' ? '店內自取碼' : '原廠條碼' }}</span>
               <button type="button" class="dialog-small danger"
                       @click="removeBarcode(b)">刪除</button>
@@ -48,7 +49,7 @@
           <div class="dialog-barcode-add">
             <input v-model="factoryBarcode" placeholder="原廠條碼"
                    @keydown.enter="handleFactoryBarcodeEnter">
-            <button type="button" class="dialog-small" @click="addFactoryBarcode">新增原廠碼</button>
+            <button type="button" class="dialog-small" :disabled="adding || saving" @click="addFactoryBarcode">新增原廠碼</button>
             <button type="button" class="dialog-small" @click="addStoreBarcode">新增自取碼</button>
           </div>
           <div v-if="barcodeError" class="dialog-error">{{ barcodeError }}</div>
@@ -60,20 +61,20 @@
       <div v-if="error" class="dialog-error">{{ error }}</div>
       <div class="dialog-actions">
         <button type="button" class="dialog-cancel" :disabled="saving" @click="cancel">取消</button>
-        <button type="submit" class="dialog-confirm" :disabled="saving || !ready">
+        <button type="submit" class="dialog-confirm" :disabled="saving || adding || !ready">
           {{ saving ? '儲存中…' : '儲存' }}
         </button>
       </div>
     </footer>
   </form>
 </div>
-<script src="js/vue.global.prod.js?v=216"></script>
-<script src="js/api.js?v=216"></script>
-<script src="js/confirm.js?v=216"></script>
-<script src="js/catalogfields.js?v=216"></script>
-<script src="js/modelpicker.js?v=216"></script>
-<script src="js/optpicker.js?v=216"></script>
-<script src="js/attrfields.js?v=216"></script>
-<script src="js/variant_editor.js?v=216"></script>
+<script src="js/vue.global.prod.js?v=217"></script>
+<script src="js/api.js?v=217"></script>
+<script src="js/confirm.js?v=217"></script>
+<script src="js/catalogfields.js?v=217"></script>
+<script src="js/modelpicker.js?v=217"></script>
+<script src="js/optpicker.js?v=217"></script>
+<script src="js/attrfields.js?v=217"></script>
+<script src="js/variant_editor.js?v=217"></script>
 </body>
 </html>

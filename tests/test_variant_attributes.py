@@ -19,12 +19,12 @@ class TestVariantAttributes(FacadeTestCase):
 
     def test_select_roundtrip(self):
         self._create({"規格": "亮面"})
-        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["規格"], "亮面")
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attributes"]["規格"], "亮面")
         self.assertEqual(self.invoke("catalog.list")[0]["variants"][0]["attributes"]["規格"], "亮面")
 
     def test_text_roundtrip(self):
         self._create({"商品描述": "限量款"})
-        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["商品描述"], "限量款")
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attributes"]["商品描述"], "限量款")
 
     def test_unknown_option_422(self):
         self.assert_application_error("validation_error", "products.create", {"name": "膜", "category_id": self.cid, "variants": [{"attributes": {"規格": "不存在的值"}, "barcodes": []}]})
@@ -35,27 +35,27 @@ class TestVariantAttributes(FacadeTestCase):
     def test_rename_option_takes_effect(self):
         self._create({"規格": "亮面"})
         self.invoke("options.update", {"id": self._opt_id("亮面"), "fields": {"value": "超亮面"}})
-        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["規格"], "超亮面")
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attributes"]["規格"], "超亮面")
 
     def test_rename_field_takes_effect(self):
         self._create({"規格": "亮面"})
         self.invoke("fields.update", {"id": self.fid, "fields": {"name": "面料"}})
-        got = self.invoke("barcodes.scan", {"code": "B1"})["attributes"]
+        got = self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attributes"]
         self.assertIn("面料", got); self.assertNotIn("規格", got); self.assertEqual(got["面料"], "亮面")
 
     def test_delete_referenced_option_preserves_existing_attribute(self):
         self._create({"規格": "亮面"})
         self.invoke("options.delete", {"id": self._opt_id("亮面")})
-        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["規格"], "亮面")
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attributes"]["規格"], "亮面")
         self.assertNotIn("亮面", [o["value"] for o in self.invoke("options.list", {"field_id": self.fid})])
         self.invoke("options.delete", {"id": self._opt_id("霧面")})
 
     def test_patch_variant_attributes(self):
         vid = self._create({"規格": "亮面"})["variant_ids"][0]
         self.invoke("variants.update", {"id": vid, "fields": {"attributes": {"規格": "霧面"}}})
-        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["規格"], "霧面")
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attributes"]["規格"], "霧面")
         self.invoke("variants.update", {"id": vid, "fields": {"attributes": {}}})
-        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"], {})
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attributes"], {})
 
 
 class TestOptionModel(FacadeTestCase):

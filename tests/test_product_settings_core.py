@@ -36,9 +36,9 @@ class TestCategoryModelModeAndSwitch(FacadeTestCase):
         with get_conn(self.db) as conn:
             self.assertEqual(conn.execute("SELECT active FROM Product WHERE product_id=?", (product_id,)).fetchone()[0], 1)
             self.assertEqual(conn.execute("SELECT active FROM Variant WHERE variant_id=?", (variant_id,)).fetchone()[0], 1)
-        self.assertFalse(self.invoke("barcodes.scan", {"code": "B1"})["active"])
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["status"], "inactive")
         self.invoke("categories.update", {"id": self.cid, "fields": {"active": 1}})
-        self.assertTrue(self.invoke("barcodes.scan", {"code": "B1"})["active"])
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["status"], "active")
 
 
 class TestTemplateFields(FacadeTestCase):
@@ -176,11 +176,11 @@ class TestDisabledValueDiff(FacadeTestCase):
 
     def test_keeps_existing_disabled_value(self):
         self.assertEqual(self.invoke("variants.update", {"id": self.v0, "fields": {"attributes": {"finish": "gloss"}}}), {"ok": True})
-        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["finish"], "gloss")
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attributes"]["finish"], "gloss")
 
     def test_changes_disabled_value_to_enabled_value(self):
         self.assertEqual(self.invoke("variants.update", {"id": self.v0, "fields": {"attributes": {"finish": "matte"}}}), {"ok": True})
-        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["finish"], "matte")
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attributes"]["finish"], "matte")
 
     def test_new_variant_with_disabled_value_is_rejected(self):
         with self.assertRaises(ValidationError) as raised:
@@ -212,14 +212,14 @@ class TestEffectiveActiveEntrypoints(FacadeTestCase):
         self.make_category_with_field("finish", options=("gloss",))
         created = self.create_product({"finish": "gloss"}, name="HODA case", barcode="B1")
         self.pid, self.v0 = created["product_id"], created["variant_ids"][0]
-        self.invoke("stock.receive", {"employee": 1, "variant_id": self.v0, "qty": 10})
+        self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": self.v0, "qty": 10}]})
 
     def _disable_category(self):
         self.invoke("categories.update", {"id": self.cid, "fields": {"active": 0}})
 
     def test_scan_reflects_category_active(self):
         self._disable_category()
-        self.assertFalse(self.invoke("barcodes.scan", {"code": "B1"})["active"])
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["status"], "inactive")
 
     def test_search_excludes_inactive_category(self):
         self._disable_category()

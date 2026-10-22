@@ -43,7 +43,7 @@ class VariantEditorTemplateTests(unittest.TestCase):
         self.assertIn('@click="addStoreBarcode"', html)
         self.assertIn('@click="removeBarcode(b)"', html)
         self.assertIn('class="dialog-error"', html)
-        self.assertIn(':disabled="saving || !ready"', html)
+        self.assertIn(':disabled="saving || adding || !ready"', html)
         self.assertIn('@keydown.enter="handleFactoryBarcodeEnter"', html)
         for shared in ("catalogfields.js", "optpicker.js", "modelpicker.js",
                        "attrfields.js"):
@@ -191,7 +191,7 @@ class VariantEditorRuntimeTests(unittest.TestCase):
         script = r'''
 const fs = require("fs"), vm = require("vm");
 const context = {
-  window:{PosComponents:{}}, API:{}, console, setTimeout, clearTimeout,
+  window:{PosComponents:{}}, API:{scanBarcode:async()=>{throw Object.assign(new Error("missing"),{status:404})}}, console, setTimeout, clearTimeout,
   document:{addEventListener:()=>{}},
 };
 vm.createContext(context);
@@ -363,8 +363,8 @@ const s = mkState({variant:{variant_id:7}, product:{category_id:5}, fields:[],
   ready:true, fieldOptions:{}, attrs:{顏色:"紅"}, modelIds:[21], price:490,
   barcodes:[{barcode:"B1",source:"factory",existing:true}]});
 s.removeBarcode(s.barcodes[0]);
-s.factoryBarcode="F2"; s.addFactoryBarcode(); s.addStoreBarcode();
 (async()=>{
+  s.factoryBarcode="F2"; await s.addFactoryBarcode(); s.addStoreBarcode();
   await s.save(); out.saveCalls=calls.slice(); out.committed=s.committed;
   calls.length=0;
   await s.cancel();
@@ -413,23 +413,48 @@ s.removeBarcode(s.barcodes[0]);
         self.assertEqual(out["pendingStoreCount"], 0)
         self.assertEqual(out["error"], "交易失敗")
 
+    def test_shared_factory_lookup_and_errors_do_not_double_add(self):
+        out = self._run(r'''
+const s=mkState({variant:{variant_id:7},factoryBarcode:"SHARED"});
+(async()=>{
+ API.scanBarcode=async()=>({matches:[{variant_id:8}]});await s.addFactoryBarcode();
+ out.shared=s.barcodes[0].shared;
+ s.factoryBarcode="NEW";API.scanBarcode=async()=>{throw Object.assign(new Error("missing"),{status:404})};
+ await s.addFactoryBarcode();out.unshared=s.barcodes[1].shared;
+ s.factoryBarcode="ERROR";API.scanBarcode=async()=>{throw new Error("server")};await s.addFactoryBarcode();
+ out.afterError=s.barcodes.length;out.error=s.barcodeError;
+ let resolve;API.scanBarcode=()=>new Promise(r=>resolve=r);s.factoryBarcode="WAIT";
+ const pending=s.addFactoryBarcode();await s.addFactoryBarcode();out.adding=s.adding;
+ resolve({matches:[{variant_id:7}]});await pending;out.count=s.barcodes.length;out.finished=s.adding;done();
+})();
+''')
+        self.assertTrue(out["shared"])
+        self.assertFalse(out["unshared"])
+        self.assertEqual(out["afterError"], 2)
+        self.assertEqual(out["error"], "server")
+        self.assertTrue(out["adding"])
+        self.assertEqual(out["count"], 3)
+        self.assertFalse(out["finished"])
+
     def test_factory_barcode_enter_consumes_event_and_adds_without_saving(self):
         out = self._run(r'''
 const s = mkState({factoryBarcode:"FACTORY-ENTER", barcodes:[]});
 let prevented=false, stopped=false, saves=0;
 s.save=()=>{saves += 1;};
 const event={preventDefault:()=>{prevented=true;},stopPropagation:()=>{stopped=true;}};
-s.handleFactoryBarcodeEnter(event);
+(async()=>{
+await s.handleFactoryBarcodeEnter(event);
 if (!prevented && !stopped) s.save();
 out.prevented=prevented; out.stopped=stopped; out.saves=saves;
 out.barcodes=s.barcodes; out.input=s.factoryBarcode;
 done();
+})();
 ''')
         self.assertTrue(out["prevented"])
         self.assertTrue(out["stopped"])
         self.assertEqual(out["saves"], 0)
         self.assertEqual(out["barcodes"], [{
-            "barcode": "FACTORY-ENTER", "source": "factory", "existing": False}])
+            "barcode": "FACTORY-ENTER", "source": "factory", "existing": False, "shared": False}])
         self.assertEqual(out["input"], "")
 
 

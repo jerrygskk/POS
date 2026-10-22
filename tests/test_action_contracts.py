@@ -68,8 +68,8 @@ RETIRED_PYDANTIC_SOURCES = {
     "catalog.list": {p:f"api.products.catalog.{p}" for p in ("q","include_inactive","category_id","brand_id","model_id")},
     "variants.create": {"product_id":"api.products.add_variant.pid", **{p:"api.products.NewVariantIn" for p in ("fields","fields.attributes","fields.price","fields.model_ids","fields.barcodes")}, **{p:"api.products.BarcodeIn" for p in ("fields.barcodes[].barcode","fields.barcodes[].source")}},
     "variants.update": {"id":"api.products.update_variant.vid", **{p:"api.products.VariantPatch" for p in ("fields","fields.attributes","fields.price","fields.active")}}, "variants.set_models": {"id":"api.products.set_variant_models.vid", "model_ids":"api.products.ModelIdList"}, "variants.delete": {"id":"api.products.delete_variant.vid"},
-    "barcodes.scan": {"code":"api.products.scan.code"}, "barcodes.add": {"variant_id":"api.products.add_barcode.variant_id", **{p:"api.products.BarcodeIn" for p in ("barcode","source")}}, "barcodes.delete": {"code":"api.products.delete_barcode.code"},
-    "stock.receive": {p:"api.stock.ReceiveIn" for p in ("variant_id","qty","note","employee")}, "stock.detail": {"variant_id":"api.stock.detail.variant_id"}, "stocktake.create": {p:"api.stocktake.SessionIn" for p in ("employee","note")}, "stocktake.scan": {"session_id":"api.stocktake.scan.sid", **{p:"api.stocktake.ScanIn" for p in ("variant_id","qty")}}, "stocktake.set_counted": {"session_id":"api.stocktake.set_counted.sid", "variant_id":"api.stocktake.set_counted.variant_id", "counted_qty":"api.stocktake.SetIn"}, "stocktake.detail": {"session_id":"api.stocktake.detail.sid"}, "stocktake.close": {"session_id":"api.stocktake.close.sid"},
+    "barcodes.scan": {"code":"api.products.scan.code"},
+    "stock.receive": {"employee":"api.stock.ReceiveIn", "items":"none", "items[].variant_id":"none", "items[].qty":"none"}, "stock.detail": {"variant_id":"api.stock.detail.variant_id"}, "stocktake.create": {p:"api.stocktake.SessionIn" for p in ("employee","note")}, "stocktake.scan": {"session_id":"api.stocktake.scan.sid", **{p:"api.stocktake.ScanIn" for p in ("variant_id","qty")}}, "stocktake.set_counted": {"session_id":"api.stocktake.set_counted.sid", "variant_id":"api.stocktake.set_counted.variant_id", "counted_qty":"api.stocktake.SetIn"}, "stocktake.detail": {"session_id":"api.stocktake.detail.sid"}, "stocktake.close": {"session_id":"api.stocktake.close.sid"},
     "sales.checkout": {**{p:"api.sales.SaleIn" for p in ("payment","order_discount","paid","items","employee")}, **{p:"api.sales.ItemIn" for p in ("items[].variant_id","items[].qty","items[].unit_price","items[].discount")}}, "sales.list": {p:f"api.sales.list_sales.{p}" for p in ("date_from","date_to","payment")}, "sales.summary": {p:f"api.sales.summary.{p}" for p in ("date_from","date_to","payment","date")}, "sales.export": {p:f"api.sales.export_csv.{p}" for p in ("date_from","date_to","payment")},
 }
 
@@ -141,10 +141,8 @@ ACTION_CONTRACTS = {
     "variants.activate": schema([I("id", required=True)], notes=("Desktop-only action.",)),
     "variants.issues": schema([], notes=("Desktop-only action.",)),
     "barcodes.scan": schema([S("code", required=True, blank="accept")]),
-    "barcodes.add": schema([I("variant_id", required=True), S("barcode", nullable=True, default=None, blank="accept"), S("source", default="store", blank="accept")]),
-    "barcodes.delete": schema([S("code", required=True, blank="accept")]),
 
-    "stock.receive": schema([I("variant_id", required=True), I("qty", required=True, constraint=">0"), S("note", nullable=True, default=None, blank="accept"), I("employee", required=True, constraint="1..6")]),
+    "stock.receive": schema([I("employee", required=True, constraint="1..6"), field("items", "list[ReceiveItem]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), I("items[].qty", required=True, constraint=">0")]),
     "stock.detail": schema([I("variant_id", required=True)]),
     "stocktake.create": schema([I("employee", required=True, constraint="1..6"), S("note", nullable=True, default=None, blank="accept")]),
     "stocktake.list": schema([]),
@@ -181,7 +179,7 @@ SETTINGS_CONTRACT_ACTIONS = {
 PRODUCT_CONTRACT_ACTIONS = {
     "products.create","products.list","products.update","products.delete","catalog.list",
     "variants.create","variants.update","variants.set_models","variants.update_details","variants.update_editor","variants.delete","variants.batch_create","variants.batch_precheck","variants.field_usage","variants.model_usage","variants.activate","variants.issues",
-    "barcodes.scan","barcodes.add","barcodes.delete",
+    "barcodes.scan",
 }
 TARGET_BY_ACTION = {
     **{action:"lib.settings_service.SettingsFacade._prepare_payload -> _validate_action" for action in SETTINGS_CONTRACT_ACTIONS},
@@ -299,7 +297,6 @@ EXPECTED_DEFAULTS = {
         ("variants.create","fields.barcodes[].barcode"),
         ("variants.batch_create","drafts[].barcodes[].barcode"),
         ("variants.batch_precheck","drafts[].barcodes[].barcode"),
-        ("barcodes.add","barcode"), ("stock.receive","note"),
         ("stocktake.create","note"),
     }, None),
     ("fields.create","field_type"): "select",
@@ -328,7 +325,6 @@ EXPECTED_DEFAULTS = {
         ("variants.create","fields.barcodes[].source"),
         ("variants.batch_create","drafts[].barcodes[].source"),
         ("variants.batch_precheck","drafts[].barcodes[].source"),
-        ("barcodes.add","source"),
     }, "store"),
     **dict.fromkeys({
         ("products.list","q"), ("catalog.list","q"),
@@ -446,7 +442,7 @@ class ActionContractTests(FacadeTestCase):
         self.model_id = self.create_model(self.phone_brand_id, "契約型號")
         product = self.invoke("products.create", {"name": "契約商品", "category_id": self.category_id, "variants": [{"attributes": {"顏色": "黑"}, "price": 100, "barcodes": [{"barcode": "contract-1"}]}]})
         self.product_id, self.variant_id = product["product_id"], product["variant_ids"][0]
-        self.invoke("stock.receive", {"employee": 1, "variant_id": self.variant_id, "qty": 3})
+        self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": self.variant_id, "qty": 3}]})
         self.session_id = self.invoke("stocktake.create", {"employee": 1})["session_id"]
         self.invoke("stocktake.scan", {"session_id":self.session_id, "variant_id":self.variant_id, "qty":1})
         self.delete_category_id = self.create_category("待刪種類")
@@ -468,7 +464,7 @@ class ActionContractTests(FacadeTestCase):
             "products.create":{"name":"新增商品","category_id":self.category_id,"variants":[{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"new-code","source":"store"}]}]}, "products.list":{}, "products.update":{"id":self.product_id,"fields":{}}, "products.delete":{"id":self.delete_product_id}, "catalog.list":{},
             "variants.create":{"product_id":self.product_id,"fields":{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"variant-new","source":"store"}]}}, "variants.update":{"id":self.variant_id,"fields":{}}, "variants.set_models":{"id":self.variant_id,"model_ids":[]}, "variants.update_details":{"id":self.variant_id,"fields":{},"model_ids":[]}, "variants.update_editor":{"id":self.variant_id,"fields":{},"model_ids":[],"deleted_barcodes":[],"factory_barcodes":[],"store_barcode_count":0}, "variants.delete":{"id":self.delete_variant_id}, "variants.batch_create":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"batch-new","source":"store"}]}]}, "variants.field_usage":{"category_id":self.category_id,"field_id":self.field_id}, "variants.model_usage":{"category_id":self.category_id}, "variants.activate":{"id":self.variant_id}, "variants.issues":{},
             "variants.batch_precheck":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"precheck-new","source":"store"}]}]},
-            "barcodes.scan":{"code":"contract-1"}, "barcodes.add":{"variant_id":self.variant_id,"barcode":"contract-2"}, "barcodes.delete":{"code":"contract-1"}, "stock.receive":{"variant_id":self.variant_id,"qty":1,"employee":1}, "stock.detail":{"variant_id":self.variant_id},
+            "barcodes.scan":{"code":"contract-1"}, "stock.receive":{"employee":1,"items":[{"variant_id":self.variant_id,"qty":1}]}, "stock.detail":{"variant_id":self.variant_id},
             "stocktake.create":{"employee":1}, "stocktake.list":{}, "stocktake.detail":{"session_id":self.session_id}, "stocktake.scan":{"session_id":self.session_id,"variant_id":self.variant_id,"qty":1}, "stocktake.set_counted":{"session_id":self.session_id,"variant_id":self.variant_id,"counted_qty":1}, "stocktake.close":{"session_id":self.session_id},
             "payments.list":{}, "sales.checkout":{"payment":"現金","paid":100,"employee":1,"items":[{"variant_id":self.variant_id,"qty":1,"unit_price":100}]}, "sales.list":{}, "sales.summary":{}, "sales.export_save":{}, "printing.barcode":{"variant_id":self.variant_id,"barcode":"contract-1","copies":1},
             "printing.preview":{"variant_id":self.variant_id,"barcode":"contract-1"},
@@ -494,7 +490,7 @@ class ActionContractTests(FacadeTestCase):
         direct = set().union(self.facade.settings.ACTIONS, self.facade.products.ACTIONS,
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
                              self.facade.stocktake.ACTIONS, self.facade.printing.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 71)
+        self.assertEqual(len(ACTION_CONTRACTS), 69)
         self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
@@ -752,7 +748,7 @@ class ActionContractTests(FacadeTestCase):
                     for action,contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items()
                     for path,spec in contract["fields"].items()
                     if spec["default"] != "missing"}
-        self.assertEqual(len(declared), 96)
+        self.assertEqual(len(declared), 93)
         self.assertEqual(declared, EXPECTED_DEFAULTS)
         executed = {}
         for (action,path), expected in EXPECTED_DEFAULTS.items():
@@ -792,7 +788,7 @@ class ActionContractTests(FacadeTestCase):
         self.assertNotIn("skipped", executed.values())
         self.assertEqual(
             {strategy: list(executed.values()).count(strategy) for strategy in set(executed.values())},
-            {"materialized_by_validator":17, "exact_validator_omission":79},
+            {"materialized_by_validator":17, "exact_validator_omission":76},
         )
 
         field_id = self.invoke("fields.create", {"name":"預設型態"})["field_id"]
@@ -800,7 +796,7 @@ class ActionContractTests(FacadeTestCase):
                          if row["field_id"] == field_id)
         self.assertEqual(field_row["field_type"], "select")
 
-        generated = self.invoke("barcodes.add", {"variant_id":self.variant_id})["barcode"]
+        generated = self.invoke("variants.update_editor", {"id":self.variant_id,"store_barcode_count":1})["store_barcodes"][0]
         with get_conn(self.db) as conn:
             self.assertEqual(conn.execute(
                 "SELECT source FROM Barcode WHERE barcode=?", (generated,)).fetchone()[0], "store")

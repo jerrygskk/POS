@@ -34,7 +34,7 @@ class TestMultiTagsApi(FacadeTestCase):
 
     def test_multi_roundtrip(self):
         self._create({"規格": ["霧面", "藍光"]})
-        got = self.invoke("barcodes.scan", {"code": "B1"})
+        got = self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]
         self.assertEqual(got["attributes"]["規格"], ["霧面", "藍光"])
         self.assertEqual(got["attr_display"], "霧面+藍光")
 
@@ -45,13 +45,13 @@ class TestMultiTagsApi(FacadeTestCase):
 
     def test_multi_dedup(self):
         self._create({"規格": ["亮面", "亮面"]})
-        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["規格"],
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attributes"]["規格"],
                          ["亮面"])
 
     def test_tags_autocreate_option(self):
         self._create({"規格": ["藍光"], "特性詞條": ["SGS認證", "無色偏"]})
         self.assertEqual(self._tags_values(), {"SGS認證", "無色偏"})
-        got = self.invoke("barcodes.scan", {"code": "B1"})
+        got = self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]
         self.assertEqual(got["attributes"]["特性詞條"], ["SGS認證", "無色偏"])
         self.assertEqual(got["attr_display"], "藍光｜SGS認證, 無色偏")
 
@@ -61,7 +61,7 @@ class TestMultiTagsApi(FacadeTestCase):
                if o["value"] == "SGS"][0]["option_id"]
         self.invoke("options.update", {"id": oid, "fields": {"value": "SGS認證"}})
         self.assertEqual(
-            self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["特性詞條"],
+            self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attributes"]["特性詞條"],
             ["SGS認證"])
 
     def test_default_option_exposed(self):
@@ -79,19 +79,19 @@ class TestMultiTagsApi(FacadeTestCase):
         # 預設選項(版型=滿版)一樣要顯示,不省略
         self._create({"版型": "滿版", "特性詞條": ["低藍光"],
                       "規格": ["藍光", "防窺"]})
-        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attr_display"],
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attr_display"],
                          "藍光+防窺｜低藍光｜滿版")
 
     def test_display_non_default_layout_shown(self):
         self._create({"版型": "9分滿", "規格": ["亮面"]})
-        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attr_display"],
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attr_display"],
                          "亮面｜9分滿")
 
     def test_variant_patch_multi(self):
         r = self._create({"規格": ["亮面"]})
         vid = r["variant_ids"][0]
         self.invoke("variants.update", {"id": vid, "fields": {"attributes": {"規格": ["霧面", "防窺"]}}})
-        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["attributes"]["規格"],
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "B1"})["matches"][0]["attributes"]["規格"],
                          ["霧面", "防窺"])
 
 

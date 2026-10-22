@@ -67,6 +67,7 @@
     const kept = [];
     const skipped = [];
     const errorsByDraftId = {};
+    const noticesByDraftId = {};
     for (const row of (rows || [])) {
       const result = byDraftId.get(row.draft_id) || {};
       if (result.existing_duplicate) {
@@ -76,8 +77,10 @@
       kept.push(row);
       if (result.errors && result.errors.length)
         errorsByDraftId[row.draft_id] = result.errors.slice();
+      if (result.notices && result.notices.length)
+        noticesByDraftId[row.draft_id] = result.notices.slice();
     }
-    return { kept, skipped, errorsByDraftId };
+    return { kept, skipped, errorsByDraftId, noticesByDraftId };
   }
 
   function dupRefText(err, rows) {

@@ -25,7 +25,7 @@ const API = {
       "products.create", "products.list", "products.update", "products.delete", "catalog.list",
       "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.update_editor", "variants.delete",
       "variants.batch_create", "variants.batch_precheck", "variants.field_usage", "variants.model_usage", "variants.activate", "variants.issues",
-      "barcodes.scan", "barcodes.add", "barcodes.delete", "stock.receive", "stock.detail",
+      "barcodes.scan", "stock.receive", "stock.detail",
       "stocktake.create", "stocktake.list", "stocktake.detail", "stocktake.scan", "stocktake.set_counted", "stocktake.close",
       "payments.list", "sales.checkout", "sales.list", "sales.summary", "sales.export_save", "printing.barcode", "printing.preview", "printing.check",
       "desktop.child_window.open", "desktop.child_window.context", "desktop.child_window.close"
@@ -57,16 +57,10 @@ const API = {
   createVariant: (product_id, fields) => API.invoke("variants.create", {product_id, fields}), updateVariant: (id, fields) => API.invoke("variants.update", {id, fields}), deleteVariant: id => API.invoke("variants.delete", {id}),
   batchCreateVariants: (product_id, drafts) => API.invoke("variants.batch_create", {product_id, drafts}), batchPrecheckVariants: (product_id, drafts) => API.invoke("variants.batch_precheck", {product_id, drafts}), fieldUsage: (category_id, field_id, scope) => API.invoke("variants.field_usage", Object.assign({category_id, field_id}, scope || {})), modelUsage: (category_id, scope) => API.invoke("variants.model_usage", Object.assign({category_id}, scope || {})),
   activateVariant: id => API.invoke("variants.activate", {id}), variantIssues: () => API.invoke("variants.issues", {}),
-  addBarcode: p => API.invoke("barcodes.add", p), deleteBarcode: code => API.invoke("barcodes.delete", {code}), scanBarcode: code => API.invoke("barcodes.scan", {code}),
+  scanBarcode: code => API.invoke("barcodes.scan", {code}),
   receiveStock: p => API.invoke("stock.receive", p), stockDetail: variant_id => API.invoke("stock.detail", {variant_id}),
   createStocktake: p => API.invoke("stocktake.create", p), listStocktakes: () => API.invoke("stocktake.list", {}), stocktakeDetail: session_id => API.invoke("stocktake.detail", {session_id}), stocktakeScan: p => API.invoke("stocktake.scan", p), setStocktakeCounted: p => API.invoke("stocktake.set_counted", p), closeStocktake: session_id => API.invoke("stocktake.close", {session_id}),
   listPayments: () => API.invoke("payments.list", {}), checkout: p => API.invoke("sales.checkout", p), listSales: p => API.invoke("sales.list", p), salesSummary: p => API.invoke("sales.summary", p),
-  async barcodeQuery(value) {
-    const code = String(value || "").trim();
-    if (!code) return null;
-    const data = await this.scanBarcode(code);
-    return { code, data };
-  },
   updateVariantDetails(id, fields, modelIds) {
     return this.invoke("variants.update_details", {
       id, fields, model_ids: modelIds

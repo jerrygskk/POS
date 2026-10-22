@@ -112,3 +112,21 @@ def next_store_barcode(conn):
         "INSERT OR REPLACE INTO Setting(key,value) VALUES('next_store_barcode',?)",
         (str(serial + 1),))
     return code
+
+
+def ensure_store_codes_for_shared(conn, code):
+    """共用原廠碼的持有者各保留店內碼；使用呼叫端的連線與交易。"""
+    owners = [r[0] for r in conn.execute(
+        "SELECT DISTINCT variant_id FROM Barcode WHERE barcode=? AND source='factory' "
+        "ORDER BY variant_id", (code,))]
+    if len(owners) < 2:
+        return []
+    created = []
+    for vid in owners:
+        if conn.execute("SELECT 1 FROM Barcode WHERE variant_id=? AND source='store'",
+                        (vid,)).fetchone() is None:
+            tl = next_store_barcode(conn)
+            conn.execute("INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,'store')",
+                         (tl, vid))
+            created.append((vid, tl))
+    return created

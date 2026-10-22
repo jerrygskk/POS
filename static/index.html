@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=216">
+<link rel="stylesheet" href="css/pos.css?v=217">
 </head>
 <body>
 <div id="app">
   <nav>
-    <img class="nav-logo" src="img/logo.png?v=216" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=217" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}</button>
   </nav>
@@ -117,23 +117,47 @@
 </div>
 </template>
 <template id="tpl-receive">
-<div class="page">
+<div class="page receive">
   <div class="scan-row"><employee-picker></employee-picker></div>
   <div class="scan-row">
     <input ref="scan" v-model="scanCode" @keyup.enter="onScan"
            placeholder="掃描條碼進貨" class="scan-input">
   </div>
-  <div v-if="hit" class="pay-panel">
-    <div>{{ hit.name }}|{{ attrText(hit) }}|目前庫存 {{ hit.stock }}</div>
-    <label>進貨數量 <input type="number" v-model.number="qty" min="1" class="w80"></label>
-    <button class="primary" @click="doReceive">入庫</button>
-    <button v-if="labelQty" :disabled="labelBusy" @click="addToLabels">加入列印清單（{{ labelQty }} 張）</button>
-    <span v-if="labelMsg">{{ labelMsg }}</span>
+  <div v-if="draft.notFound" class="notice-bar">
+    查無條碼「{{ draft.notFound }}」。進貨不建立產品，請先至商品設定建立產品與子產品。
+    <button @click="goSettings">前往商品設定</button>
   </div>
-  <div v-if="notFound" class="pay-panel">
-    <div>查無條碼「{{ notFound }}」。進貨不建立產品，請先至商品設定建立產品與子產品。</div>
-    <button class="primary" @click="goSettings">前往商品設定</button>
+  <table class="cart-table receive-table">
+    <colgroup>
+      <col><col>
+      <col class="receive-col-barcode"><col class="cart-col-stock"><col class="receive-col-qty">
+      <col class="receive-col-label"><col class="cart-col-remove">
+    </colgroup>
+    <thead><tr><th>商品</th><th>規格</th><th>條碼</th><th>目前庫存</th>
+      <th>進貨數量</th><th>標籤</th><th></th></tr></thead>
+    <tbody>
+      <tr v-if="!draft.rows.length"><td colspan="7" class="hint">請掃描條碼加入進貨清單。</td></tr>
+      <tr v-for="row in draft.rows" :key="row.variant_id"
+          :class="{'receive-row-hit': draft.highlightKey === row.variant_id}">
+        <td>{{ row.name }}</td>
+        <td>{{ attrText(row) }}</td>
+        <td>{{ row.label_barcode }}</td>
+        <td>{{ row.stock }}</td>
+        <td><input type="number" :value="row.qty" min="1" class="w80"
+                   :disabled="draft.locked" @change="setQty(row, $event)"></td>
+        <td><button v-if="row.qty > row.labeled" class="btn-sm"
+                    :disabled="row.labelBusy || draft.locked" @click="addToLabels(row)">加入列印清單（{{ row.qty - row.labeled }} 張）</button>
+            <span v-else-if="row.labeled > 0" class="hint">已加入 {{ row.labeled }} 張</span></td>
+        <td><button class="btn-x" title="移除" :disabled="draft.locked" @click="removeRow(row)">✕</button></td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="pay-panel">
+    <div>共 {{ draft.rows.length }} 項、{{ totalQty }} 件</div>
+    <button class="primary" :disabled="draft.locked || !draft.rows.length" @click="confirmReceive">確認進貨</button>
+    <button :disabled="draft.locked || !draft.rows.length" @click="clearAll">清空</button>
   </div>
+  <div v-if="draft.doneMsg" class="done-msg">{{ draft.doneMsg }}</div>
 </div>
 </template>
 <template id="tpl-stocktake">
@@ -564,24 +588,24 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=216"></script>
-<script src="js/api.js?v=216"></script>
-<script src="js/confirm.js?v=216"></script>
-<script src="js/pos_shared.js?v=216"></script>
-<script src="js/catalogfields.js?v=216"></script>
-<script src="js/checkout.js?v=216"></script>
-<script src="js/receive.js?v=216"></script>
-<script src="js/stocktake.js?v=216"></script>
-<script src="js/records.js?v=216"></script>
-<script src="js/catalog.js?v=216"></script>
-<script src="js/sortable.js?v=216"></script>
-<script src="js/combobox.js?v=216"></script>
-<script src="js/optpicker.js?v=216"></script>
-<script src="js/modelpicker.js?v=216"></script>
-<script src="js/employeepicker.js?v=216"></script>
-<script src="js/attrfields.js?v=216"></script>
-<script src="js/settings.js?v=216"></script>
-<script src="js/labels.js?v=216"></script>
-<script src="js/app.js?v=216"></script>
+<script src="js/vue.global.prod.js?v=217"></script>
+<script src="js/api.js?v=217"></script>
+<script src="js/confirm.js?v=217"></script>
+<script src="js/pos_shared.js?v=217"></script>
+<script src="js/catalogfields.js?v=217"></script>
+<script src="js/checkout.js?v=217"></script>
+<script src="js/receive.js?v=217"></script>
+<script src="js/stocktake.js?v=217"></script>
+<script src="js/records.js?v=217"></script>
+<script src="js/catalog.js?v=217"></script>
+<script src="js/sortable.js?v=217"></script>
+<script src="js/combobox.js?v=217"></script>
+<script src="js/optpicker.js?v=217"></script>
+<script src="js/modelpicker.js?v=217"></script>
+<script src="js/employeepicker.js?v=217"></script>
+<script src="js/attrfields.js?v=217"></script>
+<script src="js/settings.js?v=217"></script>
+<script src="js/labels.js?v=217"></script>
+<script src="js/app.js?v=217"></script>
 </body>
 </html>

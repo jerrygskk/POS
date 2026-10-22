@@ -43,7 +43,7 @@ class PrintingServiceTests(FacadeTestCase):
     @patch("lib.printing_service.render_label")
     def test_specified_factory_barcode_is_printed_even_with_store_barcode(self, render, print_label):
         vid = self._create_variant(barcode="STORE-FACTORY")
-        self.invoke("barcodes.add", {"variant_id": vid, "barcode": "4710000000000", "source": "factory"})
+        self.invoke("variants.update_editor", {"id": vid, "factory_barcodes": ["4710000000000"]})
         self.invoke("printing.barcode", {"variant_id": vid, "barcode": "4710000000000"})
         render.assert_called_once_with("玻璃保護貼", "透明", "$590", "4710000000000", models=[])
         print_label.assert_called_once_with(render.return_value, 1)
@@ -184,7 +184,7 @@ class PrintingServiceTests(FacadeTestCase):
         vid = self._create_variant(barcode="DELETED-AFTER-CHECK")
         payload = {"variant_id": vid, "barcode": "DELETED-AFTER-CHECK"}
         self.assertTrue(self.invoke("printing.check", {"items": [payload]})["items"][0]["valid"])
-        self.invoke("barcodes.delete", {"code": "DELETED-AFTER-CHECK"})
+        self.invoke("variants.update_editor", {"id": vid, "deleted_barcodes": ["DELETED-AFTER-CHECK"]})
         with patch("lib.printing_service.LabelPrinter.print") as print_label:
             self.assert_application_error("validation_error", "printing.barcode", payload)
             print_label.assert_not_called()

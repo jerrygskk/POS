@@ -111,11 +111,11 @@ class ScanGuardTests(FacadeTestCase):
             "name": "測試膜", "category_id": self.cid,
             "variants": [{"attributes": {}, "price": 100}]})
         self.variant_id = product["variant_ids"][0]
-        self.code = self.invoke("barcodes.add", {"variant_id": self.variant_id})["barcode"]
+        self.code = self.invoke("variants.update_editor", {"id": self.variant_id, "store_barcode_count": 1})["store_barcodes"][0]
 
     def test_generated_code_is_new_format_and_scannable(self):
         self.assertIsNotNone(parse_store_barcode(self.code))
-        self.assertEqual(self.invoke("barcodes.scan", {"code": self.code})["variant_id"],
+        self.assertEqual(self.invoke("barcodes.scan", {"code": self.code})["matches"][0]["variant_id"],
                          self.variant_id)
 
     def test_lowercase_scan_still_reports_not_found_not_format_error(self):
@@ -133,5 +133,5 @@ class ScanGuardTests(FacadeTestCase):
 
     def test_manual_store_prefix_barcode_still_rejected(self):
         self.assert_application_error(
-            "validation_error", "barcodes.add",
-            {"variant_id": self.variant_id, "barcode": format_store_barcode(999)})
+            "validation_error", "variants.update_editor",
+            {"id": self.variant_id, "factory_barcodes": [format_store_barcode(999)]})

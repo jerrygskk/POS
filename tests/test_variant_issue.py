@@ -107,19 +107,19 @@ class VariantIssueTests(ConnTestCase):
         self.assertEqual(rows[0]["related_variant_id"], first)
         conn.close()
 
-    def test_tolerant_duplicate_barcode_preserves_source_value(self):
+    def test_tolerant_shared_barcode_keeps_both_owners_without_issue(self):
         res = self._tolerant([
             {"draft_id": "a", "attributes": {"顏色": "紅"}, "barcodes": [{"barcode": "DUP", "source": "factory"}]},
             {"draft_id": "b", "attributes": {"顏色": "藍"}, "barcodes": [{"barcode": "DUP", "source": "factory"}]}])
-        second = res["results"][1]["variant_id"]
         conn = self._fresh()
-        rows = self._issues(conn, second)
-        self.assertEqual(rows[0]["issue_type"], "duplicate_barcode")
-        self.assertEqual(rows[0]["source_value"], "DUP")
-        # 重複條碼未寫入正式欄位(仍只有第一筆擁有)
-        owners = [r["variant_id"] for r in conn.execute("SELECT variant_id FROM Barcode WHERE barcode='DUP'")]
-        self.assertEqual(owners, [res["results"][0]["variant_id"]])
-        conn.close()
+        try:
+            for result in res["results"]:
+                self.assertEqual(list(self._issues(conn, result["variant_id"])), [])
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM Barcode WHERE variant_id=? AND source='store'",
+                                             (result["variant_id"],)).fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM Barcode WHERE barcode='DUP'").fetchone()[0], 2)
+        finally:
+            conn.close()
 
     def test_tolerant_structural_error_rejected(self):
         with self.assertRaises(ValidationError):
@@ -136,36 +136,14 @@ class VariantIssueTests(ConnTestCase):
         self.assertEqual(len(self._issues(conn, vid)), 0)
         conn.close()
 
-    def test_revalidate_keeps_remaining_issue(self):
-        # 兩問題:缺顏色 + 條碼重複
-        self._tolerant([{"draft_id": "x", "attributes": {"顏色": "藍"}, "barcodes": [{"barcode": "DUP", "source": "factory"}]}])
-        vid = self._tolerant([{"draft_id": "a", "attributes": {"長度": "1m"}, "barcodes": [{"barcode": "DUP", "source": "factory"}]}])["results"][0]["variant_id"]
-        conn = self._fresh(); self.assertEqual(len(self._issues(conn, vid)), 2); conn.close()
-        # 只補顏色,條碼仍衝突
-        self.facade.invoke("variants.update_details", {
-            "id": vid, "fields": {"attributes": {"顏色": "紅"}}})
+    def test_revalidate_keeps_remaining_required_issue(self):
+        vid = self._tolerant([{"draft_id": "a", "attributes": {"長度": "1m"}}])["results"][0]["variant_id"]
+        self.facade.invoke("variants.update_details", {"id": vid, "fields": {"price": 50}})
         conn = self._fresh()
-        rows = self._issues(conn, vid)
-        self.assertEqual([r["issue_type"] for r in rows], ["duplicate_barcode"])
-        conn.close()
-
-    def test_revalidate_resolvable_barcode_written(self):
-        vid = self._tolerant([{"draft_id": "a", "attributes": {"顏色": "紅"},
-                               "barcodes": [{"barcode": "GONE", "source": "factory"}]}])["results"][0]["variant_id"]
-        # 手動塞一個佔用者再移除,模擬衝突消失:直接建立問題無衝突來源
-        conn = self._fresh()
-        # 人工把此筆改成 duplicate_barcode 問題(來源值目前無人佔用)
-        conn.execute("DELETE FROM Barcode WHERE barcode='GONE'")
-        conn.execute("UPDATE Variant SET active=0 WHERE variant_id=?", (vid,))
-        conn.execute("INSERT INTO VariantIssue(variant_id,issue_type,source_value) VALUES(?,?,?)",
-                     (vid, "duplicate_barcode", "GONE"))
-        conn.commit(); conn.close()
-        state = self.facade.invoke("variants.update_details", {"id": vid, "fields": {"price": 50}})
-        conn = self._fresh()
-        self.assertEqual(len(self._issues(conn, vid)), 0)
-        # 條碼補寫回正式欄位
-        self.assertTrue(conn.execute("SELECT 1 FROM Barcode WHERE barcode='GONE' AND variant_id=?", (vid,)).fetchone())
-        conn.close()
+        try:
+            self.assertEqual([r["issue_type"] for r in self._issues(conn, vid)], ["missing_required"])
+        finally:
+            conn.close()
 
     # ---- 啟用前完整驗證 ----
 
@@ -200,8 +178,8 @@ class VariantIssueTests(ConnTestCase):
         vid = self._tolerant([{"draft_id": "a", "attributes": {"長度": "1m"},
                                "barcodes": [{"barcode": "SCANME", "source": "factory"}]}])["results"][0]["variant_id"]
         # 掃碼成交:active 應為 False
-        scanned = self.facade.invoke("barcodes.scan", {"code": "SCANME"})
-        self.assertFalse(scanned["active"])
+        scanned = self.facade.invoke("barcodes.scan", {"code": "SCANME"})["matches"][0]
+        self.assertEqual(scanned["status"], "issue")
         # 銷售層 variant_is_active 亦為 0
         conn = self._fresh()
         self.assertEqual(SalesRepository(conn).variant_is_active(vid)["ok"], 0)
@@ -209,7 +187,7 @@ class VariantIssueTests(ConnTestCase):
         # 補齊必填後可銷售
         self.facade.invoke("variants.update_details", {"id": vid, "fields": {"attributes": {"顏色": "紅"}}})
         self.facade.invoke("variants.activate", {"id": vid})
-        self.assertTrue(self.facade.invoke("barcodes.scan", {"code": "SCANME"})["active"])
+        self.assertEqual(self.facade.invoke("barcodes.scan", {"code": "SCANME"})["matches"][0]["status"], "active")
 
     # ---- 待處理彙總 ----
 

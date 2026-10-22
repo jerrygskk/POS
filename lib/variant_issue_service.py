@@ -4,9 +4,8 @@
 支援的問題種類(規格 §11.2 / 商品設定核心規格 §8.2):
   missing_required   - 缺少必填模板欄位值(field_id 指出欄位)
   duplicate_signature- 與同產品的另一子產品規格簽章重複(related_variant_id 對照)
-  duplicate_barcode  - 來源條碼與既有條碼衝突,暫存於 source_value
 
-三種問題任一存在即視為未解決;全部排除後方可手動啟用。
+兩種問題任一存在即視為未解決;全部排除後方可手動啟用。
 容錯建立(供未來匯入)由 VariantBatchService.tolerant_create 寫入問題筆,
 本服務負責之後的重驗與啟用。
 """
@@ -64,19 +63,10 @@ class VariantIssueService:
         """持久化簽章:正式規格(含停用值,排除特性詞條)＋適用型號。"""
         return variant_signature(self.conn, variant_id, feature_id)
 
-    def _persisted_dup_barcodes(self, variant_id):
-        """既有 duplicate_barcode 問題的來源值清單。"""
-        return [r["source_value"] for r in self.conn.execute(
-            "SELECT source_value FROM VariantIssue "
-            "WHERE variant_id=? AND issue_type='duplicate_barcode'", (variant_id,))
-            if r["source_value"]]
-
     # ---- 計算目前應有的問題集合 ----
 
     def compute(self, variant_id):
-        """依目前持久化狀態計算應有問題集合。回傳:
-        {issues: [issue_dict,...], resolvable_barcodes: [code,...]}
-        resolvable_barcodes 為原重複、現已無衝突可寫入正式欄位的條碼。"""
+        """依目前持久化狀態計算應有問題集合，回傳 {issues: [issue_dict,...]}。"""
         ctx = self._context(variant_id)
         feature_id = self._feature_id(ctx["category_id"])
         issues = []
@@ -98,30 +88,14 @@ class VariantIssueService:
         if related is not None:
             issues.append({"issue_type": "duplicate_signature", "field_id": None,
                            "source_value": None, "related_variant_id": related})
-        # 3. 重複條碼:既有問題若來源值仍被他人佔用則保留,否則可寫入
-        resolvable = []
-        for code in self._persisted_dup_barcodes(variant_id):
-            owner = self.conn.execute(
-                "SELECT variant_id FROM Barcode WHERE barcode=?", (code,)).fetchone()
-            if owner is not None and owner["variant_id"] != variant_id:
-                issues.append({"issue_type": "duplicate_barcode", "field_id": None,
-                               "source_value": code, "related_variant_id": owner["variant_id"]})
-            else:
-                resolvable.append(code)
-        return {"issues": issues, "resolvable_barcodes": resolvable}
+        return {"issues": issues}
 
     # ---- 重新驗證(修改後) ----
 
     def revalidate(self, variant_id):
-        """重算問題:已解決者刪除、仍存在者更新;可寫入的重複條碼補寫正式欄位。
+        """重算問題:已解決者刪除、仍存在者更新。
         不自動啟用。回傳 {variant_id, issues, can_activate}。"""
         result = self.compute(variant_id)
-        for code in result["resolvable_barcodes"]:
-            # 條碼衝突已消失 → 寫入正式欄位(重複條碼恆為原廠來源)
-            if self.conn.execute("SELECT 1 FROM Barcode WHERE barcode=?", (code,)).fetchone() is None:
-                self.conn.execute(
-                    "INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,'factory')",
-                    (code, variant_id))
         self.conn.execute("DELETE FROM VariantIssue WHERE variant_id=?", (variant_id,))
         for it in result["issues"]:
             self.conn.execute(

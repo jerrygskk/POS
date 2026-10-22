@@ -10,7 +10,7 @@ from lib.application_errors import NotFoundError, ValidationError
 from lib.db import next_sort
 from lib.normalize import normalize_display, normalize_key
 from lib.product_data import FEATURE_FIELD_KEY, variant_signature
-from lib.product_rules import has_store_barcode_prefix, next_store_barcode
+from lib.product_rules import has_store_barcode_prefix, next_store_barcode, ensure_store_codes_for_shared
 
 
 def _err(code, message, field_id=None, related_variant_id=None, related_draft_id=None):
@@ -178,7 +178,7 @@ class VariantBatchService:
             "draft_id": draft.get("draft_id"),
             "attrs": attrs_out, "model_ids": model_ids, "barcodes": barcodes,
             "price": price, "active": active,
-            "signature": frozenset(sig), "errors": errors,
+            "signature": frozenset(sig), "errors": errors, "notices": [],
             "structural_errors": hard,
             "missing_field_ids": missing_field_ids,
             "model_required_missing": model_required_missing,
@@ -232,25 +232,30 @@ class VariantBatchService:
                     "duplicate_signature", "與既有子產品規格重複",
                     related_variant_id=variant_id))
 
-        seen_codes = {}
-        for idx, r in enumerate(resolved):
+        batch_count = {}
+        batch_store = set()
+        for r in resolved:
+            for bc in r["barcodes"]:
+                code = bc["barcode"]
+                if code:
+                    batch_count[code] = batch_count.get(code, 0) + 1
+                    if bc["source"] == "store":
+                        batch_store.add(code)
+        for r in resolved:
             for bc in r["barcodes"]:
                 code = bc["barcode"]
                 if not code:
                     continue
-                if code in seen_codes and seen_codes[code][0] != idx:
-                    first_idx, first_draft_id = seen_codes[code]
+                owners = self.conn.execute(
+                    "SELECT variant_id,source FROM Barcode WHERE barcode=?", (code,)).fetchall()
+                if (any(owner["source"] == "store" for owner in owners)
+                        or (bc["source"] == "store" and owners)
+                        or (code in batch_store and batch_count[code] >= 2)):
                     r["errors"].append(_err(
-                        "duplicate_barcode", f"此條碼與第 {first_idx + 1} 筆重複",
-                        related_draft_id=first_draft_id))
-                else:
-                    row = self.conn.execute(
-                        "SELECT variant_id FROM Barcode WHERE barcode=?", (code,)).fetchone()
-                    if row:
-                        r["errors"].append(_err(
-                            "duplicate_barcode", "此條碼已存在",
-                            related_variant_id=row["variant_id"]))
-                seen_codes.setdefault(code, (idx, r["draft_id"]))
+                        "duplicate_barcode", "此條碼已存在",
+                        related_variant_id=owners[0]["variant_id"] if owners else None))
+                elif (batch_count[code] >= 2 or owners) and not r["notices"]:
+                    r["notices"].append({"code": "shared_barcode", "message": "(已重複)"})
         return resolved, {"created": created, "reactivated": reactivated,
                           "category_id": category_id, "feature_id": feature_id}
 
@@ -264,7 +269,7 @@ class VariantBatchService:
                               if error["code"] == "duplicate_signature"
                               and error.get("related_variant_id") is not None), None)
             results.append({"index": i, "draft_id": r["draft_id"],
-                            "errors": r["errors"],
+                            "errors": r["errors"], "notices": r["notices"],
                             "existing_duplicate": duplicate is not None,
                             "related_variant_id": duplicate and duplicate["related_variant_id"]})
         return {"product_id": payload["product_id"], "results": results,
@@ -312,6 +317,7 @@ class VariantBatchService:
             results.append({"draft_id": r["draft_id"], "variant_id": vid,
                             "barcodes": codes})
 
+        self._ensure_shared_codes(resolved, results)
         return {"product_id": product_id, "results": results,
                 "created_option_ids": sorted(ctx["created"]),
                 "reactivated_option_ids": sorted(ctx["reactivated"])}
@@ -320,7 +326,7 @@ class VariantBatchService:
 
     def tolerant_create(self, payload):
         """問題子產品照建但停用並逐問題寫 VariantIssue;正常筆維持啟用。
-        僅容忍三種業務問題(missing_required/duplicate_signature/duplicate_barcode);
+        僅容忍兩種業務問題(missing_required/duplicate_signature);
         結構性錯誤(未知欄、select 多值、型號不存在、TL 條碼)仍整批拒絕。"""
         product_id = payload["product_id"]
         resolved, ctx = self._validate_batch(payload, dry=False)
@@ -330,8 +336,11 @@ class VariantBatchService:
             raise ValidationError("部分資料結構有誤，無法建立", details=hard)
 
         sig_owner = dict(self._existing_signatures(product_id, ctx["feature_id"]))
-        code_owner = {r["barcode"]: r["variant_id"]
-                      for r in self.conn.execute("SELECT barcode, variant_id FROM Barcode")}
+        collisions = [{"index": i, "draft_id": r["draft_id"], "errors": [e for e in r["errors"]
+                       if e["code"] == "duplicate_barcode"]} for i, r in enumerate(resolved)
+                      if any(e["code"] == "duplicate_barcode" for e in r["errors"])]
+        if collisions:
+            raise ValidationError("部分子產品資料有誤，請修正後再送出", details=collisions)
         results = []
         for r in resolved:
             issues = []                 # [(issue_type, field_id, source_value, related_variant_id)]
@@ -362,14 +371,13 @@ class VariantBatchService:
             codes = []
             for bc in r["barcodes"]:
                 code = bc["barcode"]
-                if code is not None and code in code_owner:
-                    issues.append(("duplicate_barcode", None, code, code_owner[code]))
+                if code is not None and self.conn.execute(
+                        "SELECT 1 FROM Barcode WHERE barcode=? AND variant_id=?", (code, vid)).fetchone():
                     continue
                 code = code or next_store_barcode(self.conn)
                 self.conn.execute(
                     "INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",
                     (code, vid, bc["source"]))
-                code_owner[code] = vid
                 codes.append({"barcode": code, "source": bc["source"]})
             if issues:
                 self.conn.execute("UPDATE Variant SET active=0 WHERE variant_id=?", (vid,))
@@ -381,6 +389,16 @@ class VariantBatchService:
                 self.conn.execute("UPDATE Variant SET active=0 WHERE variant_id=?", (vid,))
             results.append({"draft_id": r["draft_id"], "variant_id": vid,
                             "issue_count": len(issues), "barcodes": codes})
+        self._ensure_shared_codes(resolved, results)
         return {"product_id": product_id, "results": results,
                 "created_option_ids": sorted(ctx["created"]),
                 "reactivated_option_ids": sorted(ctx["reactivated"])}
+
+    def _ensure_shared_codes(self, resolved, results):
+        codes = dict.fromkeys(bc["barcode"] for r in resolved for bc in r["barcodes"]
+                              if bc["barcode"] and bc["source"] == "factory")
+        by_id = {r["variant_id"]: r for r in results}
+        for code in codes:
+            for vid, store in ensure_store_codes_for_shared(self.conn, code):
+                if vid in by_id:
+                    by_id[vid]["barcodes"].append({"barcode": store, "source": "store"})

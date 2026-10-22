@@ -367,15 +367,18 @@ class VariantBatchTests(ConnTestCase):
             "product_id": self.pid,
             "drafts": [{"draft_id": "a", "attributes": {"顏色": "紅"},
                         "barcodes": [{"barcode": "DUP", "source": "factory"}]}]})
-        # 對 DB 重複
-        try:
-            self.facade.invoke("variants.batch_create", {
+        # 既有原廠碼可共用，雙方自動取得店內碼。
+        result = self.facade.invoke("variants.batch_create", {
                 "product_id": self.pid,
                 "drafts": [{"draft_id": "b", "attributes": {"顏色": "藍"},
                             "barcodes": [{"barcode": "DUP", "source": "factory"}]}]})
-            self.fail("應該 raise")
-        except Exception as exc:
-            self.assertTrue(getattr(exc, "details", None))
+        conn = self._fresh()
+        try:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM Barcode WHERE barcode='DUP'").fetchone()[0], 2)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM Barcode WHERE source='store'").fetchone()[0], 2)
+            self.assertEqual(len(result["results"]), 1)
+        finally:
+            conn.close()
 
     # ---- 前置:停用產品/種類 ----
 

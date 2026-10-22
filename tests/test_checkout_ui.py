@@ -200,6 +200,14 @@ s.draft.cart = [{variant_id:7, qty:1, unit_price:500, discount:0}];
         self.assertEqual(out["calls"], 1)
         self.assertEqual(out["kept"], 3)
 
+    def test_scan_cancel_clears_input_without_changing_cart(self):
+        out = self._run(r'''
+context.window.PosScan=async()=>null;
+const s=mkState({scanCode:"SHARED"});
+(async()=>{await s.onScan();out.scan=s.scanCode;out.cart=s.draft.cart.length;done()})();
+''')
+        self.assertEqual(out, {"scan": "", "cart": 0})
+
     def test_cart_item_carries_current_stock(self):
         out = self._run(r'''
 const s = mkState();

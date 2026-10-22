@@ -23,7 +23,7 @@ class TestEmployee(FacadeTestCase):
             conn.close()
 
     def test_each_operation_records_employee(self):
-        self.invoke("stock.receive", {"variant_id": self.vid, "qty": 5, "employee": 2})
+        self.invoke("stock.receive", {"employee": 2, "items": [{"variant_id": self.vid, "qty": 5}]})
         self.invoke("sales.checkout", {"payment": "現金", "paid": 100, "employee": 3,
             "items": [{"variant_id": self.vid, "qty": 1, "unit_price": 100}]})
         sid = self.invoke("stocktake.create", {"employee": 4})["session_id"]
@@ -34,7 +34,7 @@ class TestEmployee(FacadeTestCase):
 
     def test_missing_or_out_of_range_employee_is_rejected(self):
         payloads = {
-            "stock.receive": {"variant_id": self.vid, "qty": 1},
+            "stock.receive": {"items": [{"variant_id": self.vid, "qty": 1}]},
             "sales.checkout": {"payment": "現金", "paid": 100,
                 "items": [{"variant_id": self.vid, "qty": 1, "unit_price": 100}]},
             "stocktake.create": {},
@@ -58,7 +58,7 @@ class TestEmployeeMigration(FacadeTestCase):
             conn.execute(f"ALTER TABLE {table} DROP COLUMN employee")
         conn.execute("ALTER TABLE StocktakeSession ADD COLUMN operator TEXT")
         conn.execute("UPDATE Setting SET value=? WHERE key='schema_version'",
-                     (str(db_schema.SCHEMA_VERSION - 1),))
+                     ("15",))
         conn.commit()
         conn.close()
         init_db(self.db)

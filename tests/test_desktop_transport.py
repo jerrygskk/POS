@@ -136,7 +136,7 @@ vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
 (async () => {
   await vm.runInContext('API.listCategories({all:1})', context);
   await vm.runInContext('API.createProduct({name:"A"})', context);
-  await vm.runInContext('API.receiveStock({variant_id:4,qty:2})', context);
+  await vm.runInContext('API.receiveStock({employee:1,items:[{variant_id:4,qty:2}]})', context);
   await vm.runInContext('API.listStocktakes()', context);
   await vm.runInContext('API.checkout({payment:"現金",items:[]})', context);
   await vm.runInContext('API.printBarcode(9)', context);
@@ -162,9 +162,8 @@ vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
 const fs = require("fs"), vm = require("vm");
 let scanned = null;
 const context = {
-  window: {PosPages: {}},
+  window: {PosPages: {},PosScan:async code=>({code,data:{variant_id:8}})},
   API: {
-    barcodeQuery: async code => ({code, data: {variant_id: 8}}),
     stocktakeScan: async payload => { scanned = payload; },
     stocktakeDetail: async () => ({items: []})
   }
@@ -220,6 +219,7 @@ const context = {
 };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
+context.window.PosScan=async code=>({code,data:await context.API.scanBarcode(code)});
 const page = context.window.PosPages["page-labels"];
 const state = {
   ...page.data(), ...page.methods, query: "玻璃", attrText: () => "亮面",

@@ -152,13 +152,10 @@ window.PosPages["page-catalog"] = {
       this.includeInactive = true;
       await this.reload();
     },
-    // 待處理問題轉正式中文說明(missing_required/duplicate_barcode/duplicate_signature)
+    // 待處理問題轉正式中文說明(missing_required/duplicate_signature)
     issueText(it) {
       if (it.issue_type === "missing_required")
         return `缺少必填「${it.field_name || it.source_value || "規格"}」`;
-      if (it.issue_type === "duplicate_barcode")
-        return `條碼「${it.source_value}」與其他款式重複` +
-          (it.related_label ? `（${it.related_label}）` : "");
       if (it.issue_type === "duplicate_signature")
         return "規格與其他款式重複" +
           (it.related_label ? `（${it.related_label}）` : "");

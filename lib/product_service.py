@@ -6,7 +6,7 @@ from lib.db import in_clause, next_sort
 from lib.normalize import normalize_display, normalize_key
 from lib.product_rules import (allow_keys as _allow, is_int as _is_int,
                                has_store_barcode_prefix, next_store_barcode,
-                               parse_store_barcode)
+                               parse_store_barcode, ensure_store_codes_for_shared)
 from lib import product_data
 
 
@@ -144,10 +144,6 @@ def _validate_action_payload(action, payload):
         _allow(payload,{"product_id","fields"})
         if not _is_int(payload.get("product_id")):raise ValidationError("商品識別碼格式不正確")
         _validate_variant(payload.get("fields"))
-    elif action=="barcodes.add":
-        _allow(payload,{"variant_id","barcode","source"})
-        if not _is_int(payload.get("variant_id")):raise ValidationError("子產品識別碼格式不正確")
-        _validate_barcode({k:v for k,v in payload.items() if k!="variant_id"})
     else:
         _allow(payload,{"code"})
         if not isinstance(payload.get("code"),str):raise ValidationError("條碼格式不正確")
@@ -226,6 +222,9 @@ class ProductService:
         codes = []
         for barcode in payload.get("barcodes", []):
             codes.append(self._add_barcode(vid, barcode)["barcode"])
+        for row in self.repo.all("SELECT barcode FROM Barcode WHERE variant_id=? AND source='factory'", (vid,)):
+            created = ensure_store_codes_for_shared(self.repo.connection, row["barcode"])
+            codes.extend(code for owner, code in created if owner == vid)
         return vid, codes
 
     def add_variant(self, product_id, payload):
@@ -244,35 +243,45 @@ class ProductService:
         code = payload.get("barcode")
         if has_store_barcode_prefix(code):
             raise ValidationError("TL 開頭條碼僅供系統自動產生")
-        code = code or next_store_barcode(self.repo.connection)
-        if self.repo.one("SELECT 1 FROM Barcode WHERE barcode=?", (code,)):
-            raise ConflictError("此條碼已存在")
+        source = payload.get("source", "store")
+        if code:
+            if self.repo.one("SELECT 1 FROM Barcode WHERE barcode=? AND variant_id=?", (code, variant_id)):
+                raise ConflictError("此條碼已在此子產品")
+            if self.repo.one("SELECT 1 FROM Barcode WHERE barcode=? AND (source='store' OR ?='store')", (code, source)):
+                raise ConflictError("此條碼已存在")
+        else:
+            code = next_store_barcode(self.repo.connection)
+            source = "store"
         self.repo.execute("INSERT INTO Barcode(barcode,variant_id,source) VALUES(?,?,?)",
-                          (code, variant_id, payload.get("source", "store")))
+                          (code, variant_id, source))
         return {"barcode": code}
-
-    def add_barcode(self, payload):
-        return self._add_barcode(payload["variant_id"], payload)
 
     def scan(self, code):
         # 自取碼先驗檢查碼：掃錯或打錯一位時明確回報格式錯誤，
         # 不要拿錯碼去查資料庫而回報成「查無此條碼」，避免誤判為商品未建檔。
         if has_store_barcode_prefix(code) and parse_store_barcode(code) is None:
             raise ValidationError("自取碼格式不正確")
-        row = self.repo.one(
-            "SELECT v.variant_id,v.product_id,v.price price,p.name,"
-            "(COALESCE(c.active,1) AND p.active AND v.active AND "
-            "NOT EXISTS(SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id)) active FROM Barcode b "
+        rows = self.repo.all(
+            "SELECT DISTINCT v.variant_id,v.product_id,v.price price,p.name,"
+            "CASE WHEN EXISTS(SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id) THEN 'issue' "
+            "WHEN NOT (COALESCE(c.active,1) AND p.active AND v.active) THEN 'inactive' ELSE 'active' END status,"
+            "(SELECT MIN(barcode) FROM Barcode WHERE variant_id=v.variant_id AND source='store') store_barcode,"
+            "(SELECT MIN(barcode) FROM Barcode WHERE variant_id=v.variant_id AND source='factory') factory_barcode "
+            "FROM Barcode b "
             "JOIN Variant v ON b.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id "
             "LEFT JOIN Category c ON p.category_id=c.category_id "
-            "WHERE b.barcode=?", (code,))
-        if row is None:
+            "WHERE b.barcode=? ORDER BY p.name,v.variant_id", (code,))
+        if not rows:
             raise NotFoundError("找不到此條碼")
-        vid = row["variant_id"]
-        return {"variant_id": vid, "product_id": row["product_id"], "name": row["name"],
-                "attributes": product_data.attrs_by_variant(self.repo.connection, [vid]).get(vid, {}),
-                "attr_display": product_data.display_attrs(self.repo.connection, [vid]).get(vid, ""), "price": row["price"],
-                "stock": product_data.stock_of(self.repo.connection, vid), "active": bool(row["active"])}
+        ids = [r["variant_id"] for r in rows]
+        attrs = product_data.attrs_by_variant(self.repo.connection, ids)
+        display = product_data.display_attrs(self.repo.connection, ids)
+        return {"matches": [{"variant_id": row["variant_id"], "product_id": row["product_id"], "name": row["name"],
+                "attributes": attrs.get(row["variant_id"], {}), "attr_display": display.get(row["variant_id"], ""),
+                "price": row["price"], "stock": product_data.stock_of(self.repo.connection, row["variant_id"]),
+                "status": row["status"], "store_barcode": row["store_barcode"],
+                "label_barcode": row["store_barcode"] if row["store_barcode"] is not None else row["factory_barcode"]}
+                for row in rows]}
 
     def search(self, payload):
         sql = ("SELECT v.variant_id,p.name,v.price price,"
@@ -366,6 +375,9 @@ class ProductService:
         for _ in range(payload.get("store_barcode_count", 0)):
             store_barcodes.append(self._add_barcode(
                 vid, {"source": "store"})["barcode"])
+        for row in self.repo.all("SELECT barcode FROM Barcode WHERE variant_id=? AND source='factory'", (vid,)):
+            created = ensure_store_codes_for_shared(self.repo.connection, row["barcode"])
+            store_barcodes.extend(code for owner, code in created if owner == vid)
         return {"ok": True, "store_barcodes": store_barcodes}
 
     def _ensure_editor_options(self, category_id, attributes):
@@ -394,11 +406,6 @@ class ProductService:
     def list_issues(self):
         from lib.variant_issue_service import VariantIssueService
         return VariantIssueService(self.repo.connection).summary()
-
-    def delete_barcode(self, code):
-        if self.repo.execute("DELETE FROM Barcode WHERE barcode=?", (code,)).rowcount == 0:
-            raise NotFoundError("找不到此條碼")
-        return {"ok": True}
 
     def delete_variant(self, vid):
         self.repo.require_variant(vid)
@@ -431,7 +438,7 @@ class ProductFacade(BaseFacade):
     ACTIONS = {"products.create", "products.list", "catalog.list", "products.update", "products.delete",
                "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.update_editor", "variants.delete",
                "variants.batch_create", "variants.batch_precheck", "variants.field_usage", "variants.model_usage", "variants.activate", "variants.issues",
-               "barcodes.scan", "barcodes.add", "barcodes.delete"}
+               "barcodes.scan"}
 
     ERROR_MESSAGE = "不支援的商品操作"
 
@@ -472,5 +479,3 @@ class ProductFacade(BaseFacade):
                 connection, payload["category_id"],
                 brand_id=payload.get("brand_id"), product_id=payload.get("product_id"))
         if action == "barcodes.scan": return s.scan(payload["code"])
-        if action == "barcodes.delete": return s.delete_barcode(payload["code"])
-        return s.add_barcode(payload)

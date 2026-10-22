@@ -51,13 +51,13 @@ assert.equal(s.defaultBarcode({barcodes}),want);
 assert.equal(s.defaultBarcode({}),"");
 ''')
 
-    def test_scan_uses_exact_input_barcode(self):
+    def test_scan_uses_store_label_barcode(self):
         self._run(r'''
-const checked=[];API.scanBarcode=async code=>{assert.equal(code,"471000");return{variant_id:1}};
+const checked=[];API.scanBarcode=async code=>{assert.equal(code,"471000");return{matches:[{variant_id:1,label_barcode:"TL1"}]}};
 API.checkLabels=async rows=>{checked.push(plain(rows));return{items:[{valid:true,label:label(1)}]}};
 const s=mkState({query:" 471000 "});await s.submitInput();
-assert.deepEqual(checked,[[{variant_id:1,barcode:"471000"}]]);
-assert.equal(s.q.rows[0].barcode,"471000");assert.equal(s.query,"");assert.equal(s.searched,false);
+assert.deepEqual(checked,[[{variant_id:1,barcode:"TL1"}]]);
+assert.equal(s.q.rows[0].barcode,"TL1");assert.equal(s.query,"");assert.equal(s.searched,false);
 ''')
 
     def test_distinct_codes_and_duplicate_increments_without_clearing_status(self):

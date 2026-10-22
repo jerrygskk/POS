@@ -369,6 +369,16 @@ def catalog(conn, include_inactive=False, category_id=None, brand_id=None, model
                 f"WHERE variant_id IN ({qs}) ORDER BY variant_id,barcode", barcode_ids):
             bars.setdefault(r["variant_id"],[]).append(
                 {"barcode":r["barcode"],"source":r["source"]})
+    codes = list(dict.fromkeys(b["barcode"] for items in bars.values() for b in items))
+    shared = set()
+    for start in range(0, len(codes), 900):
+        chunk = codes[start:start + 900]
+        shared.update(r[0] for r in conn.execute(
+            f"SELECT barcode FROM Barcode WHERE barcode IN ({in_clause(chunk)}) "
+            "GROUP BY barcode HAVING COUNT(DISTINCT variant_id)>1", chunk))
+    for items in bars.values():
+        for barcode in items:
+            barcode["shared"] = barcode["barcode"] in shared
     by={}
     for r in rows:by.setdefault(r["product_id"],[]).append(r)
     out=[]

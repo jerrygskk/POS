@@ -24,19 +24,19 @@ class TestStockLayers(ConnTestCase):
 
     def test_receive_writes_purchase_and_returns_accumulated_stock(self):
         first = self.facade.invoke(
-            "stock.receive", {"employee": 1, "variant_id": 1, "qty": 5, "note": "首批"}
+            "stock.receive", {"employee": 1, "items": [{"variant_id": 1, "qty": 5}]}
         )
-        second = self.facade.invoke("stock.receive", {"employee": 1, "variant_id": 1, "qty": 3})
-        self.assertEqual({"stock": 5}, first)
-        self.assertEqual({"stock": 8}, second)
+        second = self.facade.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": 1, "qty": 3}]})
+        self.assertEqual({"items": [{"variant_id": 1, "stock": 5}]}, first)
+        self.assertEqual({"items": [{"variant_id": 1, "stock": 8}]}, second)
         row = self.conn.execute(
             "SELECT variant_id,qty,kind,note FROM StockMovement ORDER BY move_id"
         ).fetchone()
-        self.assertEqual((1, 5, "purchase", "首批"), tuple(row))
+        self.assertEqual((1, 5, "purchase", None), tuple(row))
 
     def test_detail_keeps_stock_and_latest_fifty_movements_shape(self):
         for qty in range(1, 53):
-            self.facade.invoke("stock.receive", {"employee": 1, "variant_id": 1, "qty": qty})
+            self.facade.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": 1, "qty": qty}]})
         result = self.facade.invoke("stock.detail", {"variant_id": 1})
         self.assertEqual(sum(range(1, 53)), result["stock"])
         self.assertEqual(50, len(result["movements"]))
@@ -53,7 +53,7 @@ class TestStockLayers(ConnTestCase):
         ]
         for payload in bad_payloads:
             with self.subTest(payload=payload):
-                result = self.bridge.invoke("stock.receive", payload)
+                result = self.bridge.invoke("stock.receive", {"employee": 1, "items": [payload]})
                 self.assertEqual("validation_error", result["error"]["code"])
         self.assertEqual(
             0, self.conn.execute("SELECT COUNT(*) FROM StockMovement").fetchone()[0]
@@ -61,7 +61,7 @@ class TestStockLayers(ConnTestCase):
 
     def test_missing_variant_is_not_found_for_receive_and_detail(self):
         for action, payload in (
-            ("stock.receive", {"employee": 1, "variant_id": 999, "qty": 1}),
+            ("stock.receive", {"employee": 1, "items": [{"variant_id": 999, "qty": 1}]}),
             ("stock.detail", {"variant_id": 999}),
         ):
             with self.subTest(action=action):
@@ -72,14 +72,14 @@ class TestStockLayers(ConnTestCase):
         self.conn.execute("UPDATE Variant SET active=0 WHERE variant_id=1")
         self.conn.commit()
         self.assertEqual(
-            {"stock": 2},
-            self.facade.invoke("stock.receive", {"employee": 1, "variant_id": 1, "qty": 2}),
+            {"items": [{"variant_id": 1, "stock": 2}]},
+            self.facade.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": 1, "qty": 2}]}),
         )
 
     def test_transaction_rolls_back_when_stock_result_fails_after_insert(self):
         with patch("lib.stock_service.product_data.stock_of", side_effect=RuntimeError("boom")):
             result = self.bridge.invoke(
-                "stock.receive", {"employee": 1, "variant_id": 1, "qty": 4}
+                "stock.receive", {"employee": 1, "items": [{"variant_id": 1, "qty": 4}]}
             )
         self.assertEqual("internal_error", result["error"]["code"])
         self.assertEqual(

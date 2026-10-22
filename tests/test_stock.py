@@ -16,25 +16,17 @@ class TestStock(FacadeTestCase):
         self.vid = product["variant_ids"][0]
 
     def test_receive_accumulates(self):
-        self.assertEqual(self.invoke("stock.receive", {"employee": 1,
-            "variant_id": self.vid, "qty": 5,
-        })["stock"], 5)
-        self.assertEqual(self.invoke("stock.receive", {"employee": 1,
-            "variant_id": self.vid, "qty": 3,
-        })["stock"], 8)
+        self.assertEqual(self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": self.vid, "qty": 5}]})["items"][0]["stock"], 5)
+        self.assertEqual(self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": self.vid, "qty": 3}]})["items"][0]["stock"], 8)
 
     def test_detail_lists_movements(self):
-        self.invoke("stock.receive", {"employee": 1, "variant_id": self.vid, "qty": 5})
+        self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": self.vid, "qty": 5}]})
         result = self.invoke("stock.detail", {"variant_id": self.vid})
         self.assertEqual(result["stock"], 5)
         self.assertEqual(result["movements"][0]["kind"], "purchase")
 
     def test_reject_zero_qty(self):
-        self.assert_application_error("validation_error", "stock.receive", {"employee": 1,
-            "variant_id": self.vid, "qty": 0,
-        })
+        self.assert_application_error("validation_error", "stock.receive", {"employee": 1, "items": [{"variant_id": self.vid, "qty": 0}]})
 
     def test_receive_unknown_variant_raises_not_found(self):
-        self.assert_application_error("not_found", "stock.receive", {"employee": 1,
-            "variant_id": 999999, "qty": 1,
-        })
+        self.assert_application_error("not_found", "stock.receive", {"employee": 1, "items": [{"variant_id": 999999, "qty": 1}]})

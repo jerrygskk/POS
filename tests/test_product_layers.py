@@ -27,7 +27,7 @@ class TestProductLayers(ConnTestCase):
             "variants": [{"attributes": {}, "price": 590,
                           "barcodes": [{"barcode": "F001", "source": "factory"}]}],
         })
-        hit = self.facade.invoke("barcodes.scan", {"code": "F001"})
+        hit = self.facade.invoke("barcodes.scan", {"code": "F001"})["matches"][0]
         self.assertEqual(hit["variant_id"], created["variant_ids"][0])
         self.assertEqual(hit["price"], 590)
 
@@ -37,8 +37,8 @@ class TestProductLayers(ConnTestCase):
         self.assertEqual(result["error"]["code"], "not_found")
 
     def test_malformed_payload_rejects_bool_as_integer(self):
-        result = self.bridge.invoke("barcodes.add", {
-            "variant_id": True, "source": "store",
+        result = self.bridge.invoke("variants.update_editor", {
+            "id": True, "store_barcode_count": 1,
         })
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"]["code"], "validation_error")
@@ -71,7 +71,7 @@ class TestProductLayers(ConnTestCase):
             "name": "Delete code", "category_id": self.category_id,
             "variants": [{"barcodes": [{"barcode": "DEL-1"}]}],
         })
-        self.facade.invoke("barcodes.delete", {"code": "DEL-1"})
+        self.facade.invoke("variants.update_editor", {"id": made["variant_ids"][0], "deleted_barcodes": ["DEL-1"]})
         missing = self.bridge.invoke("barcodes.scan", {"code": "DEL-1"})
         self.assertEqual(missing["error"]["code"], "not_found")
         self.assertEqual(made["variant_ids"], [1])
@@ -106,9 +106,9 @@ class TestProductLayers(ConnTestCase):
             "name": "Seed", "category_id": self.category_id,
             "variants": [{"barcodes": [{"barcode": "DUP-EXISTING", "source": "factory"}]}],
         })
-        result = self.bridge.invoke("barcodes.add", {
-            "variant_id": made["variant_ids"][0],
-            "barcode": "DUP-EXISTING", "source": "factory",
+        result = self.bridge.invoke("variants.update_editor", {
+            "id": made["variant_ids"][0],
+            "factory_barcodes": ["DUP-EXISTING"],
         })
         self.assertEqual(result["error"]["code"], "conflict")
 
@@ -124,7 +124,7 @@ class TestProductLayers(ConnTestCase):
         self.assertEqual(self.bridge.invoke("products.delete", {"id": made["product_id"]})["error"]["code"], "conflict")
         self.assertEqual(self.bridge.invoke("variants.delete", {"id": 999999})["error"]["code"], "not_found")
         self.assertEqual(self.bridge.invoke("products.delete", {"id": 999999})["error"]["code"], "not_found")
-        self.assertEqual(self.bridge.invoke("barcodes.delete", {"code": "missing"})["error"]["code"], "not_found")
+        self.assertEqual(self.bridge.invoke("variants.update_editor", {"id": vid, "deleted_barcodes": ["missing"]})["error"]["code"], "not_found")
 
     def test_nested_unknown_fields_and_boolean_ids_do_not_write(self):
         bad = self.bridge.invoke("products.create", {
@@ -140,7 +140,7 @@ class TestProductLayers(ConnTestCase):
         made = self.facade.invoke("products.create", {
             "name": "TL", "category_id": self.category_id, "variants": [{}],
         })
-        result = self.bridge.invoke("barcodes.add", {
-            "variant_id": made["variant_ids"][0], "barcode": "TL123", "source": "store",
+        result = self.bridge.invoke("variants.update_editor", {
+            "id": made["variant_ids"][0], "factory_barcodes": ["TL123"],
         })
         self.assertEqual(result["error"]["code"], "validation_error")

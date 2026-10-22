@@ -52,8 +52,8 @@ window.PosPages["page-checkout"] = {
     async onScan() {
 
       await this.guard(async () => {  // 查無條碼:保留輸入
-        const query = await API.barcodeQuery(this.scanCode);
-        if (!query) return;
+        const query = await window.PosScan(this.scanCode, { sellableOnly: true });
+        if (!query) { this.scanCode = ""; return; }
         await this.addItem(query.data);
         this.scanCode = "";
       });

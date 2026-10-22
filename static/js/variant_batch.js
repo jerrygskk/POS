@@ -13,7 +13,7 @@ window.PosPages["page-variant-batch"] = {
       catId: null, productId: null,
       fields: [], fieldUsage: {}, tagUsage: [], modelUsage: [],
       input: this.blankInput(),
-      drafts: [], skipped: [], precheckErrors: {},
+      drafts: [], skipped: [], precheckErrors: {}, precheckNotices: {},
       seq: 0, precheckSeq: 0, _precheckTimer: null, productLoadSeq: 0,
       inputCollapsed: false, selectionCollapsed: false,
       productReady: false,
@@ -127,7 +127,7 @@ window.PosPages["page-variant-batch"] = {
     clearWorksheet() {
       this.drafts = [];
       this.skipped = [];
-      this.precheckErrors = {};
+      this.precheckErrors = {}; this.precheckNotices = {};
       this.fixedEditor = null;
       this.lastDeleted = null;
       this.showSkipped = false;
@@ -361,7 +361,7 @@ window.PosPages["page-variant-batch"] = {
       const rows = this.drafts.slice();
       if (!rows.length) {
         if (seq === this.precheckSeq) {
-          this.precheckErrors = {};
+          this.precheckErrors = {}; this.precheckNotices = {};
           this.skipped = [];
           this.showSkipped = false;
         }
@@ -379,6 +379,7 @@ window.PosPages["page-variant-batch"] = {
       this.drafts = part.kept;
       this.skipped = this.skipped.concat(part.skipped);
       this.precheckErrors = part.errorsByDraftId;
+      this.precheckNotices = part.noticesByDraftId;
       if (this.fixedEditor && !this.fixedDraft) this.fixedEditor = null;
     },
 
@@ -402,6 +403,9 @@ window.PosPages["page-variant-batch"] = {
     },
     modelErrors(draft) {
       return this.errorsFor(draft).filter(err => err.code === "missing_models");
+    },
+    barcodeShared(draft) {
+      return (this.precheckNotices[draft.draft_id] || []).some(n => n.code === "shared_barcode");
     },
     barcodeErrors(draft) {
       return this.errorsFor(draft).filter(err =>
@@ -526,6 +530,7 @@ window.PosPages["page-variant-batch"] = {
           res = await API.batchCreateVariants(this.productId, this.buildPayload(this.drafts));
         } catch (err) {
           this.precheckErrors = this.mapDetails(err.details);
+          this.precheckNotices = {};
           this.showError(err.message || "建立失敗");
           return;
         }

@@ -11,7 +11,7 @@ class TestSales(FacadeTestCase):
             "variants": [{"attributes": {}, "price": 500,
                           "barcodes": [{"barcode":"B1","source":"store"}]}]})
         self.vid = product["variant_ids"][0]
-        self.invoke("stock.receive", {"employee": 1, "variant_id": self.vid, "qty": 10})
+        self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": self.vid, "qty": 10}]})
 
     def _sale(self, **kw):
         body = {"payment": "現金", "paid": 1000, "employee": 1,

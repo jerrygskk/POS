@@ -14,14 +14,16 @@ window.PosPages["page-stocktake"] = {
       await this.enter(r.session_id);
     },
     async enter(sid) {
+      // 資料載入完成才切入詳細畫面，避免 await 期間渲染到空的 detail。
+      const detail = await API.stocktakeDetail(sid);
+      this.detail = detail;
       this.current = sid;
-      this.detail = await API.stocktakeDetail(sid);
       this.$nextTick(() => this.$refs.scan?.focus());
     },
     async onScan() {
       await this.guard(async () => {
-        const query = await API.barcodeQuery(this.scanCode);
-        if (!query) return;
+        const query = await window.PosScan(this.scanCode);
+        if (!query) { this.scanCode = ""; return; }
         const hit = query.data;
         await API.stocktakeScan({session_id: this.current, variant_id: hit.variant_id, qty: 1});
         this.detail = await API.stocktakeDetail(this.current);

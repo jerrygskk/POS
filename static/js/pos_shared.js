@@ -34,3 +34,24 @@ window.PosMixin = {
     },
   },
 };
+
+// 掃描解析：同一條碼對應多個子產品時跳「選擇品項」(PosConfirm.choose)。
+// 回傳 {code, data}；空白或使用者取消回 null；404／422 由頁面處理。
+// sellableOnly：收銀用，停用／待處理的品項不可選。
+window.PosScan = async function (value, options) {
+  const code = String(value || "").trim();
+  if (!code) return null;
+  const { matches } = await API.scanBarcode(code);
+  if (matches.length === 1) return { code, data: matches[0] };
+  const index = await PosConfirm.choose({
+    title: "請選擇品項",
+    message: `條碼「${code}」對應多個品項，請選擇：`,
+    items: matches.map(m => ({
+      label: m.name,
+      detail: `${m.attr_display || "（無規格）"}｜店內碼 ${m.store_barcode || "—"}｜${m.price === null ? "未定價" : m.price + " 元"}｜庫存 ${m.stock}`,
+      note: m.status === "inactive" ? "已停用" : m.status === "issue" ? "待處理" : "",
+      disabled: !!(options?.sellableOnly && m.status !== "active"),
+    })),
+  });
+  return index === null ? null : { code, data: matches[index] };
+};

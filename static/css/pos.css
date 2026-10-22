@@ -438,6 +438,13 @@ table.big-prod td:nth-child(3), table.big-prod td:nth-child(4) {
 /* 確認／通知視窗公版:白底黑字、置中於視窗 */
 .modal-overlay.modal-centered { align-items: center; padding: 16px; }
 .confirm-box { max-width: 400px; gap: 14px; }
+.choose-list { display: flex; flex-direction: column; gap: 6px; max-height: 360px; overflow-y: auto; }
+.choose-item { width: 100%; text-align: left; min-width: 0; padding: 8px 12px; white-space: normal; overflow-wrap: anywhere; }
+.choose-label { font-weight: 600; }
+.choose-note { color: var(--danger); margin-left: 6px; font-size: 13px; }
+.choose-detail { display: block; color: var(--text-2); font-size: 13px; margin-top: 2px; }
+/* 原廠碼共用提示，款式工作表與修改視窗共用。 */
+.barcode-shared { color: var(--danger); font-size: 12px; margin-left: 4px; white-space: nowrap; }
 .confirm-title { font-size: 16px; font-weight: 600; }
 .confirm-text { white-space: pre-wrap; line-height: 1.6; }
 /* 破壞性操作的確定鈕用危險色,與一般確認區隔 */
@@ -637,3 +644,8 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .cart-col-qty, .cart-col-subtotal { width: 90px; }
 .cart-col-stock { width: 95px; }
 .cart-col-remove { width: 50px; }
+/* 批次進貨固定欄寬，其餘沿用購物車公版。 */
+.receive-col-barcode { width: 150px; }
+.receive-col-qty { width: 110px; }
+.receive-col-label { width: 200px; }
+.receive-table tr.receive-row-hit > td { background: var(--accent-soft); }

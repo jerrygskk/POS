@@ -66,12 +66,15 @@ CREATE TABLE IF NOT EXISTS OptionModel(         -- 選項限定型號(特別色)
   model_id INTEGER NOT NULL REFERENCES PhoneModel(model_id),
   PRIMARY KEY(option_id, model_id)
 );
-CREATE TABLE IF NOT EXISTS Barcode(
-  barcode TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS Barcode(               -- 原廠碼可多個子產品共用;店內碼全域唯一(部分唯一索引)
+  barcode TEXT NOT NULL,
   variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
   source TEXT NOT NULL CHECK(source IN ('factory','store')),
-  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  PRIMARY KEY(barcode, variant_id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_barcode_store ON Barcode(barcode) WHERE source='store';
+CREATE INDEX IF NOT EXISTS idx_barcode_variant ON Barcode(variant_id);
 CREATE TABLE IF NOT EXISTS AttributeField(       -- 全域欄位主檔;種類關係屬性移至 CategoryField
   field_id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -151,11 +154,11 @@ CREATE TABLE IF NOT EXISTS Setting(
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS VariantIssue(      -- 子產品待處理異常(必填缺值/條碼或簽章重複)
+CREATE TABLE IF NOT EXISTS VariantIssue(      -- 子產品待處理異常(必填缺值/簽章重複)
   issue_id INTEGER PRIMARY KEY,
   variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
   issue_type TEXT NOT NULL
-    CHECK(issue_type IN ('missing_required','duplicate_barcode','duplicate_signature')),
+    CHECK(issue_type IN ('missing_required','duplicate_signature')),
   field_id INTEGER REFERENCES AttributeField(field_id),        -- 相關欄位(適用時)
   source_value TEXT,                                           -- 觸發異常的原始值(適用時)
   related_variant_id INTEGER REFERENCES Variant(variant_id)    -- 衝突的另一子產品(適用時)
@@ -359,6 +362,56 @@ def _mig_employee(conn):
             conn.execute("ALTER TABLE StocktakeSession DROP COLUMN operator")
 
 
+def _mig_shared_factory_barcode(conn):
+    """原廠碼可共用；轉換舊異常但保留原停用狀態。"""
+    from lib.product_rules import has_store_barcode_prefix, ensure_store_codes_for_shared
+    primary = [r[1] for r in sorted(conn.execute("PRAGMA table_info(Barcode)"),
+                                    key=lambda r: r[5]) if r[5] > 0]
+    if primary == ["barcode"]:
+        conn.execute("CREATE TABLE Barcode_v17("
+                     "barcode TEXT NOT NULL,"
+                     "variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),"
+                     "source TEXT NOT NULL CHECK(source IN ('factory','store')),"
+                     "created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),"
+                     "PRIMARY KEY(barcode, variant_id))")
+        conn.execute("INSERT INTO Barcode_v17(barcode,variant_id,source,created_at) "
+                     "SELECT barcode,variant_id,source,created_at FROM Barcode")
+        conn.execute("DROP TABLE Barcode")
+        conn.execute("ALTER TABLE Barcode_v17 RENAME TO Barcode")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_barcode_store "
+                 "ON Barcode(barcode) WHERE source='store'")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_barcode_variant ON Barcode(variant_id)")
+    for vid, code in conn.execute("SELECT variant_id, source_value FROM VariantIssue "
+                                  "WHERE issue_type='duplicate_barcode'").fetchall():
+        if not code or has_store_barcode_prefix(code):
+            continue
+        if conn.execute("SELECT 1 FROM Barcode WHERE barcode=? AND source='store'",
+                        (code,)).fetchone():
+            continue
+        conn.execute("INSERT OR IGNORE INTO Barcode(barcode,variant_id,source) "
+                     "VALUES(?,?,'factory')", (code, vid))
+    conn.execute("DELETE FROM VariantIssue WHERE issue_type='duplicate_barcode'")
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' "
+                       "AND name='VariantIssue'").fetchone()[0]
+    if "'duplicate_barcode'" in sql:
+        conn.execute("CREATE TABLE VariantIssue_v17("
+                     "issue_id INTEGER PRIMARY KEY,"
+                     "variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),"
+                     "issue_type TEXT NOT NULL CHECK(issue_type IN ('missing_required','duplicate_signature')),"
+                     "field_id INTEGER REFERENCES AttributeField(field_id),"
+                     "source_value TEXT,"
+                     "related_variant_id INTEGER REFERENCES Variant(variant_id))")
+        conn.execute("INSERT INTO VariantIssue_v17 "
+                     "SELECT issue_id,variant_id,issue_type,field_id,source_value,related_variant_id "
+                     "FROM VariantIssue")
+        conn.execute("DROP TABLE VariantIssue")
+        conn.execute("ALTER TABLE VariantIssue_v17 RENAME TO VariantIssue")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_variant_issue_variant ON VariantIssue(variant_id)")
+    for row in conn.execute("SELECT barcode FROM Barcode WHERE source='factory' "
+                            "GROUP BY barcode HAVING COUNT(DISTINCT variant_id)>1").fetchall():
+        ensure_store_codes_for_shared(conn, row[0])
+
+
 MIGRATIONS = [
     (BASE_VERSION + 1, _mig_phone_brand),
     (BASE_VERSION + 2, _mig_variant_attributes),
@@ -375,6 +428,7 @@ MIGRATIONS = [
     (BASE_VERSION + 13, _mig_split_style_field),
     (BASE_VERSION + 14, _mig_split_shared_fields),
     (BASE_VERSION + 15, _mig_employee),
+    (BASE_VERSION + 16, _mig_shared_factory_barcode),
 ]
 
 # 最新版號 = 初版 + 遷移筆數;全新 DB 建 SCHEMA 即為此版

@@ -7,6 +7,7 @@ window.VariantEditorApp = {
       committed: false,
       error: "",
       barcodeError: "",
+      adding: false,
       product: null,
       variant: null,
       fields: [],
@@ -89,7 +90,8 @@ window.VariantEditorApp = {
       this.barcodes.splice(index, 1);
       this.barcodeError = "";
     },
-    addFactoryBarcode() {
+    async addFactoryBarcode() {
+      if (this.adding || this.saving) return;
       const barcode = this.factoryBarcode.trim();
       if (!barcode) {
         this.barcodeError = "請輸入原廠條碼";
@@ -103,21 +105,32 @@ window.VariantEditorApp = {
         this.barcodeError = "條碼已在清單中";
         return;
       }
-      this.barcodes.push({barcode, source: "factory", existing: false});
-      this.factoryBarcode = "";
-      this.barcodeError = "";
+      this.adding = true;
+      try {
+        let shared = false;
+        try {
+          const { matches } = await API.scanBarcode(barcode);
+          shared = matches.some(m => m.variant_id !== this.variant.variant_id);
+        } catch (error) {
+          if (error.status !== 404) throw error;
+        }
+        this.barcodes.push({barcode, source: "factory", existing: false, shared});
+        this.factoryBarcode = "";
+        this.barcodeError = "";
+      } catch (error) { this.barcodeError = error.message; }
+      finally { this.adding = false; }
     },
     handleFactoryBarcodeEnter(event) {
       event.preventDefault();
       event.stopPropagation();
-      this.addFactoryBarcode();
+      return this.addFactoryBarcode();
     },
     addStoreBarcode() {
       this.pendingStoreCount += 1;
       this.barcodeError = "";
     },
     async save() {
-      if (this.saving || !this.ready) return;
+      if (this.saving || this.adding || !this.ready) return;
       this.saving = true;
       this.error = "";
       try {

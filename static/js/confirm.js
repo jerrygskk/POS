@@ -5,6 +5,7 @@
 //   if (!await PosConfirm.ask("確定刪除?")) return;
 //   await PosConfirm.notify("已完成。");
 //   const value = await PosConfirm.input({ title:"輸入", value:"" });
+//   const index = await PosConfirm.choose({ title, message, items });
 // 主視窗與子視窗共用(各自的 html 都要載入本檔)。
 window.PosConfirm = {
   // options:{ title, confirmText, cancelText, danger }
@@ -79,6 +80,69 @@ window.PosConfirm = {
       document.body.appendChild(overlay);
       field.focus();
       field.select();
+    });
+  },
+  choose(options) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.className = "modal-overlay modal-centered";
+      const box = document.createElement("div");
+      box.className = "modal confirm-box";
+      for (const [key, cls] of [["title", "confirm-title"], ["message", "confirm-text"]]) {
+        if (!options[key]) continue;
+        const element = document.createElement("div");
+        element.className = cls;
+        element.textContent = options[key];
+        box.appendChild(element);
+      }
+      const list = document.createElement("div");
+      list.className = "choose-list";
+      let first = null;
+      options.items.forEach((item, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "choose-item";
+        button.disabled = !!item.disabled;
+        const label = document.createElement("span");
+        label.className = "choose-label";
+        label.textContent = item.label;
+        button.appendChild(label);
+        if (item.note) {
+          const note = document.createElement("span");
+          note.className = "choose-note";
+          note.textContent = item.note;
+          button.appendChild(note);
+        }
+        const detail = document.createElement("span");
+        detail.className = "choose-detail";
+        detail.textContent = item.detail;
+        button.appendChild(detail);
+        button.addEventListener("click", () => { if (!button.disabled) close(index); });
+        list.appendChild(button);
+        if (!button.disabled && !first) first = button;
+      });
+      box.appendChild(list);
+      const actions = document.createElement("div");
+      actions.className = "modal-actions";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "取消";
+      actions.appendChild(cancel);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      const close = (result) => {
+        document.removeEventListener("keydown", onKey, true);
+        overlay.remove();
+        resolve(result);
+      };
+      const onKey = (event) => {
+        if (event.key === "Escape") { event.preventDefault(); close(null); }
+      };
+      cancel.addEventListener("click", () => close(null));
+      overlay.addEventListener("mousedown", (event) => { if (event.target === overlay) close(null); });
+      document.addEventListener("keydown", onKey, true);
+      document.body.appendChild(overlay);
+      (first || cancel).focus();
     });
   },
   _open(message, opts) {

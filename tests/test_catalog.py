@@ -45,7 +45,7 @@ class TestCatalog(FacadeTestCase):
 
     def test_catalog_grouping(self):
         result = self._create(); vid = result["variant_ids"][0]
-        self.invoke("stock.receive", {"employee": 1, "variant_id": vid, "qty": 5})
+        self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": vid, "qty": 5}]})
         product = self.invoke("catalog.list")[0]
         self.assertEqual(product["product_id"], result["product_id"]); self.assertNotIn("default_price", product)
         self.assertEqual(len(product["variants"]), 2); first, second = product["variants"]
@@ -109,10 +109,13 @@ class TestCatalog(FacadeTestCase):
                                if v["variant_id"] == vid)
                 self.assertEqual(variant["price"], 590)
                 self.assertEqual(variant["barcodes"], [
-                    {"barcode": "FX100000001", "source": "factory"}])
+                    {"barcode": "FX100000001", "source": "factory", "shared": False}])
 
     def test_editor_update_rolls_back_every_change_when_late_barcode_fails(self):
         result = self._create(); vid = result["variant_ids"][0]
+        # 共用原廠碼已合法，改以店內碼撞號觸發同一個後段失敗。
+        with get_conn(self.db) as conn:
+            conn.execute("UPDATE Barcode SET source='store' WHERE barcode='FX100000002'")
 
         self.assert_application_error("conflict", "variants.update_editor", {
             "id": vid,
@@ -129,7 +132,7 @@ class TestCatalog(FacadeTestCase):
         self.assertEqual(variant["attributes"], {"color": "blue"})
         self.assertEqual(variant["models"], [])
         self.assertEqual(variant["barcodes"], [
-            {"barcode": "FX100000001", "source": "factory"}])
+            {"barcode": "FX100000001", "source": "factory", "shared": False}])
 
     def _inactive_editor_option_fixture(self):
         result = self._create(); vid = result["variant_ids"][0]
@@ -173,6 +176,8 @@ class TestCatalog(FacadeTestCase):
 
     def test_editor_update_rolls_back_option_reactivation_when_barcode_fails(self):
         _, vid, multi_id, tags_id = self._inactive_editor_option_fixture()
+        with get_conn(self.db) as conn:
+            conn.execute("UPDATE Barcode SET source='store' WHERE barcode='FX100000002'")
 
         self.assert_application_error("conflict", "variants.update_editor", {
             "id": vid,
@@ -195,13 +200,13 @@ class TestCatalog(FacadeTestCase):
 
     def test_inactive_variant_cannot_sell(self):
         result = self._create(); vid = result["variant_ids"][0]
-        self.invoke("stock.receive", {"employee": 1, "variant_id": vid, "qty": 10}); self.invoke("variants.update", {"id": vid, "fields": {"active": 0}})
+        self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": vid, "qty": 10}]}); self.invoke("variants.update", {"id": vid, "fields": {"active": 0}})
         self.assert_application_error("validation_error", "sales.checkout", {"employee": 1, "payment": "cash", "paid": 1000, "items": [{"variant_id": vid, "qty": 1, "unit_price": 590}]})
         self.assertEqual(self.invoke("stock.detail", {"variant_id": vid})["stock"], 10)
 
     def test_inactive_product_cannot_sell(self):
         result = self._create(); vid = result["variant_ids"][0]
-        self.invoke("stock.receive", {"employee": 1, "variant_id": vid, "qty": 10}); self.invoke("products.update", {"id": result["product_id"], "fields": {"active": 0}})
+        self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": vid, "qty": 10}]}); self.invoke("products.update", {"id": result["product_id"], "fields": {"active": 0}})
         self.assert_application_error("validation_error", "sales.checkout", {"employee": 1, "payment": "cash", "paid": 1000, "items": [{"variant_id": vid, "qty": 1, "unit_price": 590}]})
         self.assertEqual(self.invoke("stock.detail", {"variant_id": vid})["stock"], 10)
 
@@ -215,12 +220,12 @@ class TestCatalog(FacadeTestCase):
 
     def test_scan_active_flag(self):
         result = self._create(); vid = result["variant_ids"][0]
-        self.assertTrue(self.invoke("barcodes.scan", {"code": "FX100000001"})["active"])
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "FX100000001"})["matches"][0]["status"], "active")
         self.invoke("variants.update", {"id": vid, "fields": {"active": 0}})
-        self.assertFalse(self.invoke("barcodes.scan", {"code": "FX100000001"})["active"])
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "FX100000001"})["matches"][0]["status"], "inactive")
 
     def test_delete_variant_with_record_raises_conflict(self):
-        result = self._create(); vid = result["variant_ids"][0]; self.invoke("stock.receive", {"employee": 1, "variant_id": vid, "qty": 1})
+        result = self._create(); vid = result["variant_ids"][0]; self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": vid, "qty": 1}]})
         self.assert_application_error("conflict", "variants.delete", {"id": vid})
 
     def test_delete_clean_variant(self):
@@ -230,7 +235,7 @@ class TestCatalog(FacadeTestCase):
         self.assertEqual(len(self.invoke("catalog.list")[0]["variants"]), 1)
 
     def test_delete_product_with_record_raises_conflict(self):
-        result = self._create(); self.invoke("stock.receive", {"employee": 1, "variant_id": result["variant_ids"][0], "qty": 1})
+        result = self._create(); self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": result["variant_ids"][0], "qty": 1}]})
         self.assert_application_error("conflict", "products.delete", {"id": result["product_id"]})
 
     def test_delete_clean_product(self):
@@ -239,9 +244,9 @@ class TestCatalog(FacadeTestCase):
         self.assert_application_error("not_found", "barcodes.scan", {"code": "FX100000001"})
 
     def test_delete_barcode(self):
-        self._create(); self.assertTrue(self.invoke("barcodes.delete", {"code": "FX100000001"})["ok"])
+        created = self._create(); vid = created["variant_ids"][0]; self.assertTrue(self.invoke("variants.update_editor", {"id": vid, "deleted_barcodes": ["FX100000001"]})["ok"])
         self.assert_application_error("not_found", "barcodes.scan", {"code": "FX100000001"})
-        self.assert_application_error("not_found", "barcodes.delete", {"code": "NOPE"})
+        self.assert_application_error("not_found", "variants.update_editor", {"id": vid, "deleted_barcodes": ["NOPE"]})
 
     def test_add_variant(self):
         result = self._create(); added = self.invoke("variants.create", {"product_id": result["product_id"], "fields": {"attributes": {"color": "black"}, "price": 790, "barcodes": [{"source": "store"}]}})
@@ -338,9 +343,12 @@ class TestCatalog(FacadeTestCase):
 
         barcode_queries = [sql for sql in trace if " FROM Barcode " in sql]
         self.assertEqual(len(rows[0]["variants"]), 1)
-        self.assertEqual(len(barcode_queries), 1)
+        self.assertEqual(len(barcode_queries), 2)
         self.assertIn("WHERE variant_id IN", barcode_queries[0])
         self.assertNotIn(str(inactive_id), barcode_queries[0])
+        self.assertIn("WHERE barcode IN ('FX100000001')", barcode_queries[1])
+        self.assertIn("HAVING COUNT(DISTINCT variant_id)>1", barcode_queries[1])
+        self.assertNotIn("FX100000002", barcode_queries[1])
 
     def test_catalog_pending_barcode_query_excludes_variants_without_issues(self):
         result = self._create()
@@ -358,9 +366,12 @@ class TestCatalog(FacadeTestCase):
 
         barcode_queries = [sql for sql in trace if " FROM Barcode " in sql]
         self.assertEqual([v["variant_id"] for v in rows[0]["variants"]], [pending_id])
-        self.assertEqual(len(barcode_queries), 1)
+        self.assertEqual(len(barcode_queries), 2)
         self.assertIn(f"IN ({pending_id})", barcode_queries[0])
         self.assertNotIn(str(normal_id), barcode_queries[0])
+        self.assertIn("WHERE barcode IN ('FX100000001')", barcode_queries[1])
+        self.assertIn("HAVING COUNT(DISTINCT variant_id)>1", barcode_queries[1])
+        self.assertNotIn("FX100000002", barcode_queries[1])
 
     def test_catalog_does_not_query_barcodes_without_candidate_variants(self):
         self.invoke("products.create", {

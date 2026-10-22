@@ -53,14 +53,14 @@ class PrintingRepository(BaseRepository):
         row = self.one("SELECT p.name,v.price FROM Variant v JOIN Product p ON p.product_id=v.product_id WHERE v.variant_id=?", (variant_id,))
         if row is None:
             return None, False
-        owner = self.one("SELECT variant_id FROM Barcode WHERE barcode=?", (barcode,))
+        owner = self.one("SELECT 1 FROM Barcode WHERE barcode=? AND variant_id=?", (barcode, variant_id))
         content = {
             "name": row["name"],
             "specification": product_data.display_attrs(self.connection, [variant_id]).get(variant_id, ""),
             "price": "" if row["price"] is None else f"${row['price']}",
             "models": product_data.models_by_variant(self.connection, [variant_id]).get(variant_id, []),
         }
-        return content, owner is not None and owner["variant_id"] == variant_id
+        return content, owner is not None
 
 
 class PrintingService:

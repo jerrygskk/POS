@@ -18,8 +18,8 @@ class TestStocktake(FacadeTestCase):
             ],
         })
         self.v1, self.v2 = product["variant_ids"]
-        self.invoke("stock.receive", {"employee": 1, "variant_id": self.v1, "qty": 5})
-        self.invoke("stock.receive", {"employee": 1, "variant_id": self.v2, "qty": 3})
+        self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": self.v1, "qty": 5}]})
+        self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": self.v2, "qty": 3}]})
         self.sid = self.invoke("stocktake.create", {"employee": 1,
         })["session_id"]
 

@@ -84,16 +84,23 @@ window.PosPages["page-labels"] = {
     async submitInput() {
       if (this.q.printing) return;
       const query = this.query, code = query.trim(), seq = queueSeq;
-      if (!code) { this.results = []; return; }
       await this.guard(async () => {
         let data;
-        try { data = await API.scanBarcode(code); }
+        // 掃描一律印店內碼，沒有店內碼才印原廠碼。
+        try {
+          const scanned = await window.PosScan(code);
+          if (scanned === null) {
+            this.query = ""; this.results = []; this.searched = false;
+            return;
+          }
+          data = scanned.data;
+        }
         catch (err) {
           if (err.status !== 404 && err.status !== 422) throw err;
         }
         if (this.q.printing || seq !== queueSeq) return;
         if (data) {
-          await this.addRow(data.variant_id, code);
+          await this.addRow(data.variant_id, data.label_barcode);
           if (this.q.printing || seq !== queueSeq || this.query !== query) return;
           this.query = ""; this.results = []; this.searched = false;
           return;

@@ -36,36 +36,36 @@ class TestProducts(FacadeTestCase):
         ]})
 
     def test_create_and_scan(self):
-        result = self._create(); self.assertEqual(len(result["variant_ids"]), 2); hit = self.invoke("barcodes.scan", {"code": "FX100000001"})
+        result = self._create(); self.assertEqual(len(result["variant_ids"]), 2); hit = self.invoke("barcodes.scan", {"code": "FX100000001"})["matches"][0]
         self.assertEqual((hit["price"], hit["attributes"]["color"], hit["stock"]), (590, "blue", 0))
 
     def test_variant_price_overrides(self):
-        result = self._create(); barcode = self.invoke("barcodes.add", {"variant_id": result["variant_ids"][1], "source": "store"})["barcode"]
-        self.assertTrue(barcode.startswith("TL")); self.assertEqual(self.invoke("barcodes.scan", {"code": barcode})["price"], 690)
+        result = self._create(); barcode = self.invoke("variants.update_editor", {"id": result["variant_ids"][1], "store_barcode_count": 1})["store_barcodes"][0]
+        self.assertTrue(barcode.startswith("TL")); self.assertEqual(self.invoke("barcodes.scan", {"code": barcode})["matches"][0]["price"], 690)
 
     def test_unknown_barcode_raises_not_found(self):
         self.assert_application_error("not_found", "barcodes.scan", {"code": "NOPE"})
 
     def test_null_price_allowed(self):
         self.invoke("products.create", {"name": "no price", "category_id": self.cid, "variants": [{"attributes": {}, "barcodes": [{"barcode": "X1", "source": "factory"}]}]})
-        self.assertIsNone(self.invoke("barcodes.scan", {"code": "X1"})["price"])
+        self.assertIsNone(self.invoke("barcodes.scan", {"code": "X1"})["matches"][0]["price"])
 
     def test_store_barcode_sequence(self):
-        result = self._create(); vid = result["variant_ids"][0]; first = self.invoke("barcodes.add", {"variant_id": vid, "source": "store"})["barcode"]; second = self.invoke("barcodes.add", {"variant_id": vid, "source": "store"})["barcode"]
+        result = self._create(); vid = result["variant_ids"][0]; first = self.invoke("variants.update_editor", {"id": vid, "store_barcode_count": 1})["store_barcodes"][0]; second = self.invoke("variants.update_editor", {"id": vid, "store_barcode_count": 1})["store_barcodes"][0]
         self.assertTrue(first.startswith("TL") and second.startswith("TL")); self.assertEqual(parse_store_barcode(second) - parse_store_barcode(first), 1)
 
     def test_manual_tl_barcode_rejected(self):
         result = self._create(); vid = result["variant_ids"][0]
-        self.assert_application_error("validation_error", "barcodes.add", {"variant_id": vid, "barcode": "TL999999999", "source": "factory"})
+        self.assert_application_error("validation_error", "variants.update_editor", {"id": vid, "factory_barcodes": ["TL999999999"]})
         self.assert_application_error("validation_error", "products.create", {"name": "X", "category_id": self.cid, "variants": [{"attributes": {}, "barcodes": [{"barcode": "TL123", "source": "store"}]}]})
 
     def test_store_barcode_not_reused_after_delete(self):
-        result = self._create(); vid = result["variant_ids"][0]; first = self.invoke("barcodes.add", {"variant_id": vid, "source": "store"})["barcode"]
-        self.assertTrue(self.invoke("barcodes.delete", {"code": first})["ok"]); second = self.invoke("barcodes.add", {"variant_id": vid, "source": "store"})["barcode"]
+        result = self._create(); vid = result["variant_ids"][0]; first = self.invoke("variants.update_editor", {"id": vid, "store_barcode_count": 1})["store_barcodes"][0]
+        self.assertTrue(self.invoke("variants.update_editor", {"id": vid, "deleted_barcodes": [first]})["ok"]); second = self.invoke("variants.update_editor", {"id": vid, "store_barcode_count": 1})["store_barcodes"][0]
         self.assertEqual(parse_store_barcode(second), parse_store_barcode(first) + 1)
 
     def test_add_barcode_unknown_variant_raises_not_found(self):
-        self.assert_application_error("not_found", "barcodes.add", {"variant_id": 999999, "source": "store"})
+        self.assert_application_error("not_found", "variants.update_editor", {"id": 999999, "store_barcode_count": 1})
 
     def test_variant_model_unknown_id_raises_validation_error(self):
         vid = self._create()["variant_ids"][0]; self.assert_application_error("validation_error", "variants.set_models", {"id": vid, "model_ids": [999999]})
