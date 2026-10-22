@@ -13,7 +13,7 @@ class ReceiveLabelQueueRuntimeTests(unittest.TestCase):
     def _run(self, body):
         script = r'''
 const fs=require("fs"),vm=require("vm"),assert=require("assert/strict");
-const context={window:{PosPages:{}},API:{},Vue:{reactive:x=>x},console,
+const context={window:{PosPages:{},PosEmployee:{id:1}},API:{},Vue:{reactive:x=>x},console,
 PosConfirm:{ask:async()=>true,notify:()=>{}}};vm.createContext(context);
 for(const file of process.argv.slice(1))vm.runInContext(fs.readFileSync(file,"utf8"),context);
 const page=context.window.PosPages["page-receive"],API=vm.runInContext("API",context);

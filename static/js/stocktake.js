@@ -3,13 +3,14 @@ window.PosPages["page-stocktake"] = {
   template: "#tpl-stocktake",
   inject: ["showError"],
   data() {
-    return { sessions: [], current: null, detail: null, scanCode: "", operator: "" };
+    return { sessions: [], current: null, detail: null, scanCode: "", employee: window.PosEmployee };
   },
   async mounted() { await this.reload(); },
   methods: {
     async reload() { this.sessions = await API.listStocktakes(); },
     async openNew() {
-      const r = await API.createStocktake({ operator: this.operator || null });
+      if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
+      const r = await API.createStocktake({ employee: this.employee.id });
       await this.enter(r.session_id);
     },
     async enter(sid) {

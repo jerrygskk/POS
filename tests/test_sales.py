@@ -11,10 +11,10 @@ class TestSales(FacadeTestCase):
             "variants": [{"attributes": {}, "price": 500,
                           "barcodes": [{"barcode":"B1","source":"store"}]}]})
         self.vid = product["variant_ids"][0]
-        self.invoke("stock.receive", {"variant_id": self.vid, "qty": 10})
+        self.invoke("stock.receive", {"employee": 1, "variant_id": self.vid, "qty": 10})
 
     def _sale(self, **kw):
-        body = {"payment": "現金", "paid": 1000,
+        body = {"payment": "現金", "paid": 1000, "employee": 1,
                 "items": [{"variant_id": self.vid, "qty": 2, "unit_price": 500}]}
         body.update(kw)
         return self.invoke("sales.checkout", body)
@@ -34,7 +34,7 @@ class TestSales(FacadeTestCase):
         self.assertEqual(r["total"], 450)
 
     def test_item_discount_cannot_exceed_subtotal(self):
-        error = self.assert_application_error("validation_error", "sales.checkout", {
+        error = self.assert_application_error("validation_error", "sales.checkout", {"employee": 1,
             "payment": "現金", "paid": 1000, "items": [
             {"variant_id": self.vid, "qty": 1,
              "unit_price": 500, "discount": 501},
@@ -45,7 +45,7 @@ class TestSales(FacadeTestCase):
         self.assertEqual(self._stock(), 10)
 
     def test_negative_total_rejected(self):
-        error = self.assert_application_error("validation_error", "sales.checkout", {
+        error = self.assert_application_error("validation_error", "sales.checkout", {"employee": 1,
             "payment": "現金", "paid": 1000, "order_discount": 99999,
             "items": [{"variant_id": self.vid, "qty": 2, "unit_price": 500}],
         })
@@ -55,7 +55,7 @@ class TestSales(FacadeTestCase):
 
     def test_unknown_payment_rejected(self):
         self.assertIn("現金", self.invoke("payments.list"))
-        error = self.assert_application_error("validation_error", "sales.checkout", {
+        error = self.assert_application_error("validation_error", "sales.checkout", {"employee": 1,
             "payment": "不存在的付款方式", "paid": 1000,
             "items": [{"variant_id": self.vid, "qty": 2, "unit_price": 500}],
         })
@@ -115,7 +115,7 @@ class TestSales(FacadeTestCase):
         with db_conn(self.db) as conn:
             conn.execute("UPDATE Variant SET price=500 WHERE variant_id=?", (self.vid,))
             conn.commit()
-        error = self.assert_application_error("validation_error", "sales.checkout", {
+        error = self.assert_application_error("validation_error", "sales.checkout", {"employee": 1,
             "payment": "現金", "paid": 1000,
             "items": [{"variant_id": self.vid, "qty": 1, "unit_price": 499}],
         })

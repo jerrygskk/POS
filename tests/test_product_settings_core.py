@@ -212,7 +212,7 @@ class TestEffectiveActiveEntrypoints(FacadeTestCase):
         self.make_category_with_field("finish", options=("gloss",))
         created = self.create_product({"finish": "gloss"}, name="HODA case", barcode="B1")
         self.pid, self.v0 = created["product_id"], created["variant_ids"][0]
-        self.invoke("stock.receive", {"variant_id": self.v0, "qty": 10})
+        self.invoke("stock.receive", {"employee": 1, "variant_id": self.v0, "qty": 10})
 
     def _disable_category(self):
         self.invoke("categories.update", {"id": self.cid, "fields": {"active": 0}})
@@ -233,7 +233,7 @@ class TestEffectiveActiveEntrypoints(FacadeTestCase):
     def test_sale_is_rejected_when_category_inactive(self):
         self._disable_category()
         with self.assertRaises(ValidationError) as raised:
-            self.invoke("sales.checkout", {"payment": "cash", "paid": 1000,
+            self.invoke("sales.checkout", {"employee": 1, "payment": "cash", "paid": 1000,
                                              "items": [{"variant_id": self.v0, "qty": 1, "unit_price": 100}]})
         self.assertEqual(raised.exception.code, "validation_error")
         self.assertEqual(self.invoke("stock.detail", {"variant_id": self.v0})["stock"], 10)

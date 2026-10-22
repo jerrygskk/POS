@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS StockMovement(
   kind TEXT NOT NULL CHECK(kind IN ('purchase','sale','adjust')),
   ref_id INTEGER,                 -- sale_id 或 session_id
   note TEXT,
+  employee INTEGER CHECK(employee BETWEEN 1 AND 6),  -- 進貨操作員工代號(銷售看 Sale、盤點看 StocktakeSession)
   ts TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_move_variant ON StockMovement(variant_id);
@@ -119,7 +120,8 @@ CREATE TABLE IF NOT EXISTS Sale(
   order_discount INTEGER NOT NULL DEFAULT 0,  -- 整單折抵(元)
   total INTEGER NOT NULL,         -- 應收
   paid INTEGER NOT NULL,          -- 實收
-  change INTEGER NOT NULL DEFAULT 0
+  change INTEGER NOT NULL DEFAULT 0,
+  employee INTEGER CHECK(employee BETWEEN 1 AND 6)  -- 結帳員工代號;舊單為 NULL
 );
 CREATE TABLE IF NOT EXISTS SaleItem(
   item_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,7 +135,7 @@ CREATE TABLE IF NOT EXISTS StocktakeSession(
   session_id INTEGER PRIMARY KEY AUTOINCREMENT,
   started_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   ended_at TEXT,
-  operator TEXT,
+  employee INTEGER CHECK(employee BETWEEN 1 AND 6),  -- 盤點員工代號
   status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')),
   note TEXT
 );
@@ -342,6 +344,21 @@ def _split_field_by_category(conn, old_fid, name, field_type, active=1):
     conn.execute("DELETE FROM AttributeField WHERE field_id=?", (old_fid,))
 
 
+def _mig_employee(conn):
+    """結帳、進貨、盤點記錄操作員工代號(1~6)。
+
+    盤點單原本的自由文字「盤點人」改為員工代號:正式啟用前沒有真實盤點資料,直接移除舊欄。
+    """
+    # 缺的表會先以最新 DDL 建好(已含 employee),故逐表檢查欄位再補
+    for table in ("Sale", "StockMovement", "StocktakeSession"):
+        cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if "employee" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN "
+                         "employee INTEGER CHECK(employee BETWEEN 1 AND 6)")
+        if table == "StocktakeSession" and "operator" in cols:
+            conn.execute("ALTER TABLE StocktakeSession DROP COLUMN operator")
+
+
 MIGRATIONS = [
     (BASE_VERSION + 1, _mig_phone_brand),
     (BASE_VERSION + 2, _mig_variant_attributes),
@@ -357,6 +374,7 @@ MIGRATIONS = [
     (BASE_VERSION + 12, _mig_variant_issue),
     (BASE_VERSION + 13, _mig_split_style_field),
     (BASE_VERSION + 14, _mig_split_shared_fields),
+    (BASE_VERSION + 15, _mig_employee),
 ]
 
 # 最新版號 = 初版 + 遷移筆數;全新 DB 建 SCHEMA 即為此版

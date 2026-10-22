@@ -4,7 +4,7 @@ window.PosPages["page-receive"] = {
   inject: ["showError", "goPage"],
   data() {
     return {
-      scanCode: "", hit: null, qty: 1, notFound: null,
+      scanCode: "", hit: null, qty: 1, notFound: null, employee: window.PosEmployee,
       // 掃什麼印什麼:批次＝「款式＋掃到的條碼」。labelQty 為本批次已入庫、尚未加入列印清單的張數;
       // batchId 每換一批就加一,非同步回應回來時用它確認還是同一批,避免張數算到別的商品上。
       scannedCode: "", batchKey: "", batchId: 0, labelQty: 0, labelMsg: "", labelBusy: false,
@@ -41,10 +41,11 @@ window.PosPages["page-receive"] = {
     },
     goSettings() { this.goPage("settings"); },
     async doReceive() {
+      if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
       await this.guard(async () => {
         const qty = this.qty, batchId = this.batchId;
         const r = await API.receiveStock(
-          { variant_id: this.hit.variant_id, qty });
+          { variant_id: this.hit.variant_id, qty, employee: this.employee.id });
         // 等待期間已換成別的商品:庫存已入帳,但不可把張數算到新商品上。
         if (batchId !== this.batchId) return;
         this.hit.stock = r.stock; this.qty = 1;

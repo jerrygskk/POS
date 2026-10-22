@@ -18,7 +18,7 @@ class CheckoutUiTests(unittest.TestCase):
         script = r'''
 const fs = require("fs"), vm = require("vm");
 const context = {
-  window: { PosPages: {}, PosConfirm: {} }, API: {},
+  window: { PosPages: {}, PosConfirm: {}, PosEmployee: { id: 1 } }, API: {},
   Vue: { reactive: x => x },
   console, setTimeout, clearTimeout,
 };
@@ -173,11 +173,43 @@ s.draft.orderDiscount = 50;
 })();
 ''')
         self.assertEqual(out["submitted"], {
-            "payment": "現金", "order_discount": 50, "paid": 500,
+            "payment": "現金", "order_discount": 50, "paid": 500, "employee": 1,
             "items": [{"variant_id": 7, "qty": 2, "unit_price": 250, "discount": 30}]})
         self.assertEqual(out["draft"], {"cart": [], "orderDiscount": 0, "submitting": False})
         self.assertEqual(out["paid"], 0)
         self.assertEqual(out["total"], 0)
+
+    def test_checkout_without_employee_is_blocked_and_selection_is_kept(self):
+        out = self._run(r'''
+let calls = 0;
+API.checkout = async () => { calls += 1; return {change:0, sale_id:1}; };
+const s = mkState({paid:500});
+s.draft.cart = [{variant_id:7, qty:1, unit_price:500, discount:0}];
+(async () => {
+  context.window.PosEmployee.id = null;
+  await s.checkout();
+  out.blockedCalls = calls; out.errors = s._errors.slice();
+  context.window.PosEmployee.id = 3;
+  await s.checkout();
+  out.calls = calls; out.kept = context.window.PosEmployee.id;
+  done();
+})();
+''')
+        self.assertEqual(out["blockedCalls"], 0)
+        self.assertEqual(out["errors"], ["請先選擇員工代號"])
+        self.assertEqual(out["calls"], 1)
+        self.assertEqual(out["kept"], 3)
+
+    def test_cart_item_carries_current_stock(self):
+        out = self._run(r'''
+const s = mkState();
+(async () => {
+  await s.addItem({variant_id:7, name:"保護殼", price:300, stock:4});
+  out.stock = s.draft.cart[0].stock;
+  done();
+})();
+''')
+        self.assertEqual(out["stock"], 4)
 
 
 class ConfirmAndResourceContractTests(unittest.TestCase):

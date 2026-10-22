@@ -8,7 +8,7 @@ from lib import product_data
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ValidationError
 from lib.db import stock_map
-from lib.product_rules import is_int as _is_int
+from lib.product_rules import is_int as _is_int, require_employee
 
 
 def _strict_mapping(payload, allowed):
@@ -40,7 +40,8 @@ def _filters(payload, legacy_date=False):
 
 
 def _checkout_payload(payload):
-    _strict_mapping(payload, {"payment", "order_discount", "paid", "items"})
+    _strict_mapping(payload, {"payment", "order_discount", "paid", "items", "employee"})
+    require_employee(payload.get("employee"))
     if not isinstance(payload.get("payment"), str) or not payload["payment"]:
         raise ValidationError("付款方式不正確")
     for key in ("order_discount", "paid"):
@@ -64,7 +65,7 @@ def _checkout_payload(payload):
             raise ValidationError("單項折扣不可超過該項金額")
         clean.append(row)
     return {"payment": payload["payment"], "order_discount": payload.get("order_discount", 0),
-            "paid": payload.get("paid", 0), "items": clean}
+            "paid": payload.get("paid", 0), "items": clean, "employee": payload["employee"]}
 
 
 class SalesRepository(BaseRepository):
@@ -84,10 +85,10 @@ class SalesRepository(BaseRepository):
             "LEFT JOIN Category c ON p.category_id=c.category_id WHERE v.variant_id=?",
             (variant_id,),).fetchone()
 
-    def create_sale(self, payment, order_discount, total, paid):
+    def create_sale(self, payment, order_discount, total, paid, employee):
         return self.connection.execute(
-            "INSERT INTO Sale(payment,order_discount,total,paid,change) VALUES(?,?,?,?,?)",
-            (payment, order_discount, total, paid, paid - total)).lastrowid
+            "INSERT INTO Sale(payment,order_discount,total,paid,change,employee) VALUES(?,?,?,?,?,?)",
+            (payment, order_discount, total, paid, paid - total, employee)).lastrowid
 
     def add_item(self, sale_id, item):
         self.connection.execute(
@@ -150,7 +151,8 @@ class SalesService:
         total = sum(i["qty"] * i["unit_price"] - i["discount"] for i in body["items"]) - body["order_discount"]
         if total < 0:
             raise ValidationError("折扣後總額不可為負數")
-        sale_id = self.repo.create_sale(body["payment"], body["order_discount"], total, body["paid"])
+        sale_id = self.repo.create_sale(body["payment"], body["order_discount"], total, body["paid"],
+                                       body["employee"])
         for item in body["items"]:
             self.repo.add_item(sale_id, item)
         return {"sale_id": sale_id, "total": total, "change": body["paid"] - total}
@@ -164,7 +166,7 @@ class SalesService:
         for row in rows:
             sale = out.setdefault(row["sale_id"], {"sale_id": row["sale_id"], "ts": row["ts"],
                 "payment": row["payment"], "order_discount": row["order_discount"],
-                "total": row["total"], "items": []})
+                "total": row["total"], "employee": row["employee"], "items": []})
             sale["items"].append({"variant_id": row["variant_id"], "name": row["name"],
                 "attributes": attrs.get(row["variant_id"], {}), "attr_display": display.get(row["variant_id"], ""),
                 "qty": row["qty"], "unit_price": row["unit_price"], "discount": row["discount"]})
@@ -180,9 +182,9 @@ class SalesService:
         display = product_data.display_attrs(self.repo.connection, [row["variant_id"] for row in rows])
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["銷售編號", "時間", "付款方式", "商品", "規格", "數量", "單價", "單項折扣", "訂單折扣", "總額"])
+        writer.writerow(["銷售編號", "時間", "員工", "付款方式", "商品", "規格", "數量", "單價", "單項折扣", "訂單折扣", "總額"])
         for row in rows:
-            writer.writerow([row["sale_id"], row["ts"], row["payment"], row["name"],
+            writer.writerow([row["sale_id"], row["ts"], row["employee"], row["payment"], row["name"],
                 display.get(row["variant_id"], ""), row["qty"], row["unit_price"], row["discount"],
                 row["order_discount"], row["total"]])
         return {"filename": "sales.csv", "content": "\ufeff" + buf.getvalue()}

@@ -30,7 +30,7 @@ class SalesLayersTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def checkout(self, **changes):
-        payload = {"payment": "現金", "order_discount": 100, "paid": 900,
+        payload = {"payment": "現金", "order_discount": 100, "paid": 900, "employee": 1,
                    "items": [{"variant_id": self.vid, "qty": 2,
                               "unit_price": 500, "discount": 0}]}
         payload.update(changes)

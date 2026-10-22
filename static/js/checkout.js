@@ -7,7 +7,8 @@ window.PosPages["page-checkout"] = {
   inject: ["showError"],
   data() {
     return { scanCode: "", searchQ: "", searchResults: [], draft: window.PosCheckoutDraft,
-             payments: [], payment: "現金", paid: 0, doneMsg: "" };
+             payments: [], payment: "現金", paid: 0, doneMsg: "",
+             employee: window.PosEmployee };
   },
   computed: {
     total() {
@@ -45,7 +46,7 @@ window.PosPages["page-checkout"] = {
       if (dup) dup.qty += 1;
       else this.draft.cart.push({ variant_id: r.variant_id, name: r.name,
         attributes: r.attributes, attr_display: r.attr_display,
-        unit_price: price, qty: 1, discount: 0 });
+        unit_price: price, qty: 1, discount: 0, stock: r.stock });
       this.searchResults = [];
     },
     async onScan() {
@@ -63,12 +64,13 @@ window.PosPages["page-checkout"] = {
     },
     async checkout() {
       if (this.draft.submitting) return;
+      if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
       this.draft.submitting = true;
       try {
         await this.guard(async () => {
           const r = await API.checkout({
             payment: this.payment, order_discount: this.draft.orderDiscount,
-            paid: this.paid,
+            paid: this.paid, employee: this.employee.id,
             items: this.draft.cart.map(i => ({ variant_id: i.variant_id, qty: i.qty,
               unit_price: i.unit_price, discount: i.discount })) });
           this.doneMsg = `結帳完成，找零 ${r.change} 元(交易編號 ${r.sale_id})`;

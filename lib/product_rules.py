@@ -38,6 +38,14 @@ def is_int(value):
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+EMPLOYEE_IDS = range(1, 7)  # 店員以數字代號 1~6 識別
+
+
+def require_employee(value):
+    if not is_int(value) or value not in EMPLOYEE_IDS:
+        raise ValidationError("請選擇員工代號（1～6）")
+
+
 def allow_keys(payload, allowed, message="不支援的欄位：{field}"):
     unknown = set(payload) - set(allowed)
     if unknown:

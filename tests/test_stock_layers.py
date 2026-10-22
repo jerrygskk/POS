@@ -24,9 +24,9 @@ class TestStockLayers(ConnTestCase):
 
     def test_receive_writes_purchase_and_returns_accumulated_stock(self):
         first = self.facade.invoke(
-            "stock.receive", {"variant_id": 1, "qty": 5, "note": "首批"}
+            "stock.receive", {"employee": 1, "variant_id": 1, "qty": 5, "note": "首批"}
         )
-        second = self.facade.invoke("stock.receive", {"variant_id": 1, "qty": 3})
+        second = self.facade.invoke("stock.receive", {"employee": 1, "variant_id": 1, "qty": 3})
         self.assertEqual({"stock": 5}, first)
         self.assertEqual({"stock": 8}, second)
         row = self.conn.execute(
@@ -36,7 +36,7 @@ class TestStockLayers(ConnTestCase):
 
     def test_detail_keeps_stock_and_latest_fifty_movements_shape(self):
         for qty in range(1, 53):
-            self.facade.invoke("stock.receive", {"variant_id": 1, "qty": qty})
+            self.facade.invoke("stock.receive", {"employee": 1, "variant_id": 1, "qty": qty})
         result = self.facade.invoke("stock.detail", {"variant_id": 1})
         self.assertEqual(sum(range(1, 53)), result["stock"])
         self.assertEqual(50, len(result["movements"]))
@@ -61,7 +61,7 @@ class TestStockLayers(ConnTestCase):
 
     def test_missing_variant_is_not_found_for_receive_and_detail(self):
         for action, payload in (
-            ("stock.receive", {"variant_id": 999, "qty": 1}),
+            ("stock.receive", {"employee": 1, "variant_id": 999, "qty": 1}),
             ("stock.detail", {"variant_id": 999}),
         ):
             with self.subTest(action=action):
@@ -73,13 +73,13 @@ class TestStockLayers(ConnTestCase):
         self.conn.commit()
         self.assertEqual(
             {"stock": 2},
-            self.facade.invoke("stock.receive", {"variant_id": 1, "qty": 2}),
+            self.facade.invoke("stock.receive", {"employee": 1, "variant_id": 1, "qty": 2}),
         )
 
     def test_transaction_rolls_back_when_stock_result_fails_after_insert(self):
         with patch("lib.stock_service.product_data.stock_of", side_effect=RuntimeError("boom")):
             result = self.bridge.invoke(
-                "stock.receive", {"variant_id": 1, "qty": 4}
+                "stock.receive", {"employee": 1, "variant_id": 1, "qty": 4}
             )
         self.assertEqual("internal_error", result["error"]["code"])
         self.assertEqual(

@@ -20,7 +20,7 @@ class TestStocktakeLayers(ConnTestCase):
         self.bridge = DesktopBridge(logger=Mock(), facade=self.facade)
 
     def test_create_scan_detail_set_and_list_round_trip(self):
-        created = self.facade.invoke("stocktake.create", {"operator": "A", "note": None})
+        created = self.facade.invoke("stocktake.create", {"employee": 1, "note": None})
         sid = created["session_id"]
         self.assertEqual({"system_qty": 5, "counted_qty": 2}, self.facade.invoke(
             "stocktake.scan", {"session_id": sid, "variant_id": 1, "qty": 2}))
@@ -33,7 +33,7 @@ class TestStocktakeLayers(ConnTestCase):
         self.assertEqual(sid, self.facade.invoke("stocktake.list", {})[0]["session_id"])
 
     def test_close_is_atomic_and_adjusts_once(self):
-        sid = self.facade.invoke("stocktake.create", {})["session_id"]
+        sid = self.facade.invoke("stocktake.create", {"employee": 1})["session_id"]
         self.facade.invoke("stocktake.scan", {"session_id": sid, "variant_id": 1, "qty": 4})
         self.assertEqual({"ok": True}, self.facade.invoke("stocktake.close", {"session_id": sid}))
         second = self.bridge.invoke("stocktake.close", {"session_id": sid})
@@ -42,7 +42,7 @@ class TestStocktakeLayers(ConnTestCase):
             "SELECT COUNT(*) FROM StockMovement WHERE kind='adjust' AND ref_id=?", (sid,)).fetchone()[0])
 
     def test_close_rolls_back_status_and_adjustment(self):
-        sid = self.facade.invoke("stocktake.create", {})["session_id"]
+        sid = self.facade.invoke("stocktake.create", {"employee": 1})["session_id"]
         self.facade.invoke("stocktake.scan", {"session_id": sid, "variant_id": 1, "qty": 4})
         with patch("lib.stocktake_service.StocktakeRepository.add_adjustment", side_effect=RuntimeError("secret")):
             result = self.bridge.invoke("stocktake.close", {"session_id": sid})
@@ -53,7 +53,7 @@ class TestStocktakeLayers(ConnTestCase):
 
     def test_validation_rejects_bool_malformed_unknown_and_ranges(self):
         cases = [
-            ("stocktake.create", {"operator": {"bad": 1}}),
+            ("stocktake.create", {"employee": 1, "note": {"bad": 1}}),
             ("stocktake.list", {"extra": 1}),
             ("stocktake.detail", {"session_id": True}),
             ("stocktake.scan", {"session_id": 1, "variant_id": 1, "qty": 0}),
@@ -71,7 +71,7 @@ class TestStocktakeLayers(ConnTestCase):
             "stocktake.detail", {"session_id": 999})["error"]["code"])
         self.assertEqual("not_found", self.bridge.invoke(
             "stocktake.close", {"session_id": 999})["error"]["code"])
-        sid = self.facade.invoke("stocktake.create", {})["session_id"]
+        sid = self.facade.invoke("stocktake.create", {"employee": 1})["session_id"]
         self.assertEqual("not_found", self.bridge.invoke("stocktake.set_counted", {
             "session_id": sid, "variant_id": 1, "counted_qty": 0})["error"]["code"])
         self.assertEqual("not_found", self.bridge.invoke("stocktake.scan", {
@@ -93,7 +93,7 @@ API._bridge=()=>Promise.resolve({invoke:async(action,payload)=>{
 }});
 (async()=>{
   await API.listStocktakes();
-  await API.createStocktake({operator:'A'});
+  await API.createStocktake({employee:2});
   await API.stocktakeDetail(7);
   await API.stocktakeScan({variant_id:3,session_id:7,qty:1});
   await API.setStocktakeCounted({counted_qty:4,session_id:7,variant_id:3});
@@ -111,7 +111,7 @@ API._bridge=()=>Promise.resolve({invoke:async(action,payload)=>{
         )
         self.assertEqual([
             {"action": "stocktake.list", "payload": {}},
-            {"action": "stocktake.create", "payload": {"operator": "A"}},
+            {"action": "stocktake.create", "payload": {"employee": 2}},
             {"action": "stocktake.detail", "payload": {"session_id": 7}},
             {"action": "stocktake.scan", "payload": {"variant_id": 3, "session_id": 7, "qty": 1}},
             {"action": "stocktake.set_counted", "payload": {"counted_qty": 4, "session_id": 7, "variant_id": 3}},

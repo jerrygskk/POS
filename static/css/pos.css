@@ -610,3 +610,11 @@ button.primary.danger:hover { filter: brightness(0.92); }
   .batch-price-barcode .dialog-check { grid-column: 1 / -1; }
   .batch-skipped-row { grid-template-columns: 1fr; gap: 3px; }
 }
+/* 員工代號 1~6:結帳／入庫／開盤點單旁的小按鈕組 */
+/* align-self:放在掃描列(.scan-row 預設 stretch)時不被拉高成橢圓 */
+.employee-picker { display: inline-flex; gap: 3px; align-self: center; }
+.employee-picker .chip-toggle { padding: 4px 9px; }
+/* 選中的員工外框加粗:用內陰影補一圈,不改邊框寬度以免按鈕尺寸跳動 */
+.employee-picker .chip-toggle.on { box-shadow: inset 0 0 0 1px var(--accent); }
+/* 收銀付款區要塞進員工按鈕,間距收窄以維持一排 */
+.checkout .pay-panel { gap: 12px; }

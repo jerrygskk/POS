@@ -45,7 +45,7 @@ class TestCatalog(FacadeTestCase):
 
     def test_catalog_grouping(self):
         result = self._create(); vid = result["variant_ids"][0]
-        self.invoke("stock.receive", {"variant_id": vid, "qty": 5})
+        self.invoke("stock.receive", {"employee": 1, "variant_id": vid, "qty": 5})
         product = self.invoke("catalog.list")[0]
         self.assertEqual(product["product_id"], result["product_id"]); self.assertNotIn("default_price", product)
         self.assertEqual(len(product["variants"]), 2); first, second = product["variants"]
@@ -195,14 +195,14 @@ class TestCatalog(FacadeTestCase):
 
     def test_inactive_variant_cannot_sell(self):
         result = self._create(); vid = result["variant_ids"][0]
-        self.invoke("stock.receive", {"variant_id": vid, "qty": 10}); self.invoke("variants.update", {"id": vid, "fields": {"active": 0}})
-        self.assert_application_error("validation_error", "sales.checkout", {"payment": "cash", "paid": 1000, "items": [{"variant_id": vid, "qty": 1, "unit_price": 590}]})
+        self.invoke("stock.receive", {"employee": 1, "variant_id": vid, "qty": 10}); self.invoke("variants.update", {"id": vid, "fields": {"active": 0}})
+        self.assert_application_error("validation_error", "sales.checkout", {"employee": 1, "payment": "cash", "paid": 1000, "items": [{"variant_id": vid, "qty": 1, "unit_price": 590}]})
         self.assertEqual(self.invoke("stock.detail", {"variant_id": vid})["stock"], 10)
 
     def test_inactive_product_cannot_sell(self):
         result = self._create(); vid = result["variant_ids"][0]
-        self.invoke("stock.receive", {"variant_id": vid, "qty": 10}); self.invoke("products.update", {"id": result["product_id"], "fields": {"active": 0}})
-        self.assert_application_error("validation_error", "sales.checkout", {"payment": "cash", "paid": 1000, "items": [{"variant_id": vid, "qty": 1, "unit_price": 590}]})
+        self.invoke("stock.receive", {"employee": 1, "variant_id": vid, "qty": 10}); self.invoke("products.update", {"id": result["product_id"], "fields": {"active": 0}})
+        self.assert_application_error("validation_error", "sales.checkout", {"employee": 1, "payment": "cash", "paid": 1000, "items": [{"variant_id": vid, "qty": 1, "unit_price": 590}]})
         self.assertEqual(self.invoke("stock.detail", {"variant_id": vid})["stock"], 10)
 
     def test_inactive_hidden_in_search(self):
@@ -220,7 +220,7 @@ class TestCatalog(FacadeTestCase):
         self.assertFalse(self.invoke("barcodes.scan", {"code": "FX100000001"})["active"])
 
     def test_delete_variant_with_record_raises_conflict(self):
-        result = self._create(); vid = result["variant_ids"][0]; self.invoke("stock.receive", {"variant_id": vid, "qty": 1})
+        result = self._create(); vid = result["variant_ids"][0]; self.invoke("stock.receive", {"employee": 1, "variant_id": vid, "qty": 1})
         self.assert_application_error("conflict", "variants.delete", {"id": vid})
 
     def test_delete_clean_variant(self):
@@ -230,7 +230,7 @@ class TestCatalog(FacadeTestCase):
         self.assertEqual(len(self.invoke("catalog.list")[0]["variants"]), 1)
 
     def test_delete_product_with_record_raises_conflict(self):
-        result = self._create(); self.invoke("stock.receive", {"variant_id": result["variant_ids"][0], "qty": 1})
+        result = self._create(); self.invoke("stock.receive", {"employee": 1, "variant_id": result["variant_ids"][0], "qty": 1})
         self.assert_application_error("conflict", "products.delete", {"id": result["product_id"]})
 
     def test_delete_clean_product(self):

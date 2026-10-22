@@ -3,10 +3,10 @@ from collections.abc import Mapping
 from lib import product_data
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, NotFoundError, ValidationError
-from lib.product_rules import allow_keys as _allow, is_int as _is_int
+from lib.product_rules import allow_keys as _allow, is_int as _is_int, require_employee
 
 def _validate(action, payload):
-    allowed = {"stocktake.create":{"operator","note"}, "stocktake.list":set(),
+    allowed = {"stocktake.create":{"employee","note"}, "stocktake.list":set(),
         "stocktake.detail":{"session_id"}, "stocktake.scan":{"session_id","variant_id","qty"},
         "stocktake.set_counted":{"session_id","variant_id","counted_qty"},
         "stocktake.close":{"session_id"}}[action]
@@ -18,8 +18,8 @@ def _validate(action, payload):
     if action == "stocktake.set_counted" and (not _is_int(payload.get("counted_qty")) or payload["counted_qty"] < 0):
         raise ValidationError("實盤數量必須是非負整數")
     if action == "stocktake.create":
-        for key in ("operator", "note"):
-            if payload.get(key) is not None and not isinstance(payload[key], str): raise ValidationError(f"{key} 必須是字串")
+        require_employee(payload.get("employee"))
+        if payload.get("note") is not None and not isinstance(payload["note"], str): raise ValidationError("note 必須是字串")
 
 class StocktakeRepository(BaseRepository):
     def session(self, sid): return self.one("SELECT * FROM StocktakeSession WHERE session_id=?", (sid,))
@@ -38,8 +38,8 @@ class StocktakeRepository(BaseRepository):
 
 class StocktakeService:
     def __init__(self, repository): self.repo = repository
-    def create(self, operator=None, note=None):
-        cur=self.repo.execute("INSERT INTO StocktakeSession(operator,note) VALUES(?,?)", (operator,note)); return {"session_id":cur.lastrowid}
+    def create(self, employee, note=None):
+        cur=self.repo.execute("INSERT INTO StocktakeSession(employee,note) VALUES(?,?)", (employee,note)); return {"session_id":cur.lastrowid}
     def list(self): return [dict(r) for r in self.repo.all("SELECT * FROM StocktakeSession ORDER BY session_id DESC LIMIT 50")]
     def scan(self, sid, vid, qty):
         self.repo.require_open(sid)
@@ -77,7 +77,7 @@ class StocktakeFacade(BaseFacade):
         return payload
     def _dispatch(self,action,payload,conn):
         s=StocktakeService(StocktakeRepository(conn))
-        if action=="stocktake.create": return s.create(payload.get("operator"),payload.get("note"))
+        if action=="stocktake.create": return s.create(payload["employee"],payload.get("note"))
         if action=="stocktake.list": return s.list()
         if action=="stocktake.detail": return s.detail(payload["session_id"])
         if action=="stocktake.scan": return s.scan(payload["session_id"],payload["variant_id"],payload["qty"])
