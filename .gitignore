@@ -33,3 +33,7 @@ backups/
 
 # 發布說明(給使用者看,不入庫;AGENTS.md C 節)
 release_note_v*.md
+
+# 開發用資料庫初始化工具(清交易紀錄、庫存設 1),不入庫
+reset_db.bat
+reset_db.py
