@@ -16,7 +16,10 @@ class TestStocktakeLayers(ConnTestCase):
         self.conn.execute("INSERT INTO StockMovement(variant_id,qty,kind) VALUES(1,5,'purchase')")
         self.conn.commit()
         from lib.stocktake_service import StocktakeFacade
-        self.facade = StocktakeFacade(self.db)
+        from lib.auth import AdminSession
+        self.session = AdminSession(self.db)
+        self.session.login("admin")
+        self.facade = StocktakeFacade(self.db, session=self.session)
         self.bridge = DesktopBridge(logger=Mock(), facade=self.facade)
 
     def test_create_scan_detail_set_and_list_round_trip(self):
@@ -32,23 +35,26 @@ class TestStocktakeLayers(ConnTestCase):
         self.assertEqual((4, -1), (detail["items"][0]["counted_qty"], detail["items"][0]["diff"]))
         self.assertEqual(sid, self.facade.invoke("stocktake.list", {})[0]["session_id"])
 
-    def test_close_is_atomic_and_adjusts_once(self):
+    def test_approve_is_atomic_and_adjusts_once(self):
         sid = self.facade.invoke("stocktake.create", {"employee": 1})["session_id"]
         self.facade.invoke("stocktake.scan", {"session_id": sid, "variant_id": 1, "qty": 4})
         self.assertEqual({"ok": True}, self.facade.invoke("stocktake.close", {"session_id": sid}))
-        second = self.bridge.invoke("stocktake.close", {"session_id": sid})
+        self.assertEqual(0, self.conn.execute("SELECT COUNT(*) FROM StockMovement WHERE kind='adjust'").fetchone()[0])
+        self.assertEqual({"ok": True}, self.facade.invoke("stocktake.approve", {"session_id": sid}))
+        second = self.bridge.invoke("stocktake.approve", {"session_id": sid})
         self.assertEqual("conflict", second["error"]["code"])
         self.assertEqual(1, self.conn.execute(
             "SELECT COUNT(*) FROM StockMovement WHERE kind='adjust' AND ref_id=?", (sid,)).fetchone()[0])
 
-    def test_close_rolls_back_status_and_adjustment(self):
+    def test_approve_rolls_back_status_and_adjustment(self):
         sid = self.facade.invoke("stocktake.create", {"employee": 1})["session_id"]
         self.facade.invoke("stocktake.scan", {"session_id": sid, "variant_id": 1, "qty": 4})
+        self.facade.invoke("stocktake.close", {"session_id": sid})
         with patch("lib.stocktake_service.StocktakeRepository.add_adjustment", side_effect=RuntimeError("secret")):
-            result = self.bridge.invoke("stocktake.close", {"session_id": sid})
+            result = self.bridge.invoke("stocktake.approve", {"session_id": sid})
         self.assertEqual("internal_error", result["error"]["code"])
         self.assertNotIn("secret", str(result))
-        self.assertEqual("open", self.conn.execute(
+        self.assertEqual("pending", self.conn.execute(
             "SELECT status FROM StocktakeSession WHERE session_id=?", (sid,)).fetchone()[0])
 
     def test_validation_rejects_bool_malformed_unknown_and_ranges(self):
@@ -60,6 +66,9 @@ class TestStocktakeLayers(ConnTestCase):
             ("stocktake.scan", {"session_id": 1, "variant_id": 1, "qty": True}),
             ("stocktake.set_counted", {"session_id": 1, "variant_id": 1, "counted_qty": -1}),
             ("stocktake.set_counted", {"session_id": 1, "variant_id": 1, "counted_qty": False}),
+            ("stocktake.withdraw", {"session_id": True}),
+            ("stocktake.approve", {"session_id": "1"}),
+            ("stocktake.pending_count", {"extra": 1}),
         ]
         for action, payload in cases:
             with self.subTest(action=action, payload=payload):
@@ -76,6 +85,18 @@ class TestStocktakeLayers(ConnTestCase):
             "session_id": sid, "variant_id": 1, "counted_qty": 0})["error"]["code"])
         self.assertEqual("not_found", self.bridge.invoke("stocktake.scan", {
             "session_id": sid, "variant_id": 999, "qty": 1})["error"]["code"])
+
+    def test_facade_without_session_treats_pending_editor_as_employee(self):
+        from lib.stocktake_service import StocktakeFacade
+        sid = self.facade.invoke("stocktake.create", {"employee": 1})["session_id"]
+        self.facade.invoke("stocktake.scan", {"session_id": sid, "variant_id": 1, "qty": 4})
+        self.facade.invoke("stocktake.close", {"session_id": sid})
+        from lib.application_errors import ForbiddenError
+        employee_facade = StocktakeFacade(self.db)
+        for action, payload in (("stocktake.set_counted", {"session_id": sid, "variant_id": 1, "counted_qty": 3}),
+                                ("stocktake.approve", {"session_id": sid}), ("stocktake.pending_count", {})):
+            with self.assertRaises(ForbiddenError):
+                employee_facade.invoke(action, payload)
 
     def test_frontend_routes_every_stocktake_url_to_bridge(self):
         source = (Path(__file__).parents[1] / "static/js/api.js").read_text(encoding="utf-8")

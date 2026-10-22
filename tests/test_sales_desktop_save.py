@@ -1,12 +1,16 @@
 import tempfile
 import unittest
 import logging
+from unittest.mock import Mock
 from pathlib import Path
 
 from lib.desktop_bridge import DesktopBridge
 
 
 class ExportFacade:
+    def __init__(self):
+        self.session = Mock()
+
     def invoke(self, action, payload):
         if action == "sales.export":
             return {"filename": "sales.csv", "content": "\ufeff資料"}

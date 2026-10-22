@@ -38,7 +38,7 @@ COPY_TABLES = [
 SKIP_TABLES = ["Sale", "SaleItem", "StockMovement", "StocktakeSession", "StocktakeItem"]
 # Setting 逐鍵處理：schema_version 由建庫流程寫入，其餘鍵照抄。
 SETTING_COPY_KEYS = ["payments", "next_store_barcode"]
-SETTING_SKIP_KEYS = ["schema_version"]
+SETTING_SKIP_KEYS = ["schema_version", "admin_password_hash"]
 
 
 def fail(message):

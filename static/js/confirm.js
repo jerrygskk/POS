@@ -57,24 +57,44 @@ window.PosConfirm = {
       box.appendChild(actions);
       overlay.appendChild(box);
 
+      let closed = false;
       const close = (result) => {
+        if (closed) return;
+        closed = true;
         document.removeEventListener("keydown", onKey, true);
         overlay.remove();
         resolve(result);
       };
-      const submit = () => {
-        const message = options.validate ? options.validate(field.value) : null;
-        if (message) { error.textContent = message; return; }
-        close(field.value);
+      let submitting = false;
+      const submit = async () => {
+        if (submitting) return;
+        submitting = true;
+        okBtn.disabled = true;
+        cancelBtn.disabled = true;
+        try {
+          let message = options.validate ? options.validate(field.value) : null;
+          if (message && typeof message.then === "function") message = await message;
+          if (closed) return;
+          if (message) { error.textContent = message; return; }
+          close(field.value);
+        } catch (e) { error.textContent = e.message; }
+        finally {
+          submitting = false;
+          okBtn.disabled = false;
+          cancelBtn.disabled = false;
+        }
       };
       const onKey = (event) => {
-        if (event.key === "Escape") { event.preventDefault(); close(null); }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          if (!submitting) close(null);
+        }
         else if (event.key === "Enter") { event.preventDefault(); submit(); }
       };
       okBtn.addEventListener("click", submit);
-      cancelBtn.addEventListener("click", () => close(null));
+      cancelBtn.addEventListener("click", () => { if (!submitting) close(null); });
       overlay.addEventListener("mousedown", (event) => {
-        if (event.target === overlay) close(null);
+        if (event.target === overlay && !submitting) close(null);
       });
       document.addEventListener("keydown", onKey, true);
       document.body.appendChild(overlay);

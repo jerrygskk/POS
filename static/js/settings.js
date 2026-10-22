@@ -29,6 +29,7 @@ window.PosPages["page-settings"] = {
       newSeq: { brands: "", phoneBrands: "", models: "" },
       // 商品設定單頁
       section: "category",
+      passwordForm: { old: "", next: "", confirm: "" },
       selCatId: null, newCatName: "",
       tplFields: [], bigProducts: [],
       newField: { name: "", field_type: "select" },
@@ -119,6 +120,19 @@ window.PosPages["page-settings"] = {
     window.removeEventListener("pos-child-window-closed", this._childWindowClosed);
   },
   methods: {
+    async changePassword() {
+      this.errorScope = "password";
+      if (!window.PosAuth.isAdmin) { this.showError("需要管理者權限"); return; }
+      if (this.passwordForm.next !== this.passwordForm.confirm) {
+        this.showError("兩次輸入的新密碼不一致"); return;
+      }
+      await this.guard(async () => {
+        await API.changePassword(this.passwordForm.old, this.passwordForm.next);
+        this.passwordForm = { old: "", next: "", confirm: "" };
+        await PosConfirm.notify("密碼已變更，請以新密碼重新登入。");
+        await window.PosAuthOps.refresh();
+      });
+    },
     // scope 決定訊息出現在哪一段(category／brands／phoneBrands／models),
     // 不指定就歸商品種類那段;沒有歸屬會四個區塊同時亮。
     showError(message, scope) {

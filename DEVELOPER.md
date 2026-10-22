@@ -27,12 +27,13 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `lib/runtime_paths.py` | 集中決定開發／onefile 的 DB、備份、錯誤記錄與 static 路徑 |
 | `lib/desktop_application.py` | 建立 pywebview 視窗，串接 `DesktopBridge` 與各 Facade |
 | `lib/desktop_bridge.py` | pywebview JS bridge：轉送 action、統一成功／錯誤 envelope、處理匯出存檔 |
+| `lib/auth.py` | 共用管理者身分、密碼雜湊、閒置逾時與唯一受限動作表 |
 | `lib/child_window.py` | 子視窗協調器：唯一子視窗、頁面白名單、傳入脈絡、關閉時通知主視窗解鎖 |
 | `lib/version.py` | `VERSION` 字串 |
 | `lib/db.py` | `get_conn` / `db_conn`(context manager)/ `init_db`,純資料層(零框架依賴) |
 | `lib/db_schema.py` | 現行 schema DDL 唯一來源；未來變更仍依 migration 規則升級既有資料庫 |
 | `lib/legacy_migrations.py` | 凍結的 v1–v13 migration DDL；僅供既有資料庫按版本升級，不作為現行 schema 定義 |
-| `lib/db_seed.py` | 付款方式種子、新種類預設欄清單(規格欄由各種類自建,種子不建欄) |
+| `lib/db_seed.py` | 付款方式與初始管理者密碼種子、新種類預設欄清單(規格欄由各種類自建,種子不建欄) |
 | `lib/product_rules.py` | 共用商品規則(`FIELD_TYPES`、欄位型別驗證、自取碼取號) |
 | `lib/variant_batch_service.py` | 子產品批次建立與唯讀預檢（共用 `_validate_batch`，`dry=True` 不寫入任何資料） |
 | `lib/backup.py` | GFS 備份(日7/週4/月12) |
@@ -49,6 +50,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `static/js/combobox.js` | 可搜尋下拉 `combo-box`（從既有主檔挑一筆，可新增未收錄的值） |
 | `static/js/sortable.js` | 拖拉排序清單 `sortable-list`（⠿ 拖曳＋序號格搬位；`auto-save` 決定拖完直接寫入或交給該區塊的儲存鈕，`disabled` 供清單被過濾時停用排序） |
 | `static/js/confirm.js` | 確認／通知視窗公版 `PosConfirm.ask()`／`notify()`／`input()`／`choose()`（取代瀏覽器內建 confirm／alert；`choose` 為清單選擇） |
+| `static/js/auth.js` | 主、子視窗共用的活動回報；主視窗登入／登出、身分刷新與待核准徽章 |
 | `static/js/employeepicker.js` | 員工代號 1～6 選擇元件 `employee-picker`（收銀／進貨／盤點共用同一個選擇） |
 | `static/css/dialog-theme.css` | 子視窗對話框外觀（`.dialog-*` 公版，沿用 §2 UI 風格色票） |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
@@ -70,13 +72,79 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 - **進貨頁批次**:清單 `window.PosReceiveDraft` 放元件外(切頁保留、關程式清空);掃一下加一列,同子產品再掃數量 +1 並移到最上;按「確認進貨」以 `stock.receive {employee, items:[{variant_id, qty}]}` 一次寫入,同一交易全有全無。⚠️ 確認／清空的確認視窗開啟到流程結束期間**鎖定清單**(`locked`),掃描、改數量、刪列、加標籤、重按一律在方法內擋;另有**世代編號** `generation`,每次確認／清空流程開始就 +1,掃描送出前記下、回來時編號不同就拒絕並提示重掃——只看鎖定擋不住「入庫完成、解鎖後才回來的舊掃描」,它會被加進下一批而重複入庫。送出的是確認當下的快照,送出前再驗員工與清單;數量欄不用 `v-model`(會直接改資料,方法擋不住)。
 - **自取碼交易語意**:`lib/product_rules.py:next_store_barcode` 使用呼叫端的同一條資料庫連線更新計數器,由呼叫端決定 commit;商品或條碼建立失敗造成 transaction rollback 時,計數器亦一併回復。
 - **關鍵輸入驗證**:進貨數量與盤點掃描數量須大於 0,盤點實數不得小於 0;結帳單品折扣不可超過品項小計、總額不得為負,付款方式須存在設定清單。規格欄型別統一由 `lib/product_rules.py` 驗證。
-- **盤點結案防重**:結案先以 `status='open'` 條件原子更新盤點單;不存在回 404,已結案回 409,避免重複產生 `adjust` 庫存異動。
+- **盤點送審／核准**：結案只送審、不動庫存；核准才依快照差額寫入調整。狀態與防重規則見下方「盤點兩段式」。
 - **有效售價**:`Variant.price` 不為 NULL 時採用,否則退回 `Product.default_price`,兩者皆 NULL 則售價為 `null`。
 - **同名欄去重提醒**:`AttributeField` 沒有 `category_id`,同名欄可能有多份(各種類一份);SQLite 的 `UNIQUE` 也不套正規化,故去重不能靠資料庫唯一鍵,一律先以「欄名＋型別＋種類」查再插。
 - **設定頁模板列與型號**:見下方「固定列：適用型號與特性詞條」「規格欄的移除」「新種類的預設模板」三節。
 - **商品資料庫的廠牌篩選**:廠牌下拉只列「目前種類真的有商品」的廠牌(`brands.list` 帶 `with_products`,以 `Product.brand_id` 判斷,不看 `BrandCategory` 掛勾)。掛了種類卻一件商品都沒有的廠牌選了只會查無資料。切換種類時重撈清單,原本選的廠牌若不在新清單內自動清成「全部廠牌」。設定頁的廠牌歸屬仍走原本的掛勾清單,不受影響。
 - **商品資料庫搜尋**:關鍵字以空白切成多個詞,採 **AND**(每個詞都要命中才算符合),大小寫與全半形以 `casefold` 正規化。比對範圍為商品名稱、種類、廠牌、款式的規格值(含 multi/tags 的每個值)、適用型號與條碼,命中時只保留符合的款式列。查無啟用中資料時另查一次停用資料,回報筆數並提供「顯示已停用」入口,不直接把停用商品混進結果。條碼只針對當頁款式查詢(`variant_id IN (...)`),不整表撈。
 - **Schema 與 migration**:`lib/db_schema.py` 是現行 schema DDL 的唯一來源；`lib/legacy_migrations.py` 封存 v1–v13 的歷史 migration DDL。未來修改現行 schema 時，仍須依 migration 規則新增升級步驟，讓既有資料庫可安全演進。
+
+### 權限（管理者／員工）
+
+開程式預設為員工。管理者以單一密碼登入，初始密碼為 `admin`（區分大小寫）；
+變更密碼成功後立即登出。身分只存在後端記憶體，由 `DesktopFacade.session`
+持有 `AdminSession`，主視窗與所有子視窗共用；關閉程式後不保留登入。
+
+| 操作 | 員工 | 管理者 |
+|---|---|---|
+| 收銀（含單項折扣、整單折抵）、進貨 | 可 | 可 |
+| 盤點開單、掃描、修改進行中實盤量、結案送審、抽回 | 可 | 可 |
+| 待核准盤點修改實盤量、核准、查詢待核准數量 | 不可 | 可 |
+| 銷售紀錄任意日期查詢與小結 | 可 | 可 |
+| 銷售紀錄匯出 CSV | 不可 | 可 |
+| 商品資料庫查詢（含已停用）、標籤列印 | 可 | 可 |
+| 商品新增、修改、停用／啟用、刪除、待處理管理及編輯子視窗 | 不可 | 可 |
+| 設定頁與管理者密碼變更 | 不可 | 可 |
+
+`lib/auth.py` 的 `ADMIN_ACTIONS` 是唯一動作權限表。新增會修改資料的動作時，
+必須決定歸屬，並同步更新逐項列出權限表的測試。`DesktopFacade.invoke`
+在分派前檢查管理者；Bridge 直接處理的編輯子視窗入口另檢查，
+匯出存檔在對話框結束、實際寫檔前再次檢查。未授權回傳 `forbidden`。
+待核准盤點的數量修改另依狀態檢查身分。
+
+員工畫面直接隱藏受限操作；每個前端進入點仍須檢查權限，確認視窗後的
+刪除／核准等操作在實際執行前再次檢查身分及目標狀態，不能只靠藏按鈕。
+登出或逾時後若停在設定頁，主視窗統一切回收銀。
+
+閒置固定 600 秒（10 分鐘）。後端 `is_admin()`／`touch()` 讀取時先檢查逾時，
+已逾時就登出、不續期；Bridge 先 `touch()` 再檢查受限動作。
+`auth.status`、`auth.logout`、`stocktake.pending_count` 為被動查詢，不延長登入。
+主、子視窗各自以滑鼠／鍵盤事件最多每 60 秒回報活動，不論畫面身分皆回報；
+只有主視窗在管理者狀態下每 30 秒刷新身分與徽章，前端不自行計時登出。
+主動登出會關閉子視窗；閒置逾時不主動關閉，子視窗下次儲存會收到權限錯誤。
+
+密碼存於 `Setting.admin_password_hash`，使用 PBKDF2-HMAC-SHA256、200,000 次迭代、
+16 bytes 隨機鹽，格式為 `pbkdf2_sha256$<迭代>$<鹽hex>$<雜湊hex>`，
+以 `hmac.compare_digest` 比對；種子只補缺少的密碼，不覆蓋已變更的密碼。
+密碼及請求內容不得寫入錯誤記錄。標準資料庫不複製來源密碼，由種子產生初始密碼。
+
+登入沿用 `PosConfirm.input` 非同步驗證，在原對話框顯示錯誤供重試。
+公版在驗證期間停用確定／取消，Esc 與點遮罩不關閉；驗證結束後恢復操作。
+
+### 盤點兩段式
+
+狀態僅有 `open`（進行中）、`pending`（待核准）、`closed`（已結案）。
+結案由進行中送往待核准，只寫 `submitted_at`、不動庫存；任何身分皆可將待核准單
+抽回為進行中；只有管理者可核准。核准才寫 `approved_at`、`ended_at`
+及 `adjust` 庫存異動。同時只能有一張進行中或待核准單，由
+`idx_stocktake_one_active` 部分唯一索引保證，服務層將重複開單轉為明確衝突訊息。
+
+各品項的系統量是首次掃描或最近一次抽回時的庫存快照。
+核准差額固定為「實盤量 − 系統量」，加入核准當下的庫存，不能重新用目前庫存
+計算差額，否則送審期間的銷售會被重複扣除。管理者在待核准單修改實盤量，
+是修正原盤點當時的數量，不是填入核准當下重新清點的數量；此時仍禁止掃描新增品項。
+
+抽回時同一交易內更新每個品項：新系統量＝目前庫存；
+新實盤量＝舊實盤量＋（新系統量 − 舊系統量），讓未修改品項維持原差額。
+平移結果為負數時，實盤量設為 0 並標記 `needs_recount=1`；必須重新確認數量
+才能再次結案，核准也會拒絕仍有標記的單。掃描或修改數量會清除標記，
+即使送出相同的 0 也須清除；畫面提供既有小按鈕公版的「確認」入口。
+
+送審、抽回及核准都以來源狀態作條件式更新；核准僅在更新成功一筆後寫庫存調整，
+狀態更新與異動在同一交易，重複核准不得再寫入調整。
+schema v18 重建盤點父子表以擴充狀態與欄位，搬表前明確開交易，保留明細、原編號
+及流水號；失敗須完整回復，不關閉外鍵檢查。
 
 ### 子視窗(pywebview 款式修改／新增款式)
 
@@ -358,7 +426,7 @@ product 層級失敗(產品不存在或已停用)仍照 `_require_product()` rai
 v15 `_mig_split_shared_fields` 拆其餘所有跨種類共用欄(顏色、框色、產品型號…)。
 搬移規則:每個種類各建一份同名同型別的欄,只複製**該種類真的用過**的選項
 (含限定型號與模板預設值),text 欄的值直接改指新欄;沒人用過的選項與原共用欄清掉。
-種子(`db_seed`)因此不再建任何規格欄與起始選項,只留付款方式。
+種子(`db_seed`)因此不再建任何規格欄與起始選項，保留付款方式與初始管理者密碼。
 匯入工具(未入庫)照同一條規則實作:只重用已綁本種類的欄,查無就新建。
 
 建欄的動作在設定頁建立流程(`settings.js` 的 `attachDefaultFields`),不放在

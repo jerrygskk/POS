@@ -38,6 +38,10 @@
 - **SQL-2**: **交易中設 `PRAGMA foreign_keys` 沒效果** → 該 PRAGMA 在交易內是 no-op。migration 一旦 OFF，同交易後續（含 seed）FK 都是關的；要保護不能「seed 前開回 ON」，改在 commit 前跑 `PRAGMA foreign_key_check` 驗證，有違規就 rollback。
 - **SQL-3**: **偶發 `database is locked` 直接報 500** → 另一條連線（如自動備份 `.backup()`）與寫入撞上，SQLite 預設不等待。`get_conn` 統一設 `PRAGMA busy_timeout=3000` 讓它自行重試；連線一律走 `get_conn` 單一來源，要加 PRAGMA 集中改一處。
 
+#### TEST：測試環境
+
+- **TEST-1**：**Codex 沙盒內大量測試在 `init_db` 報 `unable to open database file`，暫存目錄清理也出現 WinError 5** → 沙盒預設的 `AC\Temp` 可能無法供 SQLite 建檔。先用獨立暫存目錄確認 SQLite 可建立及刪除，再只在該次測試程序把 `TEMP`／`TMP` 指向專案內已建立、被忽略的 `.tmp_*/temp`，重跑完整測試；不要改正式資料庫路徑或放寬程式權限。此處理僅適用單元測試，真實 pywebview 仍須依 AGENTS.md 在沙盒外走查。
+
 #### PKG：打包（PyInstaller onefile）
 
 - **PKG-1**: **打包後找不到 `static/index.html`／前端資源** → onefile 執行時將打包資源解壓至 `sys._MEIPASS`，不能用程式檔位置推算 static；正式 Desktop runtime 由 `RuntimePaths.detect()` 在 frozen 環境指向 `sys._MEIPASS/static`，`DesktopApplication` 再載入本機 `index.html`。新增打包資源比照處理（DEVELOPER §4）。

@@ -138,16 +138,21 @@ CREATE TABLE IF NOT EXISTS StocktakeSession(
   session_id INTEGER PRIMARY KEY AUTOINCREMENT,
   started_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   ended_at TEXT,
+  submitted_at TEXT,
+  approved_at TEXT,
   employee INTEGER CHECK(employee BETWEEN 1 AND 6),  -- 盤點員工代號
-  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')),
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','pending','closed')),
   note TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stocktake_one_active
+  ON StocktakeSession((status IN ('open','pending'))) WHERE status IN ('open','pending');
 CREATE TABLE IF NOT EXISTS StocktakeItem(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER NOT NULL REFERENCES StocktakeSession(session_id),
   variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
-  system_qty INTEGER NOT NULL,    -- 開盤當下快照
+  system_qty INTEGER NOT NULL,    -- 首次掃描或最近一次抽回時的庫存快照
   counted_qty INTEGER NOT NULL DEFAULT 0,
+  needs_recount INTEGER NOT NULL DEFAULT 0 CHECK(needs_recount IN (0,1)),
   UNIQUE(session_id, variant_id)
 );
 CREATE TABLE IF NOT EXISTS Setting(
@@ -412,6 +417,38 @@ def _mig_shared_factory_barcode(conn):
         ensure_store_codes_for_shared(conn, row[0])
 
 
+def _mig_stocktake_approval(conn):
+    """外鍵全程開啟，原子重建盤點父子表並保留原流水號。"""
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' "
+                       "AND name='StocktakeSession'").fetchone()[0]
+    if "'pending'" in sql:
+        return
+    if not conn.in_transaction:
+        conn.execute("BEGIN")
+    sequences = dict(conn.execute("SELECT name,seq FROM sqlite_sequence "
+                                  "WHERE name IN ('StocktakeSession','StocktakeItem')"))
+    conn.execute("CREATE TABLE StocktakeItem_mig AS SELECT * FROM StocktakeItem")
+    conn.execute("DROP TABLE StocktakeItem")
+    # 從現行 SCHEMA 取得完整約束，避免 migration 另維護一份新表 DDL。
+    session_ddl = SCHEMA.split("CREATE TABLE IF NOT EXISTS StocktakeSession(", 1)[1].split(";", 1)[0]
+    conn.execute("CREATE TABLE StocktakeSession_mig(" + session_ddl)
+    conn.execute("INSERT INTO StocktakeSession_mig(session_id,started_at,ended_at,employee,status,note) "
+                 "SELECT session_id,started_at,ended_at,employee,status,note FROM StocktakeSession")
+    conn.execute("DROP TABLE StocktakeSession")
+    conn.execute("ALTER TABLE StocktakeSession_mig RENAME TO StocktakeSession")
+    item_ddl = SCHEMA.split("CREATE TABLE IF NOT EXISTS StocktakeItem(", 1)[1].split(";", 1)[0]
+    conn.execute("CREATE TABLE StocktakeItem(" + item_ddl)
+    conn.execute("INSERT INTO StocktakeItem(id,session_id,variant_id,system_qty,counted_qty) "
+                 "SELECT id,session_id,variant_id,system_qty,counted_qty FROM StocktakeItem_mig")
+    conn.execute("DROP TABLE StocktakeItem_mig")
+    for name, previous in sequences.items():
+        conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name=?", (previous, name))
+        conn.execute("INSERT INTO sqlite_sequence(name,seq) SELECT ?,? "
+                     "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name=?)", (name, previous, name))
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stocktake_one_active "
+                 "ON StocktakeSession((status IN ('open','pending'))) WHERE status IN ('open','pending')")
+
+
 MIGRATIONS = [
     (BASE_VERSION + 1, _mig_phone_brand),
     (BASE_VERSION + 2, _mig_variant_attributes),
@@ -429,6 +466,7 @@ MIGRATIONS = [
     (BASE_VERSION + 14, _mig_split_shared_fields),
     (BASE_VERSION + 15, _mig_employee),
     (BASE_VERSION + 16, _mig_shared_factory_barcode),
+    (BASE_VERSION + 17, _mig_stocktake_approval),
 ]
 
 # 最新版號 = 初版 + 遷移筆數;全新 DB 建 SCHEMA 即為此版

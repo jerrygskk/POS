@@ -20,6 +20,9 @@ class TestStockLayers(ConnTestCase):
         self.conn.commit()
         from lib.stock_service import StockFacade
         self.facade = StockFacade(self.db)
+        from lib.auth import AdminSession
+        self.facade.session = AdminSession(self.db)
+        self.facade.session.login("admin")
         self.bridge = DesktopBridge(logger=Mock(), facade=self.facade)
 
     def test_receive_writes_purchase_and_returns_accumulated_stock(self):

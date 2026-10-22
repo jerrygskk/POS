@@ -151,7 +151,8 @@ class SharedMigrationTests(FacadeTestCase):
         a, b, c, before = self.old_database()
         init_db(self.db)
         with closing(get_conn(self.db)) as conn, conn:
-            self.assertEqual(conn.execute("SELECT value FROM Setting WHERE key='schema_version'").fetchone()[0], "17")
+            from lib.db_schema import SCHEMA_VERSION
+            self.assertEqual(conn.execute("SELECT value FROM Setting WHERE key='schema_version'").fetchone()[0], str(SCHEMA_VERSION))
             after = [tuple(r) for r in conn.execute("SELECT * FROM Barcode ORDER BY barcode,variant_id")]
             self.assertTrue(all(row in after for row in before))
             self.assertTrue(conn.execute("SELECT 1 FROM Barcode WHERE barcode='OLD' AND variant_id=?", (b,)).fetchone())

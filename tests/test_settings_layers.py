@@ -16,6 +16,9 @@ class SettingsLayersTests(unittest.TestCase):
         self.db = Path(self.tmp.name) / "pos.db"
         init_db(self.db)
         self.facade = SettingsFacade(self.db)
+        from lib.auth import AdminSession
+        self.facade.session = AdminSession(self.db)
+        self.facade.session.login("admin")
         self.bridge = DesktopBridge(facade=self.facade)
 
     def tearDown(self):

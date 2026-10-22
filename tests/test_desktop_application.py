@@ -80,7 +80,7 @@ class DesktopApplicationTest(unittest.TestCase):
 
     def test_creates_one_local_window_with_bridge_and_starts_webview2(self):
         webview = FakeWebview()
-        bridge = DesktopBridge()
+        bridge = DesktopBridge(facade=Mock())
         application = DesktopApplication(
             self.paths,
             bridge=bridge,
@@ -138,7 +138,7 @@ class DesktopApplicationTest(unittest.TestCase):
 
     def test_child_window_is_singleton_and_child_bridge_only_exposes_invoke(self):
         webview = FakeWebview()
-        bridge = DesktopBridge()
+        bridge = DesktopBridge(facade=Mock())
         application = DesktopApplication(
             self.paths, bridge=bridge, webview_module=webview)
         application.run()
@@ -183,7 +183,7 @@ class DesktopApplicationTest(unittest.TestCase):
 
     def test_child_window_close_and_native_x_dispatch_exactly_once(self):
         webview = FakeWebview()
-        bridge = DesktopBridge()
+        bridge = DesktopBridge(facade=Mock())
         DesktopApplication(
             self.paths, bridge=bridge, webview_module=webview).run()
         context = {"product": {"product_id": 1}, "variant": {"variant_id": 2}}
@@ -222,7 +222,7 @@ class DesktopApplicationTest(unittest.TestCase):
                 return super().create_window(*args, **kwargs)
 
         webview = BlockingWebview()
-        bridge = DesktopBridge()
+        bridge = DesktopBridge(facade=Mock())
         DesktopApplication(self.paths, bridge=bridge, webview_module=webview).run()
         context = {"product": {"product_id": 1}, "variant": {"variant_id": 2}}
         results = []
@@ -258,7 +258,7 @@ class DesktopApplicationTest(unittest.TestCase):
                 return super().create_window(*args, **kwargs)
 
         webview = FailOnceWebview()
-        bridge = DesktopBridge()
+        bridge = DesktopBridge(facade=Mock())
         DesktopApplication(self.paths, bridge=bridge, webview_module=webview).run()
         context = {"product": {"product_id": 1}, "variant": {"variant_id": 2}}
 
@@ -273,6 +273,8 @@ class DesktopApplicationTest(unittest.TestCase):
 
     def test_native_x_after_committed_update_dispatches_saved_true(self):
         class Facade:
+            session = Mock()
+
             def invoke(self, action, payload):
                 self.call = (action, payload)
                 return {"ok": True}

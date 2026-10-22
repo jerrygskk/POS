@@ -34,6 +34,8 @@ class FacadeTestCase(unittest.TestCase):
         self.db = os.path.join(self.tmp, "pos.db")
         init_db(self.db)
         self.facade = DesktopFacade(self.db)
+        # 既有領域測試需要建檔；權限測試另建員工身分的 facade。
+        self.facade.session.login("admin")
         self.bridge = DesktopBridge(facade=self.facade)
 
     def invoke(self, action, payload=None):

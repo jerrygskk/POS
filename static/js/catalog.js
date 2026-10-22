@@ -59,6 +59,7 @@ window.PosPages["page-catalog"] = {
     };
   },
   computed: {
+    isAdmin() { return window.PosAuth.isAdmin; },
     modelOrder() {
       // 型號別名 → 全域排序索引(this.models 已依 pb.sort, m.sort 排好)
       const o = {};
@@ -72,6 +73,17 @@ window.PosPages["page-catalog"] = {
       const hasKeyword = Boolean((this.appliedQ || "").trim());
       return this.products.filter(p =>
         (p.variants || []).length > 0 || (!hasKeyword && p.active));
+    },
+  },
+  watch: {
+    isAdmin(isAdmin) {
+      if (!isAdmin && this.pending) { this.pending = false; this.reload(); }
+    },
+    pending(value) {
+      if (value && !this.isAdmin) {
+        this.pending = false;
+        this.showError("需要管理者權限");
+      }
     },
   },
   async mounted() {
@@ -94,7 +106,7 @@ window.PosPages["page-catalog"] = {
       const params = this.catalogParams();
       await this.guard(async () => {
         const [products, summary] = await Promise.all([
-          API.listCatalog(params), API.variantIssues(),
+          API.listCatalog(params), this.isAdmin ? API.variantIssues() : Promise.resolve({}),
         ]);
         if (token !== this._refreshToken) return;
         this.products = products;
@@ -131,6 +143,10 @@ window.PosPages["page-catalog"] = {
       await this.reload();
     },
     catalogParams() {
+      if (this.pending && !this.isAdmin) {
+        this.pending = false;
+        this.showError("需要管理者權限");
+      }
       return {q: this.q, include_inactive: this.includeInactive,
         category_id: this.fCategory, brand_id: this.fBrand,
         model_id: this.fModel, pending: this.pending};
@@ -164,19 +180,28 @@ window.PosPages["page-catalog"] = {
     async reload() {
       await this.refresh();
     },
-    editInSettings(p) { this.goPage("settings", { category_id: p.category_id }); },
+    requireAdmin() {
+      if (this.isAdmin) return true;
+      this.showError("需要管理者權限"); return false;
+    },
+    editInSettings(p) {
+      if (!this.requireAdmin()) return;
+      this.goPage("settings", { category_id: p.category_id });
+    },
     printLabel(p, v) { this.goPage("labels", { variant: Object.assign({}, v, { name: p.name }) }); },
     groupedVariants(p) {
       return window.groupVariantsByModel(p.variants, this.modelOrder);
     },
 
     async openVariantEditor(product, variant) {
+      if (!this.requireAdmin()) return;
       await this.openChildWindow({
         page: "variant_editor", context: {product, variant},
       });
     },
     // product 為 null=不指定產品(由子視窗自己選)
     async openAddVariant(product) {
+      if (!this.requireAdmin()) return;
       await this.openChildWindow({
         page: "variant_batch",
         context: product ? {
@@ -189,21 +214,27 @@ window.PosPages["page-catalog"] = {
     },
 
     async toggleProductActive(p) {
+      if (!this.requireAdmin()) return;
       await this.guardReload(() =>
         API.updateProduct(p.product_id, { active: p.active ? 0 : 1 }));
     },
     async deleteProduct(p) {
+      if (!this.requireAdmin()) return;
       if (!await PosConfirm.ask(`確定刪除商品「${p.name}」?刪除後無法復原。`,
                                 { danger: true })) return;
+      if (!this.requireAdmin()) return;
       await this.guardReload(() => API.deleteProduct(p.product_id));
     },
 
     async toggleVariantActive(p, v) {
+      if (!this.requireAdmin()) return;
       await this.guardReload(() =>
         API.updateVariant(v.variant_id, { active: v.active ? 0 : 1 }));
     },
     async deleteVariant(p, v) {
+      if (!this.requireAdmin()) return;
       if (!await PosConfirm.ask("確定刪除此款式?刪除後無法復原。", { danger: true })) return;
+      if (!this.requireAdmin()) return;
       await this.guardReload(() => API.deleteVariant(v.variant_id));
     },
 

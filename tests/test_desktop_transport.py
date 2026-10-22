@@ -111,7 +111,10 @@ class FrameworkNeutralRulesTests(unittest.TestCase):
 
 class PrintingContractTests(unittest.TestCase):
     def test_printing_action_rejects_invalid_payload_at_the_bridge(self):
-        result = DesktopBridge(facade=PrintingFacade("unused.db")).invoke(
+        from unittest.mock import Mock
+        facade = PrintingFacade("unused.db")
+        facade.session = Mock()
+        result = DesktopBridge(facade=facade).invoke(
             "printing.barcode", {"variant_id": 7, "barcode": "STORE-7", "copies": 0})
         self.assertEqual(result, {"ok": False, "error": {
             "code": "validation_error", "message": "張數必須是正整數"}})
@@ -172,7 +175,7 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
 const page = context.window.PosPages["page-stocktake"];
 const state = {
-  current: 3, scanCode: "ABC", detail: null,
+  current: 3, scanCode: "ABC", detail: {status:"open",items:[]},
   guard: async operation => operation()
 };
 (async () => {

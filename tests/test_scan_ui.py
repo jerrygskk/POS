@@ -92,6 +92,7 @@ function mk(name){const page=context.window.PosPages[name],s={showError:m=>error
  Object.assign(s,context.window.PosMixin.methods,page.data());for(const[k,v]of Object.entries(page.methods))s[k]=v.bind(s);return s}
 (async()=>{
  const checkout=mk("page-checkout"),stock=mk("page-stocktake"),receive=mk("page-receive"),labels=mk("page-labels");
+ stock.detail={status:"open",items:[]};
  for(const s of[checkout,stock,receive]){s.scanCode="SHARED";await s.onScan();assert.equal(s.scanCode,"")}
  labels.query="SHARED";await labels.submitInput();assert.equal(labels.query,"");assert.equal(labels.results.length,0);assert.equal(labels.searched,false);
  assert.equal(checkout.draft.cart.length,0);assert.equal(receive.draft.rows.length,0);assert.equal(labels.q.rows.length,0);assert.equal(follow.length,0);

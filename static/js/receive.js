@@ -8,6 +8,7 @@ window.PosPages["page-receive"] = {
   inject: ["showError", "goPage"],
   data() { return { scanCode: "", draft: window.PosReceiveDraft, employee: window.PosEmployee }; },
   computed: {
+    isAdmin() { return window.PosAuth.isAdmin; },
     totalQty() { return this.draft.rows.reduce((sum, row) => sum + row.qty, 0); },
   },
   mounted() { this.$refs.scan?.focus(); },
@@ -127,6 +128,9 @@ window.PosPages["page-receive"] = {
       } catch (e) { this.showError(e.message); }
       finally { this.draft.locked = false; this.$refs.scan?.focus(); }
     },
-    goSettings() { this.goPage("settings"); },
+    goSettings() {
+      if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
+      this.goPage("settings");
+    },
   },
 };

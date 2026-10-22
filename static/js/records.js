@@ -7,6 +7,7 @@ window.PosPages["page-records"] = {
     return { dateFrom: today, dateTo: today, payment: "", payments: [],
              sales: [], summary: null, expanded: null };
   },
+  computed: { isAdmin() { return window.PosAuth.isAdmin; } },
   async mounted() {
     await this.guard(async () => {
       this.payments = await API.listPayments();
@@ -23,6 +24,7 @@ window.PosPages["page-records"] = {
       });
     },
     async exportCsv() {
+      if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
       await this.guard(async () => {
         await API.exportSales({ date_from: this.dateFrom, date_to: this.dateTo,
           payment: this.payment || "" });

@@ -16,6 +16,7 @@ const API = {
   },
   async invoke(action, payload) {
     const allowed = new Set([
+      "auth.status", "auth.login", "auth.logout", "auth.touch", "auth.change_password",
       "categories.list", "categories.create", "categories.update", "categories.delete", "categories.sort", "categories.fields", "categories.set_common_fields", "categories.set_field", "categories.delete_field",
       "brands.list", "brands.create", "brands.update", "brands.delete", "brands.sort", "brands.set_categories",
       "phone_brands.list", "phone_brands.create", "phone_brands.update", "phone_brands.delete", "phone_brands.sort",
@@ -26,7 +27,7 @@ const API = {
       "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.update_editor", "variants.delete",
       "variants.batch_create", "variants.batch_precheck", "variants.field_usage", "variants.model_usage", "variants.activate", "variants.issues",
       "barcodes.scan", "stock.receive", "stock.detail",
-      "stocktake.create", "stocktake.list", "stocktake.detail", "stocktake.scan", "stocktake.set_counted", "stocktake.close",
+      "stocktake.create", "stocktake.list", "stocktake.detail", "stocktake.scan", "stocktake.set_counted", "stocktake.close", "stocktake.withdraw", "stocktake.approve", "stocktake.pending_count",
       "payments.list", "sales.checkout", "sales.list", "sales.summary", "sales.export_save", "printing.barcode", "printing.preview", "printing.check",
       "desktop.child_window.open", "desktop.child_window.context", "desktop.child_window.close"
     ]);
@@ -35,13 +36,23 @@ const API = {
     const result = await api.invoke(action, payload || {});
     if (result && result.ok) return result.data;
     const info = (result && result.error) || {};
+    if (info.code === "forbidden" && window.PosAuthOps)
+      window.PosAuthOps.refresh().catch(() => {});
     const err = new Error(info.message || "操作失敗");
-    const statuses = { validation_error: 422, not_found: 404, conflict: 409,
+    const statuses = { validation_error: 422, not_found: 404, conflict: 409, forbidden: 403,
       database_error: 500, internal_error: 500 };
     err.status = statuses[info.code] || 500;
     err.code = info.code; err.details = info.details;
     throw err;
   },
+  authStatus: () => API.invoke("auth.status", {}),
+  authLogin: password => API.invoke("auth.login", {password}),
+  authLogout: () => API.invoke("auth.logout", {}),
+  authTouch: () => API.invoke("auth.touch", {}),
+  changePassword: (old_password, new_password) => API.invoke("auth.change_password", {old_password, new_password}),
+  withdrawStocktake: session_id => API.invoke("stocktake.withdraw", {session_id}),
+  approveStocktake: session_id => API.invoke("stocktake.approve", {session_id}),
+  pendingStocktakeCount: () => API.invoke("stocktake.pending_count", {}),
   listCategories: p => API.invoke("categories.list", p), createCategory: p => API.invoke("categories.create", p),
   updateCategory: (id, fields) => API.invoke("categories.update", {id, fields}), deleteCategory: id => API.invoke("categories.delete", {id}),
   sortCategories: ids => API.invoke("categories.sort", {ids}), categoryFields: id => API.invoke("categories.fields", {id}),

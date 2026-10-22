@@ -4,14 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=217">
+<link rel="stylesheet" href="css/pos.css?v=218">
 </head>
 <body>
 <div id="app">
-  <nav>
-    <img class="nav-logo" src="img/logo.png?v=217" alt="膜型機品牌標誌">
+  <nav :class="{admin: auth.isAdmin}">
+    <img class="nav-logo" src="img/logo.png?v=218" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
-            :class="{active: page===key}" @click="goPage(key)">{{ label }}</button>
+            :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
+              v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
+              class="badge">{{ auth.pendingStocktakes }}</span></button>
+    <button style="margin-left:auto; white-space:nowrap" @click="toggleAdmin"><span
+      v-if="auth.isAdmin" class="badge">管理者</span>{{ auth.isAdmin ? '登出管理者' : '管理者登入' }}</button>
   </nav>
   <div class="error-bar" v-if="error">⚠ {{ error }}</div>
   <component :is="'page-' + page"></component>
@@ -124,8 +128,8 @@
            placeholder="掃描條碼進貨" class="scan-input">
   </div>
   <div v-if="draft.notFound" class="notice-bar">
-    查無條碼「{{ draft.notFound }}」。進貨不建立產品，請先至商品設定建立產品與子產品。
-    <button @click="goSettings">前往商品設定</button>
+    查無條碼「{{ draft.notFound }}」。進貨不建立產品，{{ isAdmin ? '請先至商品設定建立產品與子產品。' : '請管理者先建立產品與子產品。' }}
+    <button v-if="isAdmin" @click="goSettings">前往商品設定</button>
   </div>
   <table class="cart-table receive-table">
     <colgroup>
@@ -171,9 +175,9 @@
       <thead><tr><th>單號</th><th>開始時間</th><th>狀態</th><th>員工</th><th></th></tr></thead>
       <tbody><tr v-for="s in sessions" :key="s.session_id">
         <td>{{ s.session_id }}</td><td>{{ s.started_at }}</td>
-        <td>{{ s.status === 'open' ? '進行中' : '已結案' }}</td><td>{{ s.employee }}</td>
+        <td>{{ s.status === 'open' ? '進行中' : s.status === 'pending' ? '待核准' : '已結案' }}</td><td>{{ s.employee }}</td>
         <td><button v-if="s.status==='open'" @click="enter(s.session_id)">續盤</button>
-            <button v-else @click="enter(s.session_id)">檢視</button></td>
+            <button v-else @click="enter(s.session_id)">{{ s.status==='pending' && isAdmin ? '審核' : '檢視' }}</button></td>
       </tr></tbody>
     </table>
   </div>
@@ -184,14 +188,20 @@
              :disabled="detail.status!=='open'">
       <button @click="current=null; detail=null; reload()">返回列表</button>
       <button class="primary" v-if="detail.status==='open'" @click="close">結案</button>
+      <button class="primary" v-if="detail.status==='pending' && isAdmin" @click="approve">核准</button>
+      <button v-if="detail.status==='pending'" @click="withdraw">抽回修改</button>
     </div>
+    <div v-if="detail.status==='pending' && !isAdmin" class="notice-bar">等待管理者核准</div>
+    <div v-if="detail.status==='pending' && isAdmin" class="notice-bar">實盤量僅供修正原盤點時的數量，請勿填入目前重新清點的數量。</div>
+    <div v-if="recountCount" class="notice-bar">有 {{ recountCount }} 項需重新清點</div>
     <table>
       <thead><tr><th>商品</th><th>屬性</th><th>系統量</th><th>實盤量</th><th>差異</th></tr></thead>
-      <tbody><tr v-for="it in detail.items" :key="it.variant_id">
+      <tbody><tr v-for="it in detail.items" :key="it.variant_id" :class="{neg: it.needs_recount}">
         <td>{{ it.name }}</td><td>{{ attrText(it) }}</td>
         <td>{{ it.system_qty }}</td>
         <td><input type="number" v-model.number="it.counted_qty" min="0" class="w80"
-                   :disabled="detail.status!=='open'" @change="setCounted(it)"></td>
+                   :disabled="!canEditCounted" @change="setCounted(it)">
+          <button v-if="it.needs_recount && canEditCounted" class="btn-sm" @click="setCounted(it)">確認</button></td>
         <td :class="{neg: it.diff < 0}">{{ it.diff > 0 ? '+' + it.diff : it.diff }}</td>
       </tr></tbody>
     </table>
@@ -206,7 +216,7 @@
     <select v-model="payment"><option value="">全部付款方式</option>
       <option v-for="p in payments" :key="p">{{ p }}</option></select>
     <button class="primary" @click="reload">查詢</button>
-    <button @click="exportCsv">匯出 CSV</button>
+    <button v-if="isAdmin" @click="exportCsv">匯出 CSV</button>
   </div>
   <div v-if="summary" class="pay-panel">
     <div>{{ dateFrom }} 小結:{{ summary.count }} 筆,共 {{ summary.total }} 元</div>
@@ -253,8 +263,8 @@
            placeholder="搜尋名稱、規格或條碼">
     <button class="primary" @click="reload">查詢</button>
     <label class="chk"><input type="checkbox" v-model="includeInactive" @change="reload"> 顯示已停用</label>
-    <label class="chk"><input type="checkbox" v-model="pending" @change="reload"> 待處理<span v-if="pendingCount" class="badge">{{ pendingCount }}</span></label>
-    <button class="catalog-add-btn" @click="openAddVariant(null)">新增</button>
+    <label v-if="isAdmin" class="chk"><input type="checkbox" v-model="pending" @change="reload"> 待處理<span v-if="pendingCount" class="badge">{{ pendingCount }}</span></label>
+    <button v-if="isAdmin" class="catalog-add-btn" @click="openAddVariant(null)">新增</button>
   </div>
   <div class="catalog-table-scroll">
   <table class="sub catalog-table">
@@ -276,12 +286,12 @@
           <td colspan="6" class="catalog-product-info">
             <strong>{{ p.name }}</strong>
             <span v-if="!p.active" class="catalog-inactive-badge">已停用</span>
-            <button v-if="p.active" class="btn-sm" @click="openAddVariant(p)">新增款式</button>
+            <button v-if="isAdmin && p.active" class="btn-sm" @click="openAddVariant(p)">新增款式</button>
           </td>
           <td colspan="2" class="catalog-product-actions">
-            <button class="btn-sm" @click="editInSettings(p)">修改規格</button>
-            <button class="btn-sm" @click="toggleProductActive(p)">{{ p.active ? '停用' : '啟用' }}</button>
-            <button class="btn-sm" @click="deleteProduct(p)">刪除</button>
+            <button v-if="isAdmin" class="btn-sm" @click="editInSettings(p)">修改規格</button>
+            <button v-if="isAdmin" class="btn-sm" @click="toggleProductActive(p)">{{ p.active ? '停用' : '啟用' }}</button>
+            <button v-if="isAdmin" class="btn-sm" @click="deleteProduct(p)">刪除</button>
           </td>
         </tr>
         <tr v-for="{ v, showModel, rowspan } in groupedVariants(p)" :key="v.variant_id"
@@ -306,17 +316,17 @@
               <button v-if="v.active && !(v.issues && v.issues.length)"
                       class="btn-sm" @click="printLabel(p, v)">印標籤</button>
             </span>
-            <button v-else class="btn-sm" @click="openVariantEditor(p, v)">管理</button>
+            <button v-else-if="isAdmin" class="btn-sm" @click="openVariantEditor(p, v)">管理</button>
           </td>
           <td>{{ v.price === null ? '—' : v.price }}</td>
           <td>{{ v.effective_price === null ? '未定價' : v.effective_price }}</td>
           <td>{{ v.issues && v.issues.length ? '待處理' : (v.active ? '啟用' : '已停用') }}</td>
           <td>
-            <template v-if="v.issues && v.issues.length">
+            <template v-if="isAdmin && v.issues && v.issues.length">
               <button class="btn-sm" @click="openVariantEditor(p, v)">編輯</button>
               <button class="btn-sm" @click="deleteVariant(p, v)">刪除</button>
             </template>
-            <template v-else>
+            <template v-else-if="isAdmin">
               <button class="btn-sm" @click="openVariantEditor(p, v)">編輯</button>
               <button class="btn-sm" @click="toggleVariantActive(p, v)">{{ v.active ? '停用' : '啟用' }}</button>
               <button class="btn-sm" @click="deleteVariant(p, v)">刪除</button>
@@ -334,7 +344,7 @@
   <div v-else-if="displayVariantCount === 0 && !inactiveLookupFailed &&
                   (includeInactive || inactiveMatchCount === 0)"
        class="done-msg catalog-empty-result">
-    查無符合的商品，請確認關鍵字或至設定新增。
+    {{ isAdmin ? '查無符合的商品，請確認關鍵字或至設定新增。' : '查無符合的商品，請確認關鍵字。' }}
   </div>
   </div>
 </div>
@@ -365,6 +375,10 @@
       <div class="cat-item" :class="{active: section==='models'}"
            @click="selectSection('models')">
         <span class="cat-name">手機品牌與型號</span>
+      </div>
+      <div class="cat-item" :class="{active: section==='password'}"
+           @click="selectSection('password')">
+        <span class="cat-name">管理者密碼</span>
       </div>
     </aside>
 
@@ -447,6 +461,17 @@
     </section>
     <section class="cat-detail" v-else-if="section==='category'">
       <div class="hint">請於左側選擇或新增商品種類。</div>
+    </section>
+
+    <section class="cat-detail" v-else-if="section==='password'">
+      <div class="card-head"><h3>管理者密碼</h3></div>
+      <div v-if="pageError && errorScope==='password'" class="error-bar section-bar">⚠ {{ pageError }}</div>
+      <div class="create-form">
+        <label>舊密碼 <input type="password" v-model="passwordForm.old" autocomplete="current-password"></label>
+        <label>新密碼 <input type="password" v-model="passwordForm.next" autocomplete="new-password"></label>
+        <label>確認新密碼 <input type="password" v-model="passwordForm.confirm" autocomplete="new-password"></label>
+        <button type="button" class="primary" @click="changePassword">變更密碼</button>
+      </div>
     </section>
 
     <!-- 基礎資料:廠牌 -->
@@ -588,24 +613,25 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=217"></script>
-<script src="js/api.js?v=217"></script>
-<script src="js/confirm.js?v=217"></script>
-<script src="js/pos_shared.js?v=217"></script>
-<script src="js/catalogfields.js?v=217"></script>
-<script src="js/checkout.js?v=217"></script>
-<script src="js/receive.js?v=217"></script>
-<script src="js/stocktake.js?v=217"></script>
-<script src="js/records.js?v=217"></script>
-<script src="js/catalog.js?v=217"></script>
-<script src="js/sortable.js?v=217"></script>
-<script src="js/combobox.js?v=217"></script>
-<script src="js/optpicker.js?v=217"></script>
-<script src="js/modelpicker.js?v=217"></script>
-<script src="js/employeepicker.js?v=217"></script>
-<script src="js/attrfields.js?v=217"></script>
-<script src="js/settings.js?v=217"></script>
-<script src="js/labels.js?v=217"></script>
-<script src="js/app.js?v=217"></script>
+<script src="js/vue.global.prod.js?v=218"></script>
+<script src="js/api.js?v=218"></script>
+<script src="js/confirm.js?v=218"></script>
+<script src="js/auth.js?v=218"></script>
+<script src="js/pos_shared.js?v=218"></script>
+<script src="js/catalogfields.js?v=218"></script>
+<script src="js/checkout.js?v=218"></script>
+<script src="js/receive.js?v=218"></script>
+<script src="js/stocktake.js?v=218"></script>
+<script src="js/records.js?v=218"></script>
+<script src="js/catalog.js?v=218"></script>
+<script src="js/sortable.js?v=218"></script>
+<script src="js/combobox.js?v=218"></script>
+<script src="js/optpicker.js?v=218"></script>
+<script src="js/modelpicker.js?v=218"></script>
+<script src="js/employeepicker.js?v=218"></script>
+<script src="js/attrfields.js?v=218"></script>
+<script src="js/settings.js?v=218"></script>
+<script src="js/labels.js?v=218"></script>
+<script src="js/app.js?v=218"></script>
 </body>
 </html>

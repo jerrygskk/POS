@@ -2,7 +2,7 @@
 import copy
 import re
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from lib.application_errors import ConflictError, NotFoundError, ValidationError
 from lib.desktop_application import DesktopFacade
@@ -150,6 +150,9 @@ ACTION_CONTRACTS = {
     "stocktake.scan": schema([I("session_id", required=True), I("variant_id", required=True), I("qty", required=True, constraint=">0")], notes=("Desktop contract requires qty.",)),
     "stocktake.set_counted": schema([I("session_id", required=True), I("variant_id", required=True), I("counted_qty", required=True, constraint=">=0")]),
     "stocktake.close": schema([I("session_id", required=True)]),
+    "stocktake.withdraw": schema([I("session_id", required=True)]),
+    "stocktake.approve": schema([I("session_id", required=True)]),
+    "stocktake.pending_count": schema([]),
     "payments.list": schema([]),
     "sales.checkout": schema([S("payment", required=True, constraint="must be present in Setting.payments", blank="reject"), I("order_discount", default=0, constraint=">=0"), I("paid", default=0, constraint=">=0"), I("employee", required=True, constraint="1..6"), field("items", "list[ItemIn]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), I("items[].qty", required=True, constraint=">0"), I("items[].unit_price", required=True, constraint=">=0"), I("items[].discount", default=0, constraint="0..qty*unit_price")]),
     "sales.list": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")]),
@@ -192,6 +195,9 @@ TARGET_BY_ACTION = {
     "stocktake.scan":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "stocktake.set_counted":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "stocktake.close":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
+    "stocktake.withdraw":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
+    "stocktake.approve":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
+    "stocktake.pending_count":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "payments.list":"lib.sales_service.SalesFacade._prepare_payload -> _strict_mapping",
     "sales.checkout":"lib.sales_service.SalesFacade._prepare_payload -> _checkout_payload",
     "sales.list":"lib.sales_service.SalesFacade._prepare_payload -> _filters",
@@ -233,6 +239,7 @@ def validate_retired_source_metadata(contracts):
                     f"wrong retired source for {action}.{path}: expected {wanted!r}, got {source!r}")
 
 FRONTEND_ACTIONS = set(ACTION_CONTRACTS)
+AUTH_ACTIONS = {"auth.status", "auth.login", "auth.logout", "auth.touch", "auth.change_password"}
 DESKTOP_WINDOW_ACTIONS = {
     "desktop.child_window.open",
     "desktop.child_window.context",
@@ -466,6 +473,7 @@ class ActionContractTests(FacadeTestCase):
             "variants.batch_precheck":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"precheck-new","source":"store"}]}]},
             "barcodes.scan":{"code":"contract-1"}, "stock.receive":{"employee":1,"items":[{"variant_id":self.variant_id,"qty":1}]}, "stock.detail":{"variant_id":self.variant_id},
             "stocktake.create":{"employee":1}, "stocktake.list":{}, "stocktake.detail":{"session_id":self.session_id}, "stocktake.scan":{"session_id":self.session_id,"variant_id":self.variant_id,"qty":1}, "stocktake.set_counted":{"session_id":self.session_id,"variant_id":self.variant_id,"counted_qty":1}, "stocktake.close":{"session_id":self.session_id},
+            "stocktake.withdraw":{"session_id":self.session_id}, "stocktake.approve":{"session_id":self.session_id}, "stocktake.pending_count":{},
             "payments.list":{}, "sales.checkout":{"payment":"現金","paid":100,"employee":1,"items":[{"variant_id":self.variant_id,"qty":1,"unit_price":100}]}, "sales.list":{}, "sales.summary":{}, "sales.export_save":{}, "printing.barcode":{"variant_id":self.variant_id,"barcode":"contract-1","copies":1},
             "printing.preview":{"variant_id":self.variant_id,"barcode":"contract-1"},
             "printing.check":{"items":[{"variant_id":self.variant_id,"barcode":"contract-1"}]},
@@ -490,8 +498,8 @@ class ActionContractTests(FacadeTestCase):
         direct = set().union(self.facade.settings.ACTIONS, self.facade.products.ACTIONS,
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
                              self.facade.stocktake.ACTIONS, self.facade.printing.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 69)
-        self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS)
+        self.assertEqual(len(ACTION_CONTRACTS), 72)
+        self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS | AUTH_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
         self.assertEqual(set(TARGET_BY_ACTION), FRONTEND_ACTIONS | {"sales.export"})
@@ -648,6 +656,10 @@ class ActionContractTests(FacadeTestCase):
 
     def assert_valid_action(self, action):
         contract = ACTION_CONTRACTS[action]
+        if action in {"stocktake.create", "stocktake.approve", "stocktake.withdraw"}:
+            self.invoke("stocktake.close", {"session_id": self.session_id})
+            if action == "stocktake.create":
+                self.invoke("stocktake.approve", {"session_id": self.session_id})
         if contract["valid_error"] == "validation_error":
             with self.assertRaisesRegex(ValidationError, "尚未支援"):
                 self.invoke(action, self.valid_payload(action))
@@ -820,7 +832,7 @@ class ActionContractTests(FacadeTestCase):
 
     def test_desktop_bridge_export_save_forwards_payload_unchanged(self):
         class ExportFacade:
-            def __init__(self): self.calls = []
+            def __init__(self): self.calls = []; self.session = Mock()
             def invoke(self, action, payload):
                 self.calls.append((action, payload)); return {"filename":"sales.csv","content":"csv"}
         class Window:

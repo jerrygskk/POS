@@ -1,7 +1,8 @@
 import logging
 import math
 
-from lib.application_errors import ApplicationError, InternalError
+from lib.application_errors import ApplicationError, InternalError, ValidationError
+from lib.auth import ADMIN_ACTIONS, PASSIVE_ACTIONS
 
 MAX_DETAILS_DEPTH = 32
 
@@ -31,26 +32,36 @@ class DesktopBridge:
         self._child_window = child_window
 
     def invoke(self, action, payload=None):
+        return self._respond(lambda: self._invoke(action, payload))
+
+    def _invoke(self, action, payload):
+        if not isinstance(action, str):
+            raise ValidationError("不支援的操作")
+        if action in ADMIN_ACTIONS and self._facade is None:
+            raise InternalError("桌面服務尚未初始化")
+        if self._facade is not None:
+            if action not in PASSIVE_ACTIONS:
+                self._facade.session.touch()
+            # 這些操作可能先由 bridge 攔走，必須先檢查才能開窗或顯示匯出對話框。
+            if action in ADMIN_ACTIONS:
+                self._facade.session.require_admin()
         if action == "desktop.child_window.open":
-            return self._respond(lambda: self._require_child_window().open(
-                {} if payload is None else payload))
+            return self._require_child_window().open({} if payload is None else payload)
         if action == "desktop.child_window.context":
-            return self._respond(lambda: self._require_child_window().context())
+            return self._require_child_window().context()
         if action == "desktop.child_window.close":
             data = {} if payload is None else payload
-            return self._respond(lambda: self._require_child_window().close(
-                bool(data.get("saved", False))))
+            return self._require_child_window().close(bool(data.get("saved", False)))
         if action == "variants.update_editor" and self._child_window is not None:
-            return self._respond(lambda: self._child_window.update_editor(
-                {} if payload is None else payload))
+            return self._child_window.update_editor({} if payload is None else payload)
         if self._facade is None:
-            return self._respond(lambda: (_ for _ in ()).throw(
-                InternalError("桌面服務尚未初始化")))
+            raise InternalError("桌面服務尚未初始化")
         if action == "sales.export_save":
-            return self._respond(lambda: self._export_sales(payload))
-        return self._respond(
-            lambda: self._facade.invoke(action, {} if payload is None else payload)
-        )
+            return self._export_sales(payload)
+        result = self._facade.invoke(action, {} if payload is None else payload)
+        if action == "auth.logout" and self._child_window is not None:
+            self._child_window.close(saved=False)
+        return result
 
     def _require_child_window(self):
         if self._child_window is None:
@@ -66,6 +77,8 @@ class DesktopBridge:
         if not selected:
             return {"cancelled": True}
         path = selected[0] if isinstance(selected, (list, tuple)) else selected
+        # 儲存對話框可能開很久，實際寫檔前重新確認身分仍有效。
+        self._facade.session.require_admin()
         try:
             self._file_writer(path, exported["content"])
         except Exception:

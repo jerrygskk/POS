@@ -59,13 +59,38 @@ window.addEventListener("pos-child-window-closed", () => {
 document.addEventListener("DOMContentLoaded", () => {
   const app = Vue.createApp({
     data() {
-      return { page: "checkout", pageContext: null, error: "", pages: [
-        ["checkout", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"],
-        ["records", "銷售紀錄"], ["catalog", "商品資料庫"], ["labels", "標籤列印"], ["settings", "設定"]] };
+      return { page: "checkout", pageContext: null, error: "", auth: window.PosAuth };
     },
+    computed: {
+      pages() { return [
+        ["checkout", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"],
+        ["records", "銷售紀錄"], ["catalog", "商品資料庫"], ["labels", "標籤列印"], ["settings", "設定"]]
+        .filter(([key]) => key !== "settings" || this.auth.isAdmin); },
+    },
+    watch: {
+      "auth.isAdmin"(isAdmin) {
+        if (!isAdmin && this.page === "settings") this.goPage("checkout");
+      },
+    },
+    mounted() {
+      this.guard(() => window.PosAuthOps.refresh());
+      this._authPoll = setInterval(() => {
+        if (this.auth.isAdmin) this.guard(() => window.PosAuthOps.refresh());
+      }, 30000);
+    },
+    unmounted() { clearInterval(this._authPoll); },
     methods: {
       showError(msg) { this.error = msg; setTimeout(() => this.error = "", 5000); },
-      goPage(name, context = null) { this.error = ""; this.pageContext = context; this.page = name; },
+      goPage(name, context = null) {
+        if (name === "settings" && !this.auth.isAdmin) {
+          this.showError("需要管理者權限"); return;
+        }
+        this.error = ""; this.pageContext = context; this.page = name;
+        this.guard(() => window.PosAuthOps.refresh());
+      },
+      toggleAdmin() {
+        this.guard(() => this.auth.isAdmin ? window.PosAuthOps.logout() : window.PosAuthOps.login());
+      },
     },
     provide() { return {
       showError: (m) => this.showError(m), goPage: (n, c) => this.goPage(n, c),

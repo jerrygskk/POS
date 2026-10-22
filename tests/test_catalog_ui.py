@@ -19,7 +19,7 @@ class CatalogUiRuntimeTests(unittest.TestCase):
     def _run(self, body):
         script = r'''
 const fs = require("fs"), vm = require("vm");
-const context = {window: {PosPages: {}, PosDesktopLock: {lock(){}, unlock(){}}},
+const context = {window: {PosPages: {}, PosAuth:{isAdmin:true,pendingStocktakes:0}, PosDesktopLock: {lock(){}, unlock(){}}},
   API: {}, console, setTimeout, clearTimeout};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);  // pos_shared.js
@@ -95,13 +95,14 @@ done();
 const fs = require("fs"), vm = require("vm");
 let root, mounted;
 const app = {mixin(){},component(){},mount(){ mounted = true; }};
-const context = {window:{addEventListener(){}},
+const context = {window:{addEventListener(){},PosAuth:{isAdmin:true},PosAuthOps:{refresh:async()=>{}}},
   document:{addEventListener:(name, callback) => callback()},
   Vue:{createApp: options => {root = options; return app;}},
   console, setTimeout, clearTimeout};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
 const s = root.data();
+Object.assign(s,{guard:async f=>f()});
 for (const [name, method] of Object.entries(root.methods)) s[name] = method.bind(s);
 const provided = root.provide.call(s);
 s.error = "old";
@@ -538,7 +539,7 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertIn('<col class="catalog-col-spec">', self.catalog)
         self.assertIn('class="catalog-variant-row"', self.catalog)
         self.assertIn(
-            '<button class="btn-sm" @click="editInSettings(p)">修改規格</button>',
+            '<button v-if="isAdmin" class="btn-sm" @click="editInSettings(p)">修改規格</button>',
             self.catalog,
         )
         expected = (
@@ -652,9 +653,9 @@ class CatalogTemplateContractTests(unittest.TestCase):
     def test_add_variant_entry_is_only_for_active_products_and_uses_ui_term(self):
         # 新增款式一律開子視窗:入口在產品列名稱後(僅啟用中產品),工具列右端為「新增」
         info = self.catalog.split('class="catalog-product-info">', 1)[1].split("</td>", 1)[0]
-        self.assertIn('<button v-if="p.active" class="btn-sm" @click="openAddVariant(p)">新增款式</button>', info)
+        self.assertIn('<button v-if="isAdmin && p.active" class="btn-sm" @click="openAddVariant(p)">新增款式</button>', info)
         self.assertEqual(self.catalog.count('@click="openAddVariant(p)"'), 1)
-        self.assertIn('<button class="catalog-add-btn" @click="openAddVariant(null)">新增</button>', self.catalog)
+        self.assertIn('<button v-if="isAdmin" class="catalog-add-btn" @click="openAddVariant(null)">新增</button>', self.catalog)
         self.assertNotIn("addingFor", self.catalog)
         self.assertNotIn("newVariant", self.catalog)
         self.assertIn("新增款式", self.catalog)

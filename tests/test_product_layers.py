@@ -13,6 +13,9 @@ class TestProductLayers(ConnTestCase):
         super().setUp()
         self.conn.close()
         self.facade = ProductFacade(self.db)
+        from lib.auth import AdminSession
+        self.facade.session = AdminSession(self.db)
+        self.facade.session.login("admin")
         self.bridge = DesktopBridge(logger=logging.getLogger(__name__), facade=self.facade)
         conn = get_conn(self.db)
         self.category_id = conn.execute(

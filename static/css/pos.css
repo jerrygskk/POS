@@ -43,6 +43,9 @@ nav button:hover { background: var(--primary-active); }
 nav button:active { background: var(--primary-active); }
 nav button.active, nav button.active:hover, nav button.active:active {
   background: var(--surface); color: var(--primary-hover); font-weight: 600; }
+nav.admin { background: var(--accent-soft); }
+nav.admin button { color: var(--primary-active); }
+nav.admin button:hover, nav.admin button:active { background: var(--accent); }
 
 /* 錯誤條與提醒條同一種外觀(圓角方塊＋左側粗線),只有顏色不同;
    原本錯誤是整條滿版紅底白字,與頁內提醒完全兩種語言。 */

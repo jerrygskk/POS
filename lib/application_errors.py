@@ -18,6 +18,11 @@ class NotFoundError(ApplicationError):
     default_message = "找不到指定資料"
 
 
+class ForbiddenError(ApplicationError):
+    code = "forbidden"
+    default_message = "需要管理者權限"
+
+
 class ConflictError(ApplicationError):
     code = "conflict"
     default_message = "資料狀態衝突"

@@ -1,5 +1,7 @@
 import logging
+from collections.abc import Mapping
 
+from lib.auth import ADMIN_ACTIONS, AdminSession
 from lib.desktop_bridge import DesktopBridge
 from lib.settings_service import SettingsFacade
 from lib.product_service import ProductFacade
@@ -16,16 +18,21 @@ MAIN_WINDOW_SIZE = (1124, 768)
 
 class DesktopFacade:
     def __init__(self, db_path):
+        self.session = AdminSession(db_path)
         self.settings = SettingsFacade(db_path)
         self.products = ProductFacade(db_path)
         self.stock = StockFacade(db_path)
         self.sales = SalesFacade(db_path)
-        self.stocktake = StocktakeFacade(db_path)
+        self.stocktake = StocktakeFacade(db_path, session=self.session)
         self.printing = PrintingFacade(db_path)
 
     def invoke(self, action, payload=None):
         if not isinstance(action, str):
             raise ValidationError("不支援的操作")
+        if action in ADMIN_ACTIONS:
+            self.session.require_admin()
+        if action.startswith("auth."):
+            return self._auth(action, {} if payload is None else payload)
         if action in ProductFacade.ACTIONS:
             return self.products.invoke(action, payload)
         if action in StockFacade.ACTIONS:
@@ -37,6 +44,28 @@ class DesktopFacade:
         if action in PrintingFacade.ACTIONS:
             return self.printing.invoke(action, payload)
         return self.settings.invoke(action, payload)
+
+    def _auth(self, action, payload):
+        rules = {
+            "auth.status": set(), "auth.login": {"password"},
+            "auth.logout": set(), "auth.touch": set(),
+            "auth.change_password": {"old_password", "new_password"},
+        }
+        if action not in rules or not isinstance(payload, Mapping):
+            raise ValidationError("不支援的身分操作")
+        keys = rules[action]
+        if set(payload) != keys or any(not isinstance(payload[key], str) for key in keys):
+            raise ValidationError("身分操作資料格式錯誤")
+        if action == "auth.login":
+            if not self.session.login(payload["password"]):
+                raise ValidationError("密碼錯誤")
+        elif action == "auth.logout":
+            self.session.logout()
+        elif action == "auth.touch":
+            self.session.touch()
+        elif action == "auth.change_password":
+            self.session.change_password(payload["old_password"], payload["new_password"])
+        return {"is_admin": self.session.is_admin()}
 
 
 class DesktopApplication:
