@@ -44,11 +44,12 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `static/variant_batch.html` | 新增款式子視窗頁面（`variant_batch_window.js` 外殼＋組合輸入區與批次工作表樣板） |
 | `static/js/variant_batch_logic.js` | 新增款式的純邏輯（組合展開、算式、條碼展開規則、欄寬計算、預檢結果分流）；不碰 API，可單獨以 Node 測試 |
 | `static/field_editor.html` | 規格選項子視窗頁面（`field_editor.js`；設定頁自訂規格列的「✎ 選項」由此開窗，只管選項清單與建檔預設帶入值） |
-| `static/js/pos_shared.js` | 主視窗與子視窗共用的全域 mixin（`guard`／`guardReload`／`attrText`） |
+| `static/js/pos_shared.js` | 主視窗與子視窗共用的全域 mixin（`guard`／`guardReload`／`attrText`）與掃描解析 `PosScan`（同一條碼對應多個子產品時跳選擇品項） |
 | `static/js/optpicker.js` | 規格值候選選取器 `opt-picker`／`tag-selector`（前排常用值＋搜尋＋當場新增；檔頭寫明三種輸入公版的分工） |
 | `static/js/combobox.js` | 可搜尋下拉 `combo-box`（從既有主檔挑一筆，可新增未收錄的值） |
 | `static/js/sortable.js` | 拖拉排序清單 `sortable-list`（⠿ 拖曳＋序號格搬位；`auto-save` 決定拖完直接寫入或交給該區塊的儲存鈕，`disabled` 供清單被過濾時停用排序） |
-| `static/js/confirm.js` | 確認／通知視窗公版 `PosConfirm.ask()`／`notify()`（取代瀏覽器內建 confirm／alert） |
+| `static/js/confirm.js` | 確認／通知視窗公版 `PosConfirm.ask()`／`notify()`／`input()`／`choose()`（取代瀏覽器內建 confirm／alert；`choose` 為清單選擇） |
+| `static/js/employeepicker.js` | 員工代號 1～6 選擇元件 `employee-picker`（收銀／進貨／盤點共用同一個選擇） |
 | `static/css/dialog-theme.css` | 子視窗對話框外觀（`.dialog-*` 公版，沿用 §2 UI 風格色票） |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
 | `tools/make_standard_db.py` | 產生標準資料庫:最新格式＋商品與設定,不含營業紀錄(見 §2 標準資料庫) |
@@ -62,7 +63,11 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 - **規格值正規化**:變體規格不再存 JSON,改由 `VariantAttribute(variant_id, field_id, option_id?, text_value?)` 關聯表承載(`CHECK` 約束 `option_id`/`text_value` 恰一非 NULL:select 欄存 `option_id`、text 欄存 `text_value`)。Desktop action 以 `attributes:{欄名:值}` dict 進出，讀寫由 `lib/product_data.py` 的 `set_variant_attributes`/`attrs_by_variant` 在 dict 與關聯列間轉換（讀取一次 JOIN 撈齊避免 N+1）。因此**改欄名/改選項值即生效**,不需回掃變體;寫入時 select 值查無對應選項會回傳 validation error。
 - **規格選項生命週期**:`AttributeOption.active` 只控制新增選單可見性。有 `VariantAttribute` 引用時刪除會清除預設選項與限定型號後設為停用,保留既有商品關聯;0 使用中才硬刪除。設定頁重新加入同欄位、同值的停用選項時會恢復原 `option_id` 並重新啟用;商品建檔流程自動補選項時不會重新啟用。`options.list` 的 `usage_count` 為引用該 `option_id` 的 distinct `variant_id` 數量。
 - **選項限定型號**:`OptionModel(option_id, model_id)` 記錄選項只在特定型號出現(特別色)。`options.list` 搭配 `field_id`／`model_ids` 過濾時回傳「未綁任何型號的 ∪ 綁定含任一給定型號的」聯集,僅過濾建檔下拉,不回溯既有變體;未提供 `model_ids` 時回全部。`options.set_models` 以 `id`／`model_ids` 全量替換限定型號清單(空清單=改回通用)。
-- **條碼混合**:`source` 分 `factory`(廠商既有)與 `store`(店內自取碼,`TL` + 流水號,`Setting.next_store_barcode` 純計數、刪除不回收);手動輸入 `TL` 開頭一律 422(系統保留字頭)。
+- **條碼混合與共用**:`source` 分 `factory`(廠商既有)與 `store`(店內自取碼,`TL` + 流水號,`Setting.next_store_barcode` 純計數、刪除不回收);手動輸入 `TL` 開頭一律 422(系統保留字頭)。`Barcode` 主鍵為 `(barcode, variant_id)`:**原廠碼可被多個子產品共用**(廠商常把同一碼用在不同顏色),**店內碼全域唯一**(部分唯一索引 `idx_barcode_store` 加應用層檢查——非 TL 的號碼也可能存成 `store`,原廠碼不得與任何店內碼撞號),同一子產品不得重複掛同碼。
+- **共用原廠碼必配店內碼**:原廠碼被 2 個以上子產品持有時,每個持有者都要有一組店內碼,由 `lib/product_rules.py:ensure_store_codes_for_shared` 補發;建檔、修改款式(含刪掉唯一店內碼後存檔)、批次建檔、Excel 匯入都會呼叫。⚠️ 必須在該次操作**所有條碼寫完之後**才呼叫,不可每插一筆就呼叫:同一筆自己勾的「配自取碼」還沒寫入就先被補一組,會變成兩組店內碼。
+- **掃描解析**:`barcodes.scan` 回傳 `{matches:[...]}`(依品名、款式編號排序;每筆含 `status` 為 active／inactive／issue、`store_barcode`、`label_barcode`)。前端一律經 `window.PosScan`(`pos_shared.js`):一筆直接帶入,多筆跳 `PosConfirm.choose`「請選擇品項」;收銀傳 `sellableOnly`,停用／待處理品不可選(只有一筆時照舊帶入,結帳由後端擋);按取消時各頁清空掃描框。
+- **操作員工代號**:`Sale`、`StockMovement`(進貨列)、`StocktakeSession` 的 `employee` 只接受 1～6,結帳／進貨／開盤點單後端一律必填(`lib/product_rules.py:require_employee`)。前端 `employee-picker` 三頁共用同一個選擇,切頁與結帳後保留、關程式清空;未選員工時按鈕**不反灰**,按下顯示「請先選擇員工代號」(反灰的按鈕點了沒反應,店員看不到原因)。
+- **進貨頁批次**:清單 `window.PosReceiveDraft` 放元件外(切頁保留、關程式清空);掃一下加一列,同子產品再掃數量 +1 並移到最上;按「確認進貨」以 `stock.receive {employee, items:[{variant_id, qty}]}` 一次寫入,同一交易全有全無。⚠️ 確認／清空的確認視窗開啟到流程結束期間**鎖定清單**(`locked`),掃描、改數量、刪列、加標籤、重按一律在方法內擋;另有**世代編號** `generation`,每次確認／清空流程開始就 +1,掃描送出前記下、回來時編號不同就拒絕並提示重掃——只看鎖定擋不住「入庫完成、解鎖後才回來的舊掃描」,它會被加進下一批而重複入庫。送出的是確認當下的快照,送出前再驗員工與清單;數量欄不用 `v-model`(會直接改資料,方法擋不住)。
 - **自取碼交易語意**:`lib/product_rules.py:next_store_barcode` 使用呼叫端的同一條資料庫連線更新計數器,由呼叫端決定 commit;商品或條碼建立失敗造成 transaction rollback 時,計數器亦一併回復。
 - **關鍵輸入驗證**:進貨數量與盤點掃描數量須大於 0,盤點實數不得小於 0;結帳單品折扣不可超過品項小計、總額不得為負,付款方式須存在設定清單。規格欄型別統一由 `lib/product_rules.py` 驗證。
 - **盤點結案防重**:結案先以 `status='open'` 條件原子更新盤點單;不存在回 404,已結案回 409,避免重複產生 `adjust` 庫存異動。
@@ -222,6 +227,12 @@ product 層級失敗(產品不存在或已停用)仍照 `_require_product()` rai
 前端據此標到列與欄,不解析訊息字串。codes:`unknown_field`／
 `select_multi_value`／`missing_required`／`missing_models`／`model_not_found`／
 `store_prefix_barcode`／`duplicate_signature`／`duplicate_barcode`／`missing_barcode`。
+
+**原廠碼重複不是錯誤**:`duplicate_barcode` 只代表「與店內碼撞號」(會擋)。原廠碼與同批
+或既有資料重複時,預檢每列另回 `notices`(`{code:"shared_barcode"}`),畫面在原廠碼後顯示
+紅字「(已重複)」,不擋建立,建立後依「共用原廠碼必配店內碼」補碼。⚠️ 判定要**先統計整批
+號碼再逐列標記**,同批第一筆也要標;邊走邊判只會標到後面那筆。修改款式視窗加入原廠碼時
+以 `barcodes.scan` 查是否已被他人持有,同樣顯示「(已重複)」(查詢期間擋儲存,避免漏存)。
 
 **每筆至少要有一組條碼**:沒有原廠條碼就得勾「配自取碼」,否則回 `missing_barcode`
 (顯示在條碼欄)。做成**軟性錯誤**而非結構性錯誤——嚴格批次是全有全無,等於擋住;
@@ -385,18 +396,20 @@ v15 `_mig_split_shared_fields` 拆其餘所有跨種類共用欄(顏色、框色
 ⚠️ 畫字必須 `draw.fontmode = "1"` 關閉灰階平滑:熱感列印只有黑白,
 灰色細筆畫二值化時會消失,筆畫密的字(如「框」)印出來缺半邊。
 
-**業務規則**:掃什麼印什麼——清單每列記住「款式＋條碼」,店內碼與原廠碼都可印;
-非掃碼加入(搜尋點選、商品資料庫捷徑)取預設條碼:店內碼優先、同類多組取字串排序
-第一組,沒有店內碼才取原廠碼。加入後條碼固定,不因重讀資料換碼。
+**業務規則**:標籤**一律印店內碼,沒有店內碼才印原廠碼**(同類多組取字串排序第一組)。
+原廠碼可被多個品項共用,印店內碼才分得出是哪一個。掃描加入用 `barcodes.scan` 回傳的
+`label_barcode`,非掃碼加入(搜尋點選、商品資料庫捷徑)用前端 `defaultBarcode`,兩者規則
+相同。清單每列記住「款式＋條碼」,加入後條碼固定,不因重讀資料換碼。
 `Variant.price` 為 NULL 就留白不印;標籤尺寸固定 40 × 20mm 不做設定項。
 **列印清單**(`labels.js` 的 `window.PosLabelQueue`,切頁保留、關程式清空):
 送印前以 `printing.check` 整批比對,內容變更即停止並更新預覽,條碼失效的列
-只能移除重加;逐筆呼叫 `printing.barcode`,每筆後端都再驗一次條碼歸屬;
+只能移除重加;逐筆呼叫 `printing.barcode`,每筆後端都再驗一次條碼歸屬
+(以 `(barcode, variant_id)` 是否存在判斷,共用碼對每個持有者都成立);
 失敗即停,該列標「請核對已印張數」,須店員按「確認張數」才能重送
 (機器失敗時不回報已印張數,不做精準續印)。後端以模組層級鎖擋同時列印。
 加入清單一律走 `window.PosLabelQueueAdd`(標籤頁與進貨頁共用,同列累加張數、
-列印中拒絕);進貨頁入庫後出現「加入列印清單(N 張)」,N 為該品項累計入庫量,
-條碼用進貨時掃的那一個,加入後不跳頁,可接著掃下一個。
+列印中拒絕);進貨頁每列有「加入列印清單(K 張)」,K＝進貨數量－已加入張數,掃入即可加,
+不必等確認進貨,加入後不跳頁,可接著掃下一個。
 前端取資料走 `catalog.list`(**`products.list` 不回傳 `barcodes`**)。
 
 ### 標準資料庫(`tools/make_standard_db.py`)
@@ -413,6 +426,8 @@ v15 `_mig_split_shared_fields` 拆其餘所有跨種類共用欄(顏色、框色
   ⚠️ 新增資料表或設定鍵時,要同步決定它在這支工具裡屬於哪一邊。
 - **檢查**:每張表筆數與來源一致、外鍵與完整性檢查、最後以正式啟動流程再開一次。
   不覆蓋任何既有檔案(輸出已存在或與來源相同即停止);來源以唯讀方式開啟。
+- **schema 改版後重產**:母版格式落後時工具會停止;先把母版複製一份、以 `init_db` 升級
+  該副本,再以副本為 `--source` 產出,核對筆數與條碼內容後才換掉母版。
 
 **母版**:預設來源是 `docs/standard_db/pos_standard.db`(Windows 唯讀屬性)。`docs/` 不入庫,
 母版只存在本機,換機器要自行複製;遺失時從整理好的資料庫重建:
@@ -445,7 +460,7 @@ python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_s
 - **提醒條與錯誤條同一種外觀**（`.notice-bar`／`.error-bar`）：圓角方塊＋左側粗線＋淡底深字，前綴 ⚠。未儲存提醒用黃系、錯誤用紅系。⚠️ 錯誤訊息顯示在**觸發它的那個區塊內**（設定頁以 `errorScope` 分辨 category／brands／phoneBrands／models），不要丟到整頁最上面——訊息離發生的地方太遠，店員看不到自己剛按的那顆鈕出了什麼事。不要再自創滿版色條。
 - **清單維護的儲存規則**：名稱可即時寫入的區塊（手機品牌、規格項目）連拖拉排序也即時寫入，不放儲存鈕；仍需批次儲存的區塊（廠牌、手機型號）則「名稱修改＋拖過的順序」一起等按鈕，標題列用 `.card-actions` 收「復原／儲存修改」兩顆，並在有未儲存內容時顯示提醒條。⚠️ 會重新載入清單的動作（新增、刪除）必須先把未儲存的修改收起來、做完再貼回（`keepEdits`／`_collectEdits`／`_restoreEdits`），只有被刪掉的那筆會消失；**不可以代替使用者先儲存**，寫入資料庫永遠是使用者按下儲存的事。
 - **長清單分組**：手機型號依品牌分組，每組標題右側一顆收合／展開鈕（狀態各組獨立），另有「快速搜尋」比對名稱／別名／系列；有搜尋字串時符合的組自動展開、不符的整組隱藏。⚠️ **過濾狀態下必須關閉排序**（`sortable-list` 的 `disabled`）：排序 API 是把送進來的 id 依序重編 1..N，只送畫面上那幾筆會把其餘項目的號碼全打亂。展開收合套 `.collapse-*` 過場。
-- **確認／通知視窗一律用 `PosConfirm`**（`static/js/confirm.js`）：`PosConfirm.ask()`／`PosConfirm.notify()`，白底置中、Enter＝確定、Esc／點遮罩＝取消，破壞性操作的確定鈕用危險色。⚠️ 不可用瀏覽器內建的 `confirm()`／`alert()`——pywebview 會畫成深色系統對話框、貼在視窗上緣，與程式外觀完全不同。
+- **確認／通知視窗一律用 `PosConfirm`**（`static/js/confirm.js`）：`PosConfirm.ask()`／`PosConfirm.notify()`，白底置中、Enter＝確定、Esc／點遮罩＝取消，破壞性操作的確定鈕用危險色。需要使用者從幾筆中挑一筆時用 `PosConfirm.choose({title, message, items})`：點選回傳索引、取消／Esc／點遮罩回傳 `null`，`disabled` 項目不可選，且**不攔 Enter**（交給焦點所在的按鈕）。⚠️ 不可用瀏覽器內建的 `confirm()`／`alert()`——pywebview 會畫成深色系統對話框、貼在視窗上緣，與程式外觀完全不同。
 - **對話框欄位列**（`.modal > label`）：標籤欄固定 `--label-w`（px，不用 em——em 會跟著較小的提示字級縮水而對不齊），標籤靠右貼著輸入框；⚠️ `text-align: right` 只給標籤那段純文字，所有元素子節點要覆寫回靠左，否則會一路繼承進候選清單裡。欄位下方的一句提示用 `.field-note`（縮排對齊輸入框左緣），送出前的警告用 `.modal-warn`（與按鈕同列、靠左、危險色）。
 - **子視窗外觀**:`static/css/dialog-theme.css` 是子視窗公版。細捲軸(8px、`#c7c7cc`)、
   文字選取反白(`#8fa8c8`)與按鈕 hover/pressed 灰階(`#e5e5ea`／`#d1d1d6`)取自維護者
@@ -459,9 +474,9 @@ python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_s
 python -m unittest discover -s tests
 ```
 
-目前入庫 725 個測試,涵蓋 schema/migration、Desktop action 契約、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
+目前入庫 771 個測試,涵蓋 schema/migration、Desktop action 契約、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
 ⚠️ `tests/test_import_excel.py` 與 `tools/import_excel.py` 一樣**不入庫**(直接 import 該工具,
-缺檔會 error 而非 skip);兩者仍在使用中的機器上會多跑 21 項,匯入驗收結束後一起刪除。
+缺檔會 error 而非 skip);兩者仍在使用中的機器上會多跑 26 項,匯入驗收結束後一起刪除。
 
 ⚠️ 前端改動的最終驗證一律以真實 pywebview 走查(`RuntimePaths` 指向 `pos.db` 副本＋repo `static/`),
 走查腳本**只能操作 DOM**,不可去抓 Vue 元件實例——prod 版 Vue 沒有 `__vue_app__`／`__vueParentComponent`
