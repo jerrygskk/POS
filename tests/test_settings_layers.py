@@ -185,7 +185,7 @@ class SettingsLayersTests(unittest.TestCase):
         self.assertIn("{ sort: sort++, required: 0, active: 1 }", source)
         # 自訂規格列的操作鈕:✎ 選項與紅色 ✕(刪除前顯示影響筆數)
         self.assertIn('@click.stop="hasOptions(f) && openFieldPopup(f)"', html)
-        self.assertIn('class="btn-sm danger" @click.stop="deleteTemplateField(f)"', html)
+        self.assertIn('class="btn-x" title="刪除規格" @click.stop="deleteTemplateField(f)"', html)
         self.assertIn("筆商品已填${subject}", source)
         # 自訂規格改用拖拉排序公版,固定列不參與
         self.assertIn('<sortable-list :items="customRows" item-key="field_id"', html)

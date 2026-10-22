@@ -162,6 +162,17 @@ assert.equal(q.rows[0].key,"7|CODE-A");assert.equal(q.rows[0].copies,5);
 assert.equal(s.labelQty,2);assert.equal(s.labelMsg,"");
 ''')
 
+    def test_receive_without_employee_shows_hint_and_does_not_call_api(self):
+        self._run(r'''
+let calls=0;API.receiveStock=async p=>{calls+=1;return{stock:p.qty}};
+const s=mkState();await received(s,"4710000000015");
+context.window.PosEmployee.id=null;s.qty=3;await s.doReceive();
+assert.equal(calls,0);assert.deepEqual(errors,["請先選擇員工代號"]);
+assert.equal(s.labelQty,0);assert.equal(s.qty,3);
+context.window.PosEmployee.id=2;await s.doReceive();
+assert.equal(calls,1);assert.equal(s.labelQty,3);
+''')
+
     def test_rescanning_same_code_keeps_accumulated_quantity(self):
         self._run(r'''
 const s=mkState();await received(s,"TL7",5);await received(s,"TL7",3);
@@ -177,6 +188,8 @@ class ReceiveTemplateContractTests(unittest.TestCase):
         self.assertIn('<button v-if="labelQty" :disabled="labelBusy" @click="addToLabels">'
                       "加入列印清單（{{ labelQty }} 張）</button>", receive)
         self.assertIn('<span v-if="labelMsg">{{ labelMsg }}</span>', receive)
+        # 未選員工不可停用入庫／結帳／開盤點單鈕:停用的按鈕點了沒反應,看不到提示
+        self.assertNotIn("!employee.id", html)
         source = (STATIC / "js" / "receive.js").read_text(encoding="utf-8")
         self.assertIn("window.PosLabelQueueAdd(variantId, code, qty)", source)
 

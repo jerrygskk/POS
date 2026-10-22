@@ -547,8 +547,10 @@ class CatalogTemplateContractTests(unittest.TestCase):
         )
         self.assertIn(expected, self.catalog)
         self.assertIn(".catalog-table-scroll { overflow-x: auto;", self.css)
+        # 按鈕按下會下沉 1px:篩選列不可因此冒出直向捲軸而抖動
         self.assertIn(
-            ".catalog-filter-row { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }",
+            ".catalog-filter-row { max-width: 100%; overflow-x: auto; overflow-y: hidden;\n"
+            "  padding-bottom: 2px; flex-wrap: nowrap; }",
             self.css,
         )
         self.assertIn(".catalog-table { min-width: 1230px;", self.css)
@@ -576,8 +578,10 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertIn('v-model="q" @keyup.enter="reload"', self.catalog)
         self.assertIn('<button class="primary" @click="reload">', self.catalog)
         self.assertIn(
-            ".catalog-search-input { flex: 1 1 320px; min-width: 240px; max-width: 420px; }",
+            ".catalog-search-input { flex: 1 1 240px; min-width: 240px; max-width: 420px; }",
             self.css)
+        # 預設視窗下篩選列要放得下:下拉選單需有明確下限才會縮(否則被最長選項撐寬)
+        self.assertIn(".catalog-filter-row select { min-width: 110px; }", self.css)
         self.assertNotIn("至設定修改", self.catalog)
 
         info = self.catalog.split(
@@ -646,10 +650,11 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertIn("catalog-empty-result", card)
 
     def test_add_variant_entry_is_only_for_active_products_and_uses_ui_term(self):
-        # 新增款式一律開子視窗:行內快速新增表單已移除,列上只留入口按鈕
-        self.assertIn('<tr v-if="p.active">', self.catalog)
-        self.assertIn('@click="openAddVariant(p)"', self.catalog)
-        self.assertIn('@click="openAddVariant(null)"', self.catalog)
+        # 新增款式一律開子視窗:入口在產品列名稱後(僅啟用中產品),工具列右端為「新增」
+        info = self.catalog.split('class="catalog-product-info">', 1)[1].split("</td>", 1)[0]
+        self.assertIn('<button v-if="p.active" class="btn-sm" @click="openAddVariant(p)">新增款式</button>', info)
+        self.assertEqual(self.catalog.count('@click="openAddVariant(p)"'), 1)
+        self.assertIn('<button class="catalog-add-btn" @click="openAddVariant(null)">新增</button>', self.catalog)
         self.assertNotIn("addingFor", self.catalog)
         self.assertNotIn("newVariant", self.catalog)
         self.assertIn("新增款式", self.catalog)

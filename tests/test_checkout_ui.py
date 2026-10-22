@@ -212,6 +212,20 @@ const s = mkState();
         self.assertEqual(out["stock"], 4)
 
 
+class CartTemplateContractTests(unittest.TestCase):
+    def test_cart_numeric_columns_are_narrow_and_remove_button_is_small(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        css = (STATIC / "css" / "pos.css").read_text(encoding="utf-8")
+        checkout = html.split('<template id="tpl-checkout">', 1)[1].split("</template>", 1)[0]
+        # 商品、屬性不設寬度,吸收剩餘空間;數字欄與移除欄固定窄寬
+        self.assertIn("<col><col>", checkout)
+        for name in ("price", "qty", "discount", "subtotal", "stock", "remove"):
+            self.assertIn(f'class="cart-col-{name}"', checkout)
+            self.assertRegex(css, rf"\.cart-col-{name}[ ,][^{{]*\{{ width: \d+px; \}}")
+        self.assertIn('<button class="btn-x" title="移除" @click="draft.cart.splice(i,1)">✕</button>', checkout)
+        self.assertIn("background: var(--danger); color: #fff;", css.split(".btn-x {", 1)[1].split("}", 1)[0])
+
+
 class ConfirmAndResourceContractTests(unittest.TestCase):
     def test_input_dialog_renders_validates_and_handles_close_interactions(self):
         script = r'''

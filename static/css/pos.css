@@ -130,9 +130,18 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
    捲軸(實測過)。 */
 .catalog-card { background: var(--surface); border-radius: 8px; padding: 16px;
   max-width: 1263px; }
-.catalog-filter-row { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }
-/* 卡片收窄後搜尋框不能再無限撐開,否則會把篩選列其餘控制項擠出可視範圍 */
-.catalog-search-input { flex: 1 1 320px; min-width: 240px; max-width: 420px; }
+/* overflow-x:auto 會連帶讓直向也可捲;按鈕按下時下沉 1px(button:active)就冒出直向捲軸、
+   整排被擠窄 15px 而抖動。留 2px 底部空間給下沉,並關掉直向捲動 */
+.catalog-filter-row { max-width: 100%; overflow-x: auto; overflow-y: hidden;
+  padding-bottom: 2px; flex-wrap: nowrap; }
+/* 下拉選單預設被最長選項撐寬且不會縮;給明確下限讓它在預設視窗下讓出空間,
+   下限剛好完整顯示「全部種類／全部廠牌／全部型號」 */
+.catalog-filter-row select { min-width: 110px; }
+/* 卡片收窄後搜尋框不能再無限撐開,否則會把篩選列其餘控制項擠出可視範圍。
+   基準寬=下限:空間不足時搜尋框先縮到底,下拉選單才開始縮 */
+.catalog-search-input { flex: 1 1 240px; min-width: 240px; max-width: 420px; }
+/* 工具列右端「新增」:字放大一級,且不被擠成兩行 */
+.catalog-add-btn { font-size: 17px; white-space: nowrap; flex-shrink: 0; }
 table.sub { margin: 0; }
 table.sub th, table.sub td { background: var(--surface-alt); font-size: 15px; }
 .catalog-table-scroll { overflow-x: auto; }
@@ -276,6 +285,11 @@ button.primary:active { background: var(--primary-active); transform: translateY
 .btn-sm:hover { background: var(--hover); }
 .btn-sm:active { background: var(--pressed); transform: translateY(1px); }
 .btn-sm.danger { color: var(--danger); }
+/* 移除鈕(紅底白 ✕):沿用公文系統 remove 鈕規格 28×24、圓角 6;
+   hover／active 要自己蓋掉 button 基準的灰底 */
+.btn-x { width: 28px; height: 24px; min-width: 0; padding: 0; border: 0; border-radius: 6px;
+  background: var(--danger); color: #fff; font-size: 14.5px; font-weight: 600; line-height: 24px; }
+.btn-x:hover, .btn-x:active { background: var(--danger); filter: brightness(0.92); }
 
 /* 切換式 chip(材質／詞條／型號選取):選中=藍灰底白字 */
 .chip-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -618,3 +632,8 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .employee-picker .chip-toggle.on { box-shadow: inset 0 0 0 1px var(--accent); }
 /* 收銀付款區要塞進員工按鈕,間距收窄以維持一排 */
 .checkout .pay-panel { gap: 12px; }
+/* 收銀購物車:數字欄固定窄寬(放得下標題與輸入框即可),其餘寬度全給商品與屬性 */
+.cart-col-price, .cart-col-discount { width: 110px; }
+.cart-col-qty, .cart-col-subtotal { width: 90px; }
+.cart-col-stock { width: 95px; }
+.cart-col-remove { width: 50px; }
