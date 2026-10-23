@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=233">
+<link rel="stylesheet" href="css/pos.css?v=236">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=233" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=236" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -439,7 +439,7 @@
       <div class="cat-list-title cat-list-group">基礎資料</div>
       <div class="cat-item" :class="{active: section==='brands'}"
            @click="selectSection('brands')">
-        <span class="cat-name">廠牌</span>
+        <span class="cat-name">廠牌(供應商)</span>
       </div>
       <div class="cat-item" :class="{active: section==='models'}"
            @click="selectSection('models')">
@@ -461,9 +461,20 @@
         <button class="btn-sm danger" @click="deleteCategory(selectedCat)">刪除</button>
       </div>
 
-      <div class="grp-title">規格項目</div>
-      <small class="hint">可新增、修改、刪除規格</small>
+      <!-- 規格平常收成一行摘要(只列啟用中的),要改才展開;產品表格才是常用區 -->
+      <div class="spec-head">
+        <span class="grp-title">規格項目</span>
+        <span v-if="!specEditing" class="spec-tags">
+          <span class="tag" v-for="f in activeSpecRows" :key="f.field_id">
+            {{ f.name }}<template v-if="f.field_type==='multi'">（複選）</template></span>
+          <span v-if="!activeSpecRows.length" class="hint">尚未啟用任何規格</span>
+        </span>
+        <button class="btn-sm spec-toggle" @click="specEditing = !specEditing">
+          {{ specEditing ? '完成' : '編輯規格' }}</button>
+      </div>
       <div v-if="pageError && errorScope==='category'" class="error-bar section-bar">⚠ {{ pageError }}</div>
+      <template v-if="specEditing">
+      <small class="hint spec-hint">可新增、修改、刪除規格</small>
       <div class="inline-add add-before-list">
         <input v-model="newField.name" placeholder="新規格名稱"
                @keyup.enter="addTemplateField">
@@ -506,8 +517,12 @@
           <span class="switch-label">{{ f.cf_active ? '啟用' : '停用' }}</span>
         </template>
       </sortable-list>
+      </template>
 
-      <div class="grp-title" style="margin-top:14px">本商品種類產品</div>
+      <div class="card-head prod-head">
+        <span class="grp-title">本商品種類產品</span>
+        <button class="primary" @click="openProductPopup(null)">加入廠牌(供應商)</button>
+      </div>
       <table class="big-prod">
         <thead><tr><th>名稱</th><th>廠牌</th><th>子產品</th><th>狀態</th><th>操作</th></tr></thead>
         <tbody>
@@ -526,7 +541,6 @@
           <tr v-if="!bigProducts.length"><td colspan="5" class="hint">此種類尚無產品。</td></tr>
         </tbody>
       </table>
-      <button class="btn-sm" @click="openProductPopup(null)">新增產品</button>
     </section>
     <section class="cat-detail" v-else-if="section==='category'">
       <div class="hint">請於左側選擇或新增商品種類。</div>
@@ -545,7 +559,7 @@
 
     <!-- 基礎資料:廠牌 -->
     <section class="cat-detail" v-else-if="section==='brands'">
-      <div class="card-head"><h3>廠牌</h3>
+      <div class="card-head"><h3>廠牌(供應商)</h3>
         <span class="card-actions">
           <button v-if="hasUnsaved('brands')" @click="revertAll('brands')">復原</button>
           <button class="primary" @click="saveAll('brands')">儲存修改</button>
@@ -682,25 +696,25 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=233"></script>
-<script src="js/api.js?v=233"></script>
-<script src="js/confirm.js?v=233"></script>
-<script src="js/auth.js?v=233"></script>
-<script src="js/pos_shared.js?v=233"></script>
-<script src="js/catalogfields.js?v=233"></script>
-<script src="js/checkout.js?v=233"></script>
-<script src="js/receive.js?v=233"></script>
-<script src="js/stocktake.js?v=233"></script>
-<script src="js/records.js?v=233"></script>
-<script src="js/catalog.js?v=233"></script>
-<script src="js/sortable.js?v=233"></script>
-<script src="js/combobox.js?v=233"></script>
-<script src="js/optpicker.js?v=233"></script>
-<script src="js/modelpicker.js?v=233"></script>
-<script src="js/employeepicker.js?v=233"></script>
-<script src="js/attrfields.js?v=233"></script>
-<script src="js/settings.js?v=233"></script>
-<script src="js/labels.js?v=233"></script>
-<script src="js/app.js?v=233"></script>
+<script src="js/vue.global.prod.js?v=236"></script>
+<script src="js/api.js?v=236"></script>
+<script src="js/confirm.js?v=236"></script>
+<script src="js/auth.js?v=236"></script>
+<script src="js/pos_shared.js?v=236"></script>
+<script src="js/catalogfields.js?v=236"></script>
+<script src="js/checkout.js?v=236"></script>
+<script src="js/receive.js?v=236"></script>
+<script src="js/stocktake.js?v=236"></script>
+<script src="js/records.js?v=236"></script>
+<script src="js/catalog.js?v=236"></script>
+<script src="js/sortable.js?v=236"></script>
+<script src="js/combobox.js?v=236"></script>
+<script src="js/optpicker.js?v=236"></script>
+<script src="js/modelpicker.js?v=236"></script>
+<script src="js/employeepicker.js?v=236"></script>
+<script src="js/attrfields.js?v=236"></script>
+<script src="js/settings.js?v=236"></script>
+<script src="js/labels.js?v=236"></script>
+<script src="js/app.js?v=236"></script>
 </body>
 </html>

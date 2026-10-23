@@ -33,6 +33,7 @@ window.PosPages["page-settings"] = {
       selCatId: null, newCatName: "",
       tplFields: [], bigProducts: [],
       newField: { name: "", field_type: "select" },
+      specEditing: false,    // 規格區是否展開編輯;切種類時收回摘要
       // 規格模板 popup(單層)
       // 產品 popup(單層)
       prodPopup: null,
@@ -106,6 +107,10 @@ window.PosPages["page-settings"] = {
       return this.tplFields.filter(f => !this.isFeature(f))
         .sort((a, b) => (a.sort - b.sort) || (a.field_id - b.field_id));
     },
+    // 收合時的摘要:固定列＋自訂規格中啟用的,照清單順序
+    activeSpecRows() {
+      return [...this.fixedRows, ...this.customRows].filter(f => f.cf_active);
+    },
   },
   async mounted() {
     this._loadSeq = 0;
@@ -165,6 +170,7 @@ window.PosPages["page-settings"] = {
       this.prodPopup = null;
       if (same) return;
       this.selCatId = c.category_id;
+      this.specEditing = false;
       await this.guard(() => this.loadCategoryDetail());
     },
     async loadCategoryDetail() {
