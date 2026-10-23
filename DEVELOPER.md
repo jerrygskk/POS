@@ -67,7 +67,8 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 - **選項限定型號**:`OptionModel(option_id, model_id)` 記錄選項只在特定型號出現(特別色)。`options.list` 搭配 `field_id`／`model_ids` 過濾時回傳「未綁任何型號的 ∪ 綁定含任一給定型號的」聯集,僅過濾建檔下拉,不回溯既有變體;未提供 `model_ids` 時回全部。`options.set_models` 以 `id`／`model_ids` 全量替換限定型號清單(空清單=改回通用)。
 - **條碼混合與共用**:`source` 分 `factory`(廠商既有)與 `store`(店內自取碼,`TL` + 流水號,`Setting.next_store_barcode` 純計數、刪除不回收);手動輸入 `TL` 開頭一律 422(系統保留字頭)。`Barcode` 主鍵為 `(barcode, variant_id)`:**原廠碼可被多個子產品共用**(廠商常把同一碼用在不同顏色),**店內碼全域唯一**(部分唯一索引 `idx_barcode_store` 加應用層檢查——非 TL 的號碼也可能存成 `store`,原廠碼不得與任何店內碼撞號),同一子產品不得重複掛同碼。
 - **共用原廠碼必配店內碼**:原廠碼被 2 個以上子產品持有時,每個持有者都要有一組店內碼,由 `lib/product_rules.py:ensure_store_codes_for_shared` 補發;建檔、修改款式(含刪掉唯一店內碼後存檔)、批次建檔、Excel 匯入都會呼叫。⚠️ 必須在該次操作**所有條碼寫完之後**才呼叫,不可每插一筆就呼叫:同一筆自己勾的「配自取碼」還沒寫入就先被補一組,會變成兩組店內碼。
-- **掃描解析**:`barcodes.scan` 回傳 `{matches:[...]}`(依品名、款式編號排序;每筆含 `status` 為 active／inactive／issue、`store_barcode`、`label_barcode`)。前端一律經 `window.PosScan`(`pos_shared.js`):一筆直接帶入,多筆跳 `PosConfirm.choose`「請選擇品項」;收銀傳 `sellableOnly`,停用／待處理品不可選(只有一筆時照舊帶入,結帳由後端擋);按取消時各頁清空掃描框。
+- **掃描解析**:`barcodes.scan` 回傳 `{matches:[...]}`(依品名、款式編號排序;每筆含 `status` 為 active／inactive／issue、`store_barcode`、`label_barcode`)。前端一律經 `window.PosScan`(`pos_shared.js`):一筆直接帶入,多筆跳 `PosConfirm.choose`「請選擇品項」;收銀傳 `sellableOnly`,停用／待處理品不可選(只有一筆時照舊帶入,結帳由後端擋);按取消時各頁清空掃描框。狀態判定見 §2「必填切換只往前生效」的可銷售判斷。
+- **結帳期間鎖住購物車**:購物車放在元件外(`window.PosCheckoutDraft`),切頁回來是同一台。結帳送出後到回應前以 `submitting` 鎖住並遞增 `generation`(照進貨頁做法):加入商品在開頭與每個 `await`(掃描、選品項、輸入未定價單價)回來後都要檢查鎖定與批次編號,數量／單價／折扣／整單折抵／付款／實收與移除也都鎖住。⚠️ 沒鎖時,等待中加入的商品會在結帳成功清空購物車時無聲消失。
 - **操作員工代號**:`Sale`、`StockMovement`(進貨列)、`StocktakeSession` 的 `employee` 只接受 1～6,結帳／進貨／開盤點單後端一律必填(`lib/product_rules.py:require_employee`)。前端 `employee-picker` 三頁共用同一個選擇,切頁與結帳後保留、關程式清空;未選員工時按鈕**不反灰**,按下顯示「請先選擇員工代號」(反灰的按鈕點了沒反應,店員看不到原因)。
 - **進貨頁批次**:清單 `window.PosReceiveDraft` 放元件外(切頁保留、關程式清空);掃一下加一列,同子產品再掃數量 +1 並移到最上;按「確認進貨」以 `stock.receive {employee, items:[{variant_id, qty}]}` 一次寫入,同一交易全有全無。⚠️ 確認／清空的確認視窗開啟到流程結束期間**鎖定清單**(`locked`),掃描、改數量、刪列、加標籤、重按一律在方法內擋;另有**世代編號** `generation`,每次確認／清空流程開始就 +1,掃描送出前記下、回來時編號不同就拒絕並提示重掃——只看鎖定擋不住「入庫完成、解鎖後才回來的舊掃描」,它會被加進下一批而重複入庫。送出的是確認當下的快照,送出前再驗員工與清單;數量欄不用 `v-model`(會直接改資料,方法擋不住)。
 - **自取碼交易語意**:`lib/product_rules.py:next_store_barcode` 使用呼叫端的同一條資料庫連線更新計數器,由呼叫端決定 commit;商品或條碼建立失敗造成 transaction rollback 時,計數器亦一併回復。
@@ -357,6 +358,18 @@ product 層級失敗(產品不存在或已停用)仍照 `_require_product()` rai
 建檔仍硬擋必填,修改既有子產品維持軟性(可存,只有原本就是待處理筆才重驗)。
 (舊規則「已有子產品的種類暫時鎖住必填切換」已作廢。)
 
+**可銷售判斷**:種類／產品／款式都啟用,且沒有 `duplicate_signature`。`missing_required`
+只是待補提醒,**不擋銷售**(否則改必填等於讓既有商品停售,違反上面的規則);
+款式重複會讓掃描對不到正確商品,所以照擋。結帳(`sales_service.variant_is_active`)
+與掃描狀態(`product_service.scan`)用同一條規則;掃描時「有待處理紀錄且已停用」仍回
+`issue`,讓匯入的問題品顯示「待處理」而非「已停用」。
+匯入(`tolerant_create`)的問題款式照樣設 `active=0`,手動啟用前仍要排除**所有**
+待處理問題(含缺值)——明確停用的狀態不因這條規則自動解除。
+
+**移除規格欄**(`delete_field`)會一併刪掉本種類款式指向此欄的 `VariantIssue`;
+連欄位本身一起刪時再清一次殘留。⚠️ 漏掉會因外鍵擋住刪除(改必填→再移除該欄即重現)。
+被清掉紀錄的款式維持原本啟用狀態。
+
 ### 產品名稱自動組裝
 
 新增產品的欄位順序是**廠牌→名稱→備註**,焦點落在廠牌;選了廠牌就把
@@ -527,6 +540,7 @@ python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_s
   原本 select/multi/tags 還有一條「候選未載入就退回 datalist／勾選框」的退路，已移除：它會靜默換成外觀完全不同的介面，出事看不出來，現在改顯示「候選載入中…」。
 - **提醒條與錯誤條同一種外觀**（`.notice-bar`／`.error-bar`）：圓角方塊＋左側粗線＋淡底深字，前綴 ⚠。未儲存提醒用黃系、錯誤用紅系。⚠️ 錯誤訊息顯示在**觸發它的那個區塊內**（設定頁以 `errorScope` 分辨 category／brands／phoneBrands／models），不要丟到整頁最上面——訊息離發生的地方太遠，店員看不到自己剛按的那顆鈕出了什麼事。不要再自創滿版色條。
 - **清單維護的儲存規則**：名稱可即時寫入的區塊（手機品牌、規格項目）連拖拉排序也即時寫入，不放儲存鈕；仍需批次儲存的區塊（廠牌、手機型號）則「名稱修改＋拖過的順序」一起等按鈕，標題列用 `.card-actions` 收「復原／儲存修改」兩顆，並在有未儲存內容時顯示提醒條。⚠️ 會重新載入清單的動作（新增、刪除）必須先把未儲存的修改收起來、做完再貼回（`keepEdits`／`_collectEdits`／`_restoreEdits`），只有被刪掉的那筆會消失；**不可以代替使用者先儲存**，寫入資料庫永遠是使用者按下儲存的事。
+  ⚠️ 手機品牌與手機型號在同一頁：品牌的即時寫入（改名、拖拉排序）**不可重載整頁**，否則型號的未儲存修改被蓋掉。成功時只在本機更新——快照只記**實際送出的值**（送出後又改的名稱維持未儲存）、型號的 `brand_name` 跟著改；`pendingModelSort`、`collapsedBrands` 以品牌名稱當鍵，要從「狀態目前所在的名稱」搬到新名（連續送出 A→B→C 時不能用送出當下的舊名）。失敗或名稱空白只重讀手機品牌清單。
 - **長清單分組**：手機型號依品牌分組，每組標題右側一顆收合／展開鈕（狀態各組獨立），另有「快速搜尋」比對名稱／別名／系列；有搜尋字串時符合的組自動展開、不符的整組隱藏。⚠️ **過濾狀態下必須關閉排序**（`sortable-list` 的 `disabled`）：排序 API 是把送進來的 id 依序重編 1..N，只送畫面上那幾筆會把其餘項目的號碼全打亂。展開收合套 `.collapse-*` 過場。
 - **確認／通知視窗一律用 `PosConfirm`**（`static/js/confirm.js`）：`PosConfirm.ask()`／`PosConfirm.notify()`，白底置中、Enter＝確定、Esc／點遮罩＝取消，破壞性操作的確定鈕用危險色。需要使用者從幾筆中挑一筆時用 `PosConfirm.choose({title, message, items})`：點選回傳索引、取消／Esc／點遮罩回傳 `null`，`disabled` 項目不可選，且**不攔 Enter**（交給焦點所在的按鈕）。⚠️ 不可用瀏覽器內建的 `confirm()`／`alert()`——pywebview 會畫成深色系統對話框、貼在視窗上緣，與程式外觀完全不同。
 - **對話框欄位列**（`.modal > label`）：標籤欄固定 `--label-w`（px，不用 em——em 會跟著較小的提示字級縮水而對不齊），標籤靠右貼著輸入框；⚠️ `text-align: right` 只給標籤那段純文字，所有元素子節點要覆寫回靠左，否則會一路繼承進候選清單裡。欄位下方的一句提示用 `.field-note`（縮排對齊輸入框左緣），送出前的警告用 `.modal-warn`（與按鈕同列、靠左、危險色）。
