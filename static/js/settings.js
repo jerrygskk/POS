@@ -456,14 +456,54 @@ window.PosPages["page-settings"] = {
       this.snap = Object.assign({}, this._snap);
       }
     },
+    // 快照只記實際送出的內容,回應前繼續輸入的值仍屬未儲存。
+    _markSaved(kind, item, body) {
+      const key = kind + ":" + item[_MAINT[kind].id];
+      this._snap[key] = JSON.stringify(body);
+      this.snap = Object.assign({}, this._snap);
+    },
+    async _reloadPhoneBrands() {
+      const brands = await API.listPhoneBrands({ all: 1 });
+      this.phoneBrands = brands;
+      for (const key of Object.keys(this._snap))
+        if (key.startsWith("phoneBrands:")) delete this._snap[key];
+      for (const item of brands)
+        this._snap["phoneBrands:" + item.phone_brand_id] =
+          JSON.stringify(this._itemBody("phoneBrands", item));
+      this.snap = Object.assign({}, this._snap);
+    },
+    _renamePhoneBrandLocally(phoneBrandId, oldName, newName) {
+      for (const model of this.models)
+        if (model.phone_brand_id === phoneBrandId) model.brand_name = newName;
+      for (const state of [this.pendingModelSort, this.collapsedBrands]) {
+        if (!Object.prototype.hasOwnProperty.call(state, oldName) || oldName === newName) continue;
+        state[newName] = state[oldName];
+        delete state[oldName];
+      }
+    },
     // 單筆即時儲存名稱:離開欄位或按 Enter 就寫入,沒改動不送。
     async saveItemName(kind, item) {
       this.errorScope = kind;
       const m = _MAINT[kind];
       const body = this._itemBody(kind, item);
-      if (!body.name) { this.showError("名稱不可空白"); await this.reloadAll(); return; }
-      if (this.snap[kind + ":" + item[m.id]] === JSON.stringify(body)) return;
-      await this.guardReload(() => API[m.update](item[m.id], body));
+      const saved = this.snap[kind + ":" + item[m.id]];
+      if (!body.name) {
+        this.showError("名稱不可空白");
+        item.name = JSON.parse(saved).name;
+        return;
+      }
+      if (saved === JSON.stringify(body)) return;
+      try {
+        await API[m.update](item[m.id], body);
+        // 前一筆存檔可能已完成搬移,依目前快照找狀態所在的品牌名稱。
+        if (kind === "phoneBrands")
+          this._renamePhoneBrandLocally(item[m.id],
+            JSON.parse(this.snap[kind + ":" + item[m.id]]).name, body.name);
+        this._markSaved(kind, item, body);
+      } catch (e) {
+        this.showError(e.message);
+        if (kind === "phoneBrands") await this.guard(() => this._reloadPhoneBrands());
+      }
     },
     // 尚未儲存的名稱修改筆數(提醒條用)
     dirtyCount(kind) {
@@ -556,6 +596,20 @@ window.PosPages["page-settings"] = {
     async saveSort(kind, ids) {
       this.errorScope = kind;
       const m = _MAINT[kind];
+      if (kind === "phoneBrands") {
+        try {
+          await API[m.sort](ids);
+          // 只調整品牌群組順序,同品牌內保留使用者尚未儲存的型號順序。
+          const order = new Map(ids.map((id, index) => [id, index]));
+          this.models.sort((a, b) =>
+            (order.get(a.phone_brand_id) ?? ids.length) -
+            (order.get(b.phone_brand_id) ?? ids.length));
+        } catch (e) {
+          this.showError(e.message);
+          await this.guard(() => this._reloadPhoneBrands());
+        }
+        return;
+      }
       await this.guardReload(() => API[m.sort](ids));
     },
     // 拖過但還沒按儲存的順序:先記著,和名稱修改一起送出

@@ -74,11 +74,12 @@ class SalesRepository(BaseRepository):
         return json.loads(row["value"]) if row else []
 
     def variant_is_active(self, variant_id):
-        # 有效啟用(規格 §8.2):Category.active AND Product.active AND Variant.active
-        # AND 無未解決 VariantIssue
+        # 種類、產品、款式都須啟用;缺必填值只是待補提醒,不擋銷售,
+        # 待處理問題中只有款式重複會擋。
         return self.connection.execute(
             "SELECT (COALESCE(c.active,1) AND p.active AND v.active AND "
-            "NOT EXISTS(SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id)) ok, "
+            "NOT EXISTS(SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id "
+            "AND vi.issue_type='duplicate_signature')) ok, "
             "v.price, p.name "
             "FROM Variant v "
             "JOIN Product p ON v.product_id=p.product_id "

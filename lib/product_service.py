@@ -263,7 +263,10 @@ class ProductService:
             raise ValidationError("自取碼格式不正確")
         rows = self.repo.all(
             "SELECT DISTINCT v.variant_id,v.product_id,v.price price,p.name,"
-            "CASE WHEN EXISTS(SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id) THEN 'issue' "
+            "CASE WHEN EXISTS(SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id "
+            "AND vi.issue_type='duplicate_signature') THEN 'issue' "
+            "WHEN EXISTS(SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id) "
+            "AND NOT (COALESCE(c.active,1) AND p.active AND v.active) THEN 'issue' "
             "WHEN NOT (COALESCE(c.active,1) AND p.active AND v.active) THEN 'inactive' ELSE 'active' END status,"
             "(SELECT MIN(barcode) FROM Barcode WHERE variant_id=v.variant_id AND source='store') store_barcode,"
             "(SELECT MIN(barcode) FROM Barcode WHERE variant_id=v.variant_id AND source='factory') factory_barcode "

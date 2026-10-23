@@ -82,10 +82,10 @@ def _name_lines(draw, name, price_width):
     return [text], font
 
 
-def _spec_lines(draw, text, font, first_max, second_max):
-    """規格斷在「｜」段落邊界，最多兩行；放不下的段落以刪節號帶過。
+def _spec_lines(draw, text, font, first_max, second_max, max_lines=2):
+    """規格斷在「｜」段落邊界，最多指定行數；放不下的段落以刪節號帶過。
 
-    段落中間硬砍會留下孤立的分隔線，看起來像壞字。
+    優先保留完整段落；單一段落本身超寬時才逐字截短。
     """
     text = str(text or "")
     if not text:
@@ -94,6 +94,20 @@ def _spec_lines(draw, text, font, first_max, second_max):
         return [text]
 
     segments = text.split(_SEPARATOR)
+    if max_lines == 1:
+        current = []
+        for segment in segments:
+            candidate = _SEPARATOR.join(current + [segment])
+            if _width(draw, candidate + "…", font) > first_max:
+                break
+            current.append(segment)
+        if current:
+            return [_SEPARATOR.join(current) + "…"]
+        first = segments[0]
+        while first and _width(draw, first + "…", font) > first_max:
+            first = first[:-1]
+        return [first + "…" if _width(draw, "…", font) <= first_max else ""]
+
     lines, current, limit = [], [], first_max
     for segment in segments:
         candidate = _SEPARATOR.join(current + [segment])
@@ -114,6 +128,12 @@ def _spec_lines(draw, text, font, first_max, second_max):
         while last and _width(draw, last + "…", font) > cap:
             last = last[:-1]
         lines[-1] = last + "…"
+    for index, line in enumerate(lines):
+        cap = second_max if index else first_max
+        if _width(draw, line, font) > cap:
+            while line and _width(draw, line + "…", font) > cap:
+                line = line[:-1]
+            lines[index] = line + "…" if _width(draw, "…", font) <= cap else ""
     return lines[:2]
 
 
@@ -181,11 +201,11 @@ def render_label(name, specification, price, barcode, models=()):
             name_lines = [_fit(draw, name, _BOLD_FONT, (18,),
                                296 - price_width - (8 if price else 0))[0]]
         if space_left() < 0 and len(spec_lines) > 1:
-            spec_lines = _spec_lines(draw, specification, spec_font, 296, 0)
+            spec_lines = _spec_lines(draw, specification, spec_font, 296, 296, max_lines=1)
     else:
         # 文字超過條碼頂端時，先犧牲規格第二行，再犧牲品名第二行；條碼位置與下緣留白絕不動。
         if space_left() < 0 and len(spec_lines) > 1:
-            spec_lines = _spec_lines(draw, specification, spec_font, 296, 0)
+            spec_lines = _spec_lines(draw, specification, spec_font, 296, 296, max_lines=1)
         if space_left() < 0 and len(name_lines) > 1:
             name_font = _font(_BOLD_FONT, 18)
             name_lines = [_fit(draw, name, _BOLD_FONT, (18,),

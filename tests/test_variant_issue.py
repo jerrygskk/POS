@@ -1,12 +1,96 @@
 """階段 6:VariantIssue 容錯建立、重驗、啟用、待處理彙總與 effective_active。"""
 
-from base import ConnTestCase
+from base import ConnTestCase, FacadeTestCase
 from lib.db import get_conn
 from lib.application_errors import ValidationError
 from lib.product_service import ProductFacade
 from lib.variant_batch_service import VariantBatchService
 from lib.variant_issue_service import VariantIssueService
 from lib.sales_service import SalesRepository
+
+
+class RequiredReminderSalesTests(FacadeTestCase):
+    def setUp(self):
+        super().setUp()
+        self.make_category_with_field("finish", options=("gloss",))
+        self.note_fid = self.create_field("note", self.cid, field_type="text")
+        created = self.create_product({"finish": "gloss"}, price=100, barcode="REMINDER")
+        self.pid, self.vid = created["product_id"], created["variant_ids"][0]
+        self.invoke("stock.receive", {
+            "employee": 1, "items": [{"variant_id": self.vid, "qty": 5}],
+        })
+        self.invoke("categories.set_field", {
+            "category_id": self.cid, "field_id": self.note_fid,
+            "fields": {"required": 1},
+        })
+
+    def _checkout(self):
+        return self.invoke("sales.checkout", {
+            "employee": 1, "payment": "現金", "paid": 100,
+            "items": [{"variant_id": self.vid, "qty": 1, "unit_price": 100}],
+        })
+
+    def test_active_missing_required_remains_sellable_and_pending(self):
+        summary = self.invoke("variants.issues", {})
+        self.assertEqual(summary["pending_variant_count"], 1)
+        self.assertEqual(summary["by_type"], {"missing_required": 1})
+        self.assertEqual(self._checkout()["total"], 100)
+        self.assertEqual(self.invoke("stock.detail", {"variant_id": self.vid})["stock"], 4)
+        self.assertEqual(self.invoke("variants.issues", {})["by_type"], {"missing_required": 1})
+
+    def test_active_missing_required_scans_as_active(self):
+        match = self.invoke("barcodes.scan", {"code": "REMINDER"})["matches"][0]
+        self.assertEqual(match["status"], "active")
+        self.assertEqual(self.invoke("variants.issues", {})["by_type"], {"missing_required": 1})
+
+    def test_optional_again_clears_reminder_and_remains_sellable(self):
+        self.invoke("categories.set_field", {
+            "category_id": self.cid, "field_id": self.note_fid,
+            "fields": {"required": 0},
+        })
+        self.assertEqual(self.invoke("variants.issues", {})["by_type"], {})
+        self.assertEqual(self._checkout()["total"], 100)
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "REMINDER"})["matches"][0]["status"], "active")
+
+    def test_active_duplicate_signature_still_blocks_sale_and_scan(self):
+        self.invoke("categories.set_field", {
+            "category_id": self.cid, "field_id": self.note_fid,
+            "fields": {"required": 0},
+        })
+        with get_conn(self.db) as conn:
+            other_vid = conn.execute(
+                "INSERT INTO Variant(product_id,price) VALUES(?,100)", (self.pid,),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO VariantAttribute(variant_id,field_id,option_id) "
+                "SELECT ?,field_id,option_id FROM VariantAttribute WHERE variant_id=?",
+                (other_vid, self.vid),
+            )
+            conn.execute(
+                "INSERT INTO VariantIssue(variant_id,issue_type,related_variant_id) "
+                "VALUES(?,'duplicate_signature',?)", (self.vid, other_vid),
+            )
+            self.assertEqual(conn.execute(
+                "SELECT active FROM Variant WHERE variant_id=?", (self.vid,),
+            ).fetchone()[0], 1)
+        with self.assertRaisesRegex(ValidationError, "商品已停用或不存在"):
+            self._checkout()
+        self.assertEqual(self.invoke("stock.detail", {"variant_id": self.vid})["stock"], 5)
+        self.assertEqual(self.invoke("barcodes.scan", {"code": "REMINDER"})["matches"][0]["status"], "issue")
+
+    def test_missing_required_with_any_disabled_parent_still_blocks_sale(self):
+        for table, key, identity in (
+                ("Category", "category_id", self.cid),
+                ("Product", "product_id", self.pid),
+                ("Variant", "variant_id", self.vid)):
+            with self.subTest(table=table):
+                with get_conn(self.db) as conn:
+                    conn.execute(f"UPDATE {table} SET active=0 WHERE {key}=?", (identity,))
+                with self.assertRaisesRegex(ValidationError, "商品已停用或不存在"):
+                    self._checkout()
+                self.assertEqual(self.invoke("barcodes.scan", {"code": "REMINDER"})["matches"][0]["status"], "issue")
+                with get_conn(self.db) as conn:
+                    conn.execute(f"UPDATE {table} SET active=1 WHERE {key}=?", (identity,))
 
 
 class VariantIssueTests(ConnTestCase):

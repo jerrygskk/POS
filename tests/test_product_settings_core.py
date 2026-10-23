@@ -113,6 +113,76 @@ class TestTemplateFields(FacadeTestCase):
             self.invoke("fields.update", {"id": self.fid, "fields": {"field_type": "multi"}})
         self.assertEqual(raised.exception.code, "validation_error")
 
+    def test_delete_last_required_field_clears_issues_without_reactivating(self):
+        note_fid = self.create_field("note", self.cid, field_type="text")
+        created = self.invoke("products.create", {
+            "name": "product", "category_id": self.cid,
+            "variants": [{"attributes": {"size": "full"}, "barcodes": []}],
+        })
+        vid = created["variant_ids"][0]
+        self.invoke("categories.set_field", {
+            "category_id": self.cid, "field_id": note_fid, "fields": {"required": 1},
+        })
+        self.assertEqual(self.invoke("variants.issues", {})["by_type"], {"missing_required": 1})
+        other_cid = self.create_category("other")
+        with get_conn(self.db) as conn:
+            conn.execute("UPDATE Variant SET active=0 WHERE variant_id=?", (vid,))
+            # 舊資料可能殘留未綁定此欄的款式問題;欄位硬刪時仍須一併清除。
+            other_pid = conn.execute(
+                "INSERT INTO Product(name,category_id) VALUES('other',?)", (other_cid,),
+            ).lastrowid
+            other_vid = conn.execute(
+                "INSERT INTO Variant(product_id,active) VALUES(?,0)", (other_pid,),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO VariantIssue(variant_id,issue_type,field_id) "
+                "VALUES(?,'missing_required',?)", (other_vid, note_fid),
+            )
+        result = self.invoke("categories.delete_field", {
+            "category_id": self.cid, "field_id": note_fid,
+        })
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["field_deleted"])
+        with get_conn(self.db) as conn:
+            self.assertIsNone(conn.execute(
+                "SELECT 1 FROM AttributeField WHERE field_id=?", (note_fid,),
+            ).fetchone())
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM VariantIssue WHERE field_id=?", (note_fid,),
+            ).fetchone()[0], 0)
+            self.assertEqual([row[0] for row in conn.execute(
+                "SELECT active FROM Variant WHERE variant_id IN (?,?) ORDER BY variant_id",
+                (vid, other_vid),
+            )], [0, 0])
+
+    def test_delete_shared_required_field_clears_only_this_category_issues(self):
+        note_fid = self.create_field("note", self.cid, field_type="text")
+        other_cid = self.create_category("other")
+        self.invoke("products.create", {
+            "name": "product", "category_id": self.cid,
+            "variants": [{"attributes": {"size": "full"}, "barcodes": []}],
+        })
+        other = self.invoke("products.create", {
+            "name": "other", "category_id": other_cid,
+            "variants": [{"attributes": {}, "barcodes": []}],
+        })["variant_ids"][0]
+        for cid in (self.cid, other_cid):
+            self.invoke("categories.set_field", {
+                "category_id": cid, "field_id": note_fid, "fields": {"required": 1},
+            })
+        self.assertEqual(self.invoke("variants.issues", {})["by_type"], {"missing_required": 2})
+        result = self.invoke("categories.delete_field", {
+            "category_id": self.cid, "field_id": note_fid,
+        })
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["field_deleted"])
+        with get_conn(self.db) as conn:
+            rows = conn.execute(
+                "SELECT variant_id FROM VariantIssue WHERE field_id=?", (note_fid,),
+            ).fetchall()
+            self.assertEqual([row[0] for row in rows], [other])
+            self.assertEqual([row[0] for row in conn.execute("SELECT active FROM Variant")], [1, 1])
+
     def test_deactivating_default_option_clears_default(self):
         self.invoke("categories.set_field", {"category_id": self.cid, "field_id": self.fid,
                                               "fields": {"default_option_id": self.oid}})

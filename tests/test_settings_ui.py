@@ -94,6 +94,224 @@ const models = [
 ];
 """
 
+    def _phone_brand_edits(self):
+        return r'''
+const savedBrands = [
+  {phone_brand_id:10, name:"品牌甲", active:1, sort:1},
+  {phone_brand_id:20, name:"品牌乙", active:1, sort:2},
+];
+const savedModels = [
+  {model_id:1, phone_brand_id:10, brand_name:"品牌甲", name:"型號一", alias:"別名一", series:"系列一", active:1, sort:1},
+  {model_id:2, phone_brand_id:10, brand_name:"品牌甲", name:"型號二", alias:null, series:null, active:1, sort:2},
+  {model_id:3, phone_brand_id:20, brand_name:"品牌乙", name:"型號三", alias:null, series:null, active:1, sort:1},
+];
+const clone = value => JSON.parse(JSON.stringify(value));
+const lists = [];
+API.listCategories = async () => { lists.push("categories"); return []; };
+API.listBrands = async () => { lists.push("brands"); return [{brand_id:7,name:"廠牌"}]; };
+API.listPhoneBrands = async () => { lists.push("phoneBrands"); return clone(savedBrands); };
+API.listModels = async () => { lists.push("models"); return clone(savedModels); };
+const s = mkState({phoneBrands:clone(savedBrands), models:clone(savedModels),
+  brands:[{brand_id:7,name:"廠牌"}]});
+const errors = [];
+s.showError = message => errors.push(message);
+s._takeSnap();
+const modelSnap = s.snap["models:1"];
+s.models[0].name = "型號一修改";
+s.models[0].alias = "別名修改";
+s.models[0].series = "系列修改";
+s.brands[0].name = "廠牌修改";
+s.models = [s.models[1], s.models[0], s.models[2]];
+s.onModelSortPending("品牌甲", [2,1]);
+s.collapsedBrands = {"品牌甲":true, "品牌乙":false};
+function collect() {
+  out.models = s.models;
+  out.lists = lists;
+  out.errors = errors;
+  out.pending = s.pendingModelSort;
+  out.collapsed = s.collapsedBrands;
+  out.modelUnsaved = s.hasUnsaved("models");
+  out.brandUnsaved = s.hasUnsaved("phoneBrands");
+  out.otherUnsaved = s.hasUnsaved("brands");
+  out.modelSnapUnchanged = s.snap["models:1"] === modelSnap && s._snap["models:1"] === modelSnap;
+  out.snapsAgree = JSON.stringify(s.snap) === JSON.stringify(s._snap);
+  out.phoneBrands = s.phoneBrands;
+}
+'''
+
+    def _assert_model_edits_preserved(self, out, ids=(2, 1, 3)):
+        self.assertEqual([m["model_id"] for m in out["models"]], list(ids))
+        edited = next(m for m in out["models"] if m["model_id"] == 1)
+        self.assertEqual([edited["name"], edited["alias"], edited["series"]],
+                         ["型號一修改", "別名修改", "系列修改"])
+        self.assertTrue(out["modelUnsaved"])
+        self.assertTrue(out["otherUnsaved"])
+        self.assertTrue(out["modelSnapUnchanged"])
+        self.assertTrue(out["snapsAgree"])
+        self.assertNotIn("models", out["lists"])
+
+    def test_phone_brand_rename_preserves_model_edits_and_marks_only_brand_saved(self):
+        out = self._run(self._phone_brand_edits() + r'''
+API.updatePhoneBrand = async (id, body) => { out.sent = [id, body]; };
+(async () => {
+  s.phoneBrands[0].name = "新品牌";
+  await s.saveItemName("phoneBrands", s.phoneBrands[0]);
+  collect(); done();
+})();
+''')
+        self._assert_model_edits_preserved(out)
+        self.assertEqual(out["sent"], [10, {"name": "新品牌"}])
+        self.assertFalse(out["brandUnsaved"])
+        self.assertEqual(out["lists"], [])
+        self.assertEqual(out["errors"], [])
+
+    def test_phone_brand_rename_remaps_model_groups_pending_order_and_collapsed_state(self):
+        out = self._run(self._phone_brand_edits() + r'''
+API.updatePhoneBrand = async () => {};
+(async () => {
+  s.phoneBrands[0].name = "新品牌";
+  await s.saveItemName("phoneBrands", s.phoneBrands[0]);
+  out.groups = page.computed.modelGroups.call(s).map(g => [g.brand, g.items.map(m => m.model_id)]);
+  collect(); done();
+})();
+''')
+        self._assert_model_edits_preserved(out)
+        self.assertEqual([m["brand_name"] for m in out["models"]], ["新品牌", "新品牌", "品牌乙"])
+        self.assertEqual(out["groups"], [["新品牌", [2, 1]], ["品牌乙", [3]]])
+        self.assertEqual(out["pending"], {"新品牌": [2, 1]})
+        self.assertEqual(out["collapsed"], {"新品牌": True, "品牌乙": False})
+
+    def test_phone_brand_save_snapshots_sent_name_when_user_keeps_typing(self):
+        out = self._run(self._phone_brand_edits() + r'''
+let finish;
+API.updatePhoneBrand = (id, body) => {
+  out.sent = [id, body];
+  return new Promise(resolve => { finish = resolve; });
+};
+(async () => {
+  s.phoneBrands[0].name = "品牌B";
+  const saving = s.saveItemName("phoneBrands", s.phoneBrands[0]);
+  s.phoneBrands[0].name = "品牌C";
+  finish();
+  await saving;
+  out.savedName = JSON.parse(s.snap["phoneBrands:10"]).name;
+  collect(); done();
+})();
+''')
+        self._assert_model_edits_preserved(out)
+        self.assertEqual(out["sent"], [10, {"name": "品牌B"}])
+        self.assertEqual(out["savedName"], "品牌B")
+        self.assertEqual(out["phoneBrands"][0]["name"], "品牌C")
+        self.assertTrue(out["brandUnsaved"])
+        self.assertEqual([m["brand_name"] for m in out["models"]],
+                         ["品牌B", "品牌B", "品牌乙"])
+        self.assertEqual(out["pending"], {"品牌B": [2, 1]})
+        self.assertEqual(out["collapsed"], {"品牌B": True, "品牌乙": False})
+        self.assertEqual(out["lists"], [])
+
+    def test_consecutive_phone_brand_saves_move_state_from_latest_saved_name(self):
+        out = self._run(self._phone_brand_edits() + r'''
+const pending = [];
+API.updatePhoneBrand = (id, body) => new Promise(resolve => {
+  pending.push({id, body, resolve});
+});
+(async () => {
+  s.phoneBrands[0].name = "品牌B";
+  const savingB = s.saveItemName("phoneBrands", s.phoneBrands[0]);
+  s.phoneBrands[0].name = "品牌C";
+  const savingC = s.saveItemName("phoneBrands", s.phoneBrands[0]);
+  pending[0].resolve();
+  await savingB;
+  out.afterB = {
+    savedName:JSON.parse(s.snap["phoneBrands:10"]).name,
+    name:s.phoneBrands[0].name, unsaved:s.hasUnsaved("phoneBrands"),
+    pending:clone(s.pendingModelSort), collapsed:clone(s.collapsedBrands),
+    modelBrands:s.models.map(m => m.brand_name),
+  };
+  pending[1].resolve();
+  await savingC;
+  out.sent = pending.map(p => [p.id, p.body]);
+  out.savedName = JSON.parse(s.snap["phoneBrands:10"]).name;
+  collect(); done();
+})();
+''')
+        self._assert_model_edits_preserved(out)
+        self.assertEqual(out["afterB"], {
+            "savedName": "品牌B", "name": "品牌C", "unsaved": True,
+            "pending": {"品牌B": [2, 1]},
+            "collapsed": {"品牌B": True, "品牌乙": False},
+            "modelBrands": ["品牌B", "品牌B", "品牌乙"],
+        })
+        self.assertEqual(out["sent"], [[10, {"name": "品牌B"}], [10, {"name": "品牌C"}]])
+        self.assertEqual(out["savedName"], "品牌C")
+        self.assertEqual(out["phoneBrands"][0]["name"], "品牌C")
+        self.assertFalse(out["brandUnsaved"])
+        self.assertEqual([m["brand_name"] for m in out["models"]],
+                         ["品牌C", "品牌C", "品牌乙"])
+        self.assertEqual(out["pending"], {"品牌C": [2, 1]})
+        self.assertEqual(out["collapsed"], {"品牌C": True, "品牌乙": False})
+        self.assertEqual(out["lists"], [])
+
+    def test_phone_brand_rename_failure_reloads_only_brands_and_preserves_model_edits(self):
+        out = self._run(self._phone_brand_edits() + r'''
+API.updatePhoneBrand = async () => { throw new Error("品牌更新失敗"); };
+(async () => {
+  s.phoneBrands[0].name = "新品牌";
+  await s.saveItemName("phoneBrands", s.phoneBrands[0]);
+  collect(); done();
+})();
+''')
+        self._assert_model_edits_preserved(out)
+        self.assertEqual(out["phoneBrands"][0]["name"], "品牌甲")
+        self.assertEqual(out["errors"], ["品牌更新失敗"])
+        self.assertEqual(out["lists"], ["phoneBrands"])
+        self.assertFalse(out["brandUnsaved"])
+        self.assertEqual(out["pending"], {"品牌甲": [2, 1]})
+
+    def test_blank_phone_brand_name_restores_snapshot_without_list_calls(self):
+        out = self._run(self._phone_brand_edits() + r'''
+(async () => {
+  s.phoneBrands[0].name = "  ";
+  await s.saveItemName("phoneBrands", s.phoneBrands[0]);
+  collect(); done();
+})();
+''')
+        self._assert_model_edits_preserved(out)
+        self.assertEqual(out["phoneBrands"][0]["name"], "品牌甲")
+        self.assertEqual(out["errors"], ["名稱不可空白"])
+        self.assertEqual(out["lists"], [])
+
+    def test_phone_brand_sort_preserves_model_edits_and_stably_reorders_groups(self):
+        out = self._run(self._phone_brand_edits() + r'''
+API.sortPhoneBrands = async ids => { out.sent = ids; };
+(async () => {
+  s.phoneBrands.reverse();
+  await s.saveSort("phoneBrands", [20,10]);
+  out.groups = page.computed.modelGroups.call(s).map(g => g.brand);
+  collect(); done();
+})();
+''')
+        self._assert_model_edits_preserved(out, ids=(3, 2, 1))
+        self.assertEqual(out["sent"], [20, 10])
+        self.assertEqual(out["groups"], ["品牌乙", "品牌甲"])
+        self.assertEqual(out["pending"], {"品牌甲": [2, 1]})
+        self.assertEqual(out["lists"], [])
+
+    def test_phone_brand_sort_failure_reloads_only_brands_and_preserves_model_order(self):
+        out = self._run(self._phone_brand_edits() + r'''
+API.sortPhoneBrands = async () => { throw new Error("品牌排序失敗"); };
+(async () => {
+  s.phoneBrands.reverse();
+  await s.saveSort("phoneBrands", [20,10]);
+  collect(); done();
+})();
+''')
+        self._assert_model_edits_preserved(out)
+        self.assertEqual([b["phone_brand_id"] for b in out["phoneBrands"]], [10, 20])
+        self.assertEqual(out["lists"], ["phoneBrands"])
+        self.assertEqual(out["errors"], ["品牌排序失敗"])
+        self.assertEqual(out["pending"], {"品牌甲": [2, 1]})
+
     def test_full_list_drag_sends_that_brand_in_new_order(self):
         out = self._run(self._models() + r'''
 const s = mkState({ models });

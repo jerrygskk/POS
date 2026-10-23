@@ -154,7 +154,7 @@ s.guard = async operation => { try { await operation(); } catch (error) { s.show
 ''')
         self.assertEqual(out["draft"], {
             "cart": [{"variant_id": 1, "qty": 1, "unit_price": 100, "discount": 0}],
-            "orderDiscount": 50, "submitting": False})
+            "orderDiscount": 50, "submitting": False, "generation": 1})
         self.assertEqual(out["errors"], ["結帳失敗"])
         self.assertEqual(out["paid"], 100)
 
@@ -177,7 +177,8 @@ s.draft.orderDiscount = 50;
         self.assertEqual(out["submitted"], {
             "payment": "現金", "order_discount": 50, "paid": 500, "employee": 1,
             "items": [{"variant_id": 7, "qty": 2, "unit_price": 250, "discount": 30}]})
-        self.assertEqual(out["draft"], {"cart": [], "orderDiscount": 0, "submitting": False})
+        self.assertEqual(out["draft"], {
+            "cart": [], "orderDiscount": 0, "submitting": False, "generation": 1})
         self.assertIsNone(out["paid"])
         self.assertEqual(out["total"], 0)
 
@@ -273,6 +274,94 @@ const s = mkState();
 ''')
         self.assertIsNone(out["code"])
 
+    def test_pending_checkout_blocks_additions_after_switching_page(self):
+        out = self._run(r'''
+let release, submitted, focused = 0;
+API.checkout = value => { submitted = value; return new Promise(resolve => { release = resolve; }); };
+const first = mkState();
+first.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+(async () => {
+  const pending = first.checkout();
+  const second = mkState({scanCode:"NEXT", $refs:{scan:{focus:() => focused++}}});
+  await second.addItem({variant_id:2, price:200});
+  out.during = {ids:second.draft.cart.map(i => i.variant_id), errors:second._errors,
+    scan:second.scanCode, focused};
+  out.items = submitted.items;
+  release({change:0, sale_id:1}); await pending;
+  out.cart = second.draft.cart;
+  done();
+})();
+''')
+        self.assertEqual(out["during"], {"ids": [1], "errors": ["結帳處理中，請稍候。"],
+                                         "scan": "", "focused": 1})
+        self.assertEqual(out["items"], [
+            {"variant_id": 1, "qty": 1, "unit_price": 100, "discount": 0}])
+        self.assertEqual(out["cart"], [])
+
+    def test_pending_checkout_blocks_scan_before_lookup(self):
+        out = self._run(r'''
+let release, calls = 0, focused = 0;
+API.checkout = () => new Promise(resolve => { release = resolve; });
+context.window.PosScan = async () => { calls++; return {data:{variant_id:2, price:200}}; };
+const s = mkState({scanCode:"NEXT", $refs:{scan:{focus:() => focused++}}});
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+(async () => {
+  const pending = s.checkout(); await s.onScan();
+  out.during = {calls, focused, scan:s.scanCode, errors:s._errors, count:s.draft.cart.length};
+  release({change:0, sale_id:1}); await pending; done();
+})();
+''')
+        self.assertEqual(out["during"], {"calls": 0, "focused": 1, "scan": "",
+                                         "errors": ["結帳處理中，請稍候。"], "count": 1})
+
+    def test_scan_finishing_after_checkout_does_not_add_to_new_cart(self):
+        out = self._run(r'''
+let releaseScan;
+context.window.PosScan = () => new Promise(resolve => { releaseScan = resolve; });
+API.checkout = async () => ({change:0, sale_id:1});
+const s = mkState({scanCode:"NEXT"});
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+(async () => {
+  const scan = s.onScan(); await s.checkout();
+  releaseScan({data:{variant_id:2, price:200}}); await scan;
+  out.cart = s.draft.cart; out.errors = s._errors; done();
+})();
+''')
+        self.assertEqual(out["cart"], [])
+        self.assertEqual(out["errors"], ["結帳期間購物車已變動，請重新加入。"])
+
+    def test_price_input_finishing_after_checkout_does_not_add_to_new_cart(self):
+        out = self._run(r'''
+let releaseInput;
+PosConfirm.input = () => new Promise(resolve => { releaseInput = resolve; });
+API.checkout = async () => ({change:0, sale_id:1});
+const s = mkState();
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+(async () => {
+  const adding = s.addItem({variant_id:2, name:"未定價", price:null});
+  await s.checkout(); releaseInput("200"); await adding;
+  out.cart = s.draft.cart; out.errors = s._errors; done();
+})();
+''')
+        self.assertEqual(out["cart"], [])
+        self.assertEqual(out["errors"], ["結帳期間購物車已變動，請重新加入。"])
+
+    def test_pending_checkout_blocks_remove_and_unlocks_after_success(self):
+        out = self._run(r'''
+let release;
+API.checkout = () => new Promise(resolve => { release = resolve; });
+const s = mkState();
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+(async () => {
+  const pending = s.checkout(); s.removeItem(0);
+  out.during = s.draft.cart.map(i => i.variant_id);
+  release({change:0, sale_id:1}); await pending;
+  await s.addItem({variant_id:2, price:200}); s.removeItem(0);
+  out.after = s.draft.cart; done();
+})();
+''')
+        self.assertEqual(out, {"during": [1], "after": []})
+
 
 class CartTemplateContractTests(unittest.TestCase):
     def test_number_column_precedes_product_and_uses_shared_barcode_width(self):
@@ -293,8 +382,20 @@ class CartTemplateContractTests(unittest.TestCase):
         for name in ("price", "qty", "discount", "subtotal", "stock", "remove"):
             self.assertIn(f'class="cart-col-{name}"', checkout)
             self.assertRegex(css, rf"\.cart-col-{name}[ ,][^{{]*\{{ width: \d+px; \}}")
-        self.assertIn('<button class="btn-x" title="移除" @click="draft.cart.splice(i,1)">✕</button>', checkout)
+        self.assertIn('<button class="btn-x" title="移除" @click="removeItem(i)" :disabled="draft.submitting">✕</button>', checkout)
         self.assertIn("background: var(--danger); color: #fff;", css.split(".btn-x {", 1)[1].split("}", 1)[0])
+
+    def test_checkout_inputs_and_remove_button_are_disabled_while_submitting(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        checkout = html.split('<template id="tpl-checkout">', 1)[1].split("</template>", 1)[0]
+        for model in ("it.unit_price", "it.qty", "it.discount", "draft.orderDiscount", "payment", "paid"):
+            with self.subTest(model=model):
+                tag = re.search(r'<(?:input|select)\b[^>]*v-model(?:\.number)?="'
+                                + re.escape(model) + r'"[^>]*>', checkout)
+                self.assertIsNotNone(tag)
+                self.assertIn(':disabled="draft.submitting"', tag.group())
+        self.assertIn('@click="removeItem(i)" :disabled="draft.submitting"', checkout)
+        self.assertIn('@change="it.qty = Math.max(1, Math.floor(it.qty) || 1)"', checkout)
 
 
 class ConfirmAndResourceContractTests(unittest.TestCase):

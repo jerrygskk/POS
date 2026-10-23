@@ -6,12 +6,6 @@ from lib.product_rules import FIELD_TYPES
 
 FEATURE_FIELD_KEY = normalize_key("特性詞條")  # 每個種類各自一份的詞條欄
 
-# 有效啟用(規格 §8.2):Category.active AND Product.active AND Variant.active
-#   AND 沒有未解決的 VariantIssue。以下常數以 c/p/v 別名表示三表;
-#   VARIANT_NO_ISSUE 需子查詢的 v 別名即為 Variant。
-VARIANT_NO_ISSUE = "NOT EXISTS (SELECT 1 FROM VariantIssue vi WHERE vi.variant_id=v.variant_id)"
-EFFECTIVE_ACTIVE = "c.active=1 AND p.active=1 AND v.active=1 AND " + VARIANT_NO_ISSUE
-
 
 def variant_signature(conn, variant_id, feature_id):
     """正式規格（排除特性詞條）與適用型號的持久化簽章。"""

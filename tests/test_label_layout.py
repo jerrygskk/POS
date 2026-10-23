@@ -18,12 +18,82 @@ def _draw():
     return ImageDraw.Draw(Image.new("RGB", (320, 160), "white"))
 
 
+def _text_images_without_barcode(name, specification, models):
+    before_barcode = []
+    original_paste = Image.Image.paste
+
+    def capture_text(image, *args, **kwargs):
+        # 白條碼會蓋掉重疊的字；貼上前也要量測，才不會漏掉已被擦除的墨跡。
+        before_barcode.append(image.copy())
+        return original_paste(image, *args, **kwargs)
+
+    white_barcode = Image.new("RGB", (296, label_layout._BARCODE_HEIGHT), "white")
+    with patch("lib.label_layout._barcode_image", return_value=white_barcode):
+        with patch.object(Image.Image, "paste", autospec=True, side_effect=capture_text):
+            image = render_label(name, specification, "$1290", _CODE, models=models)
+    return image, before_barcode[0]
+
+
 class LabelLayoutTests(unittest.TestCase):
+    def test_long_content_ink_stays_above_barcode(self):
+        specification = "MOD NX｜深湖藍｜含邊框｜二入組｜附擦拭布｜防滑設計｜磁吸支援"
+        models = [f"iPhone {i} Pro Max" for i in range(17, 13, -1)]
+        cases = (
+            (_LONG_NAME, specification, models),
+            (_SHORT_NAME, specification, models),
+            (_LONG_NAME, specification, ()),
+            (_SHORT_NAME, "單一超長規格段落" * 20, models),
+        )
+        for name, spec, applicable_models in cases:
+            with self.subTest(name=name, specification=spec, models=applicable_models):
+                for stage, image in zip(("finished", "before_barcode"),
+                                        _text_images_without_barcode(name, spec, applicable_models)):
+                    with self.subTest(stage=stage):
+                        region = image.convert("L").crop((
+                            0, label_layout._TEXT_LIMIT, image.width,
+                            label_layout._BARCODE_TOP + label_layout._BARCODE_HEIGHT,
+                        ))
+                        self.assertEqual(region.histogram()[0], 0, "文字墨跡進入條碼保留區")
+
+    def test_one_spec_line_truncates_at_complete_segment_boundary(self):
+        draw, font = _draw(), _font("C:/Windows/Fonts/msjh.ttc", 14)
+        text = "深湖藍｜含邊框｜二入組｜附擦拭布｜防滑設計｜磁吸支援"
+        lines = _spec_lines(draw, text, font, 150, 296, max_lines=1)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].endswith("…"))
+        self.assertLessEqual(label_layout._width(draw, lines[0], font), 150)
+        prefix = lines[0].removesuffix("…")
+        self.assertIn(prefix, ["｜".join(text.split("｜")[:n])
+                               for n in range(1, len(text.split("｜")))])
+
+    def test_one_spec_line_truncates_single_overlong_segment(self):
+        draw, font = _draw(), _font("C:/Windows/Fonts/msjh.ttc", 14)
+        lines = _spec_lines(draw, "單一超長規格段落" * 20, font, 296, 296, max_lines=1)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].endswith("…"))
+        self.assertLessEqual(label_layout._width(draw, lines[0], font), 296)
+
+    def test_default_spec_lines_bound_each_overlong_segment(self):
+        draw, font = _draw(), _font("C:/Windows/Fonts/msjh.ttc", 14)
+        for text in ("單一超長規格段落" * 20, "短｜" + "單一超長規格段落" * 20,
+                     "單一超長規格段落" * 20 + "｜短"):
+            with self.subTest(text=text):
+                lines = _spec_lines(draw, text, font, 150, 296)
+                self.assertLessEqual(len(lines), 2)
+                for line, maximum in zip(lines, (150, 296)):
+                    self.assertTrue(line)
+                    self.assertLessEqual(label_layout._width(draw, line, font), maximum)
+
+    def test_empty_specification_keeps_empty_line(self):
+        draw, font = _draw(), _font("C:/Windows/Fonts/msjh.ttc", 14)
+        self.assertEqual(_spec_lines(draw, "", font, 296, 296), [""])
+        self.assertEqual(_spec_lines(draw, "", font, 296, 296, max_lines=1), [""])
+
     def test_no_models_matches_baseline_pixels(self):
         # 條碼固定在底部、號碼在條碼下方後重新產生（已目視確認），鎖住無型號排版。
         cases = (
             (_SHORT_NAME, _SHORT_SPEC, "$590", "da2b3debdc0c0b7c8f0d13a9b7cf664ef1b7138139763b3e56d27c78bf87b998"),
-            (_LONG_NAME, _LONG_SPEC, "$1290", "42e0cb7b643de48d14222a5a5890957d78e5a792fc85a0636499577702414e9c"),
+            (_LONG_NAME, _LONG_SPEC, "$1290", "e448949c7f8f9382b9198dee9d439f196bbd57931f11c7c4469b1be31e51d6d8"),
             ("超長品名" * 40, _LONG_SPEC, "", "5c6dfde5048e8f66c2618b84b97ec27e621d0b579fd22a02a929a9af0613dec7"),
         )
         for name, spec, price, expected in cases:
@@ -91,8 +161,7 @@ class LabelLayoutTests(unittest.TestCase):
         printed = [(call.args[1], call.args[2]) for call in text.call_args_list]
         name = label_layout._fit(draw, _LONG_NAME, "C:/Windows/Fonts/msjhbd.ttc", (18,), 296 - price_width - 8)[0]
         self.assertEqual(printed, [((308 - price_width, 16), "$1290"), ((12, 16), name),
-                                  ((12, 38), "i17 ProMax"), ((12, 56), spec[0]),
-                                  ((12, 74), spec[1]),
+                                  ((12, 38), "i17 ProMax"), ((12, 56), "MOD NX｜深湖藍｜含邊框｜二入組…"),
                                   # 條碼固定頂 86、高 50;號碼置中、貼條碼下 2 點(字頂自帶 5 點空白)
                                   (((320 - label_layout._width(draw, _CODE, font)) // 2, 86 + 50 + 2 - 5), _CODE)])
 

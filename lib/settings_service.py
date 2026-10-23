@@ -531,6 +531,11 @@ class SettingsService:
             "DELETE FROM VariantAttribute WHERE field_id=? AND variant_id IN ("
             "SELECT v.variant_id FROM Variant v JOIN Product p ON p.product_id=v.product_id "
             "WHERE p.category_id=?)", (field_id, category_id))
+        # 此種類已移除此欄,相關待補問題不再成立;保留款式原本的啟用狀態。
+        self.repo.execute(
+            "DELETE FROM VariantIssue WHERE field_id=? AND variant_id IN ("
+            "SELECT v.variant_id FROM Variant v JOIN Product p ON p.product_id=v.product_id "
+            "WHERE p.category_id=?)", (field_id, category_id))
         self.repo.execute("DELETE FROM CategoryField WHERE category_id=? AND field_id=?",
                           (category_id, field_id))
         field_deleted = False
@@ -541,6 +546,7 @@ class SettingsService:
                 "DELETE FROM OptionModel WHERE option_id IN "
                 "(SELECT option_id FROM AttributeOption WHERE field_id=?)", (field_id,))
             self.repo.execute("DELETE FROM AttributeOption WHERE field_id=?", (field_id,))
+            self.repo.execute("DELETE FROM VariantIssue WHERE field_id=?", (field_id,))
             self.repo.execute("DELETE FROM AttributeField WHERE field_id=?", (field_id,))
             field_deleted = True
         return {"ok": True, "removed_variant_count": removed,

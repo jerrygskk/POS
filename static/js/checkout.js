@@ -1,7 +1,7 @@
 window.PosPages = window.PosPages || {};
 // 切頁會卸載收銀元件;購物車放元件外才撐得過切頁。只活在本次開啟程式期間,
 // 不落地——關閉程式後沒結帳的單本來就不該留著。
-window.PosCheckoutDraft = Vue.reactive({ cart: [], orderDiscount: 0, submitting: false });
+window.PosCheckoutDraft = Vue.reactive({ cart: [], orderDiscount: 0, submitting: false, generation: 0 });
 window.PosPages["page-checkout"] = {
   template: "#tpl-checkout",
   inject: ["showError"],
@@ -36,7 +36,17 @@ window.PosPages["page-checkout"] = {
   unmounted() { document.removeEventListener("click", this._refocus); },
   methods: {
     itemsText(s) { return s.items.map(i => `${i.name}×${i.qty}`).join("、"); },
-    async addItem(r) {
+    async addItem(r, gen = this.draft.generation) {
+      if (this.draft.submitting) {
+        this.showError("結帳處理中，請稍候。");
+        this.scanCode = "";
+        this.$refs?.scan?.focus();
+        return;
+      }
+      if (this.draft.generation !== gen) {
+        this.showError("結帳期間購物車已變動，請重新加入。");
+        return;
+      }
       let price = r.price;
       if (price === null) {
         const s = await PosConfirm.input({
@@ -44,6 +54,10 @@ window.PosPages["page-checkout"] = {
           inputType: "number",
           validate: value => /^\d+$/.test(value) ? null : "價格必須是非負整數",
         });
+        if (this.draft.submitting || this.draft.generation !== gen) {
+          this.showError("結帳期間購物車已變動，請重新加入。");
+          return;
+        }
         if (s === null) return;
         price = Number(s);
       }
@@ -55,12 +69,28 @@ window.PosPages["page-checkout"] = {
         unit_price: price, qty: 1, discount: 0, stock: r.stock });
       this.searchResults = [];
     },
+    removeItem(i) {
+      if (this.draft.submitting) return;
+      this.draft.cart.splice(i, 1);
+    },
     async onScan() {
-
+      if (this.draft.submitting) {
+        this.showError("結帳處理中，請稍候。");
+        this.scanCode = "";
+        this.$refs?.scan?.focus();
+        return;
+      }
+      const gen = this.draft.generation;
       await this.guard(async () => {  // 查無條碼:保留輸入
         const query = await window.PosScan(this.scanCode, { sellableOnly: true });
+        // 只看鎖定擋不住結帳完成後才回來的舊掃描，批次編號也必須相同。
+        if (this.draft.submitting || this.draft.generation !== gen) {
+          this.showError("結帳期間購物車已變動，請重新加入。");
+          this.scanCode = "";
+          return;
+        }
         if (!query) { this.scanCode = ""; return; }
-        await this.addItem(query.data);
+        await this.addItem(query.data, gen);
         this.scanCode = "";
       });
     },
@@ -72,13 +102,15 @@ window.PosPages["page-checkout"] = {
       if (this.draft.submitting) return;
       if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
       this.draft.submitting = true;
+      this.draft.generation += 1;
+      const snapshot = this.draft.cart.map(i => ({ variant_id: i.variant_id, qty: i.qty,
+        unit_price: i.unit_price, discount: i.discount }));
       try {
         await this.guard(async () => {
           const r = await API.checkout({
             payment: this.payment, order_discount: this.draft.orderDiscount,
             paid: this.paidAmount, employee: this.employee.id,
-            items: this.draft.cart.map(i => ({ variant_id: i.variant_id, qty: i.qty,
-              unit_price: i.unit_price, discount: i.discount })) });
+            items: snapshot });
           this.doneMsg = this.paidBlank
             ? `結帳完成(交易編號 ${r.sale_id})`
             : `結帳完成，找零 ${r.change} 元(交易編號 ${r.sale_id})`;
