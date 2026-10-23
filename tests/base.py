@@ -1,4 +1,5 @@
 """tests 共用基底:連線型與 Desktop Facade 型測試 setUp。"""
+import atexit
 import os
 import sys
 import tempfile
@@ -7,18 +8,59 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import lib.db as _db
+
+_real_get_conn = _db.get_conn
+
+
+def _fast_get_conn(db_path):
+    # 測試不驗斷電耐久性，存檔不等硬碟寫完以縮短整輪時間；正式程式不受影響。
+    conn = _real_get_conn(db_path)
+    conn.execute("PRAGMA synchronous=OFF")
+    return conn
+
+
+_db.get_conn = _fast_get_conn
+
 from lib.db import init_db, get_conn
 from lib.desktop_application import DesktopFacade
 from lib.application_errors import ApplicationError
 from lib.desktop_bridge import DesktopBridge
+from lib.auth import hash_password
+
+_TEMPLATE_DB = None
+
+
+def _template_db():
+    """整輪測試只跑一次 init_db,之後各測試複製檔案;密碼改低迭代以免每次登入耗時。"""
+    global _TEMPLATE_DB
+    if _TEMPLATE_DB is None:
+        folder = tempfile.mkdtemp()
+        atexit.register(shutil.rmtree, folder, True)
+        path = os.path.join(folder, "template.db")
+        init_db(path)
+        conn = get_conn(path)
+        conn.execute("UPDATE Setting SET value=? WHERE key='admin_password_hash'",
+                     (hash_password("admin", iterations=1),))
+        conn.commit()
+        conn.close()
+        _TEMPLATE_DB = path
+    return _TEMPLATE_DB
+
+
+def fresh_db(folder):
+    db = os.path.join(folder, "pos.db")
+    shutil.copyfile(_template_db(), db)
+    return db
+
+
 class ConnTestCase(unittest.TestCase):
-    """建 tmpdir + db + init_db + get_conn,供 self.conn;tearDown 關閉。"""
+    """建 tmpdir + db(複製初始化範本)+ get_conn,供 self.conn;tearDown 關閉。"""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
+        self.db = fresh_db(self.tmp)
         self.conn = get_conn(self.db)
 
     def tearDown(self):
@@ -31,8 +73,7 @@ class FacadeTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.db = os.path.join(self.tmp, "pos.db")
-        init_db(self.db)
+        self.db = fresh_db(self.tmp)
         self.facade = DesktopFacade(self.db)
         # 既有領域測試需要建檔；權限測試另建員工身分的 facade。
         self.facade.session.login("admin")
