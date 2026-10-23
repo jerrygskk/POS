@@ -38,7 +38,10 @@ nav { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding: 
   background: var(--primary-hover); border-bottom: 1px solid var(--pressed); }
 .nav-logo { width: 52px; height: 52px; object-fit: contain; flex: 0 0 52px; }
 nav button { padding: 12px 24px; font-size: 18px; border: 0; border-radius: 8px;
-  background: transparent; color: #fff; cursor: pointer; min-width: 0; }
+  background: transparent; color: #fff; cursor: pointer; min-width: 0;
+  display: inline-flex; align-items: center; }
+/* 頁籤上的紅色小標以 flex 置中;管理者標籤在文字前,間距改放右側 */
+nav button > .badge:first-child { margin: 0 6px 0 0; }
 nav button:hover { background: var(--primary-active); }
 nav button:active { background: var(--primary-active); }
 nav button.active, nav button.active:hover, nav button.active:active {
@@ -172,7 +175,7 @@ tr.inactive > td { opacity: 0.55; }
 .bc-err { color: var(--danger); font-size: 13px; margin-top: 4px; white-space: normal; }
 
 /* 待處理徽章與問題說明 */
-.badge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 4px;
+.badge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 4px; vertical-align: middle;
   background: var(--danger); color: #fff; font-size: 12px; line-height: 16px;
   text-align: center; border-radius: 8px; }
 .issue-box { margin-top: 6px; padding: 6px 8px; border-radius: 6px;
@@ -266,6 +269,8 @@ tr.inactive > td { opacity: 0.55; }
   border-radius: 8px; border: 1px solid var(--hover); }
 .maint-detail { margin: 0 0 8px; }
 .grp-title { font-weight: bold; margin: 8px 0 2px; color: var(--text-2); }
+/* 收銀頁下方最近成交:與上方結帳區拉開距離 */
+.recent-sales-title { margin: 32px 0 8px; font-size: 16px; }
 .model-group { margin-bottom: 10px; }
 .hint { color: var(--text-2); font-size: 14px; }
 .opt-block { margin: 8px 0; }
@@ -652,3 +657,5 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .receive-col-qty { width: 110px; }
 .receive-col-label { width: 200px; }
 .receive-table tr.receive-row-hit > td { background: var(--accent-soft); }
+/* 盤點審核:標記退回的品項整列淡紅底,一眼看出哪些會被退回 */
+tr.stocktake-row-returned > td { background: rgba(220, 38, 38, 0.08); color: var(--danger); }

@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=220">
+<link rel="stylesheet" href="css/pos.css?v=230">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=220" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=230" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -72,6 +72,16 @@
             @click="checkout">結帳</button>
   </div>
   <div v-if="doneMsg" class="done-msg">{{ doneMsg }}</div>
+  <template v-if="recent.length">
+  <div class="grp-title recent-sales-title">本日最近成交</div>
+  <table>
+    <thead><tr><th>編號</th><th>時間</th><th>員工</th><th>商品</th><th>應收</th></tr></thead>
+    <tbody><tr v-for="s in recent" :key="s.sale_id">
+      <td>{{ s.sale_id }}</td><td>{{ s.ts }}</td><td>{{ s.employee }}</td>
+      <td>{{ itemsText(s) }}</td><td>{{ s.total }}</td>
+    </tr></tbody>
+  </table>
+  </template>
 </div>
 </template>
 <template id="tpl-labels">
@@ -178,8 +188,10 @@
       <tbody><tr v-for="s in sessions" :key="s.session_id">
         <td>{{ s.session_id }}</td><td>{{ s.started_at }}</td>
         <td>{{ s.status === 'open' ? '進行中' : s.status === 'pending' ? '待核准' : '已結案' }}</td><td>{{ s.employee }}</td>
-        <td><button v-if="s.status==='open'" @click="enter(s.session_id)">續盤</button>
-            <button v-else @click="enter(s.session_id)">{{ s.status==='pending' && isAdmin ? '審核' : '檢視' }}</button></td>
+        <td><div class="card-actions">
+            <button v-if="s.status==='open'" @click="enter(s.session_id)">續盤</button>
+            <button v-else @click="enter(s.session_id)">{{ s.status==='pending' && isAdmin ? '審核' : '檢視' }}</button>
+            <button v-if="s.status==='pending'" @click="withdraw(s.session_id)">抽回修改</button></div></td>
       </tr></tbody>
     </table>
   </div>
@@ -189,22 +201,25 @@
              class="scan-input" placeholder="掃描條碼(重複掃自動累加)"
              :disabled="detail.status!=='open'">
       <button @click="current=null; detail=null; reload()">返回列表</button>
-      <button class="primary" v-if="detail.status==='open'" @click="close">結案</button>
-      <button class="primary" v-if="detail.status==='pending' && isAdmin" @click="approve">核准</button>
-      <button v-if="detail.status==='pending'" @click="withdraw">抽回修改</button>
+      <button class="primary" v-if="detail.status==='open'" @click="close">送出</button>
+      <button class="primary" v-if="canReview" :disabled="marked.length > 0" @click="approve">核准</button>
+      <button class="primary" v-if="canReview" :disabled="!marked.length" @click="returnItems">退回重盤（{{ marked.length }} 項）</button>
     </div>
     <div v-if="detail.status==='pending' && !isAdmin" class="notice-bar">等待管理者核准</div>
-    <div v-if="detail.status==='pending' && isAdmin" class="notice-bar">實盤量僅供修正原盤點時的數量，請勿填入目前重新清點的數量。</div>
     <div v-if="recountCount" class="notice-bar">有 {{ recountCount }} 項需重新清點</div>
     <table>
-      <thead><tr><th>商品</th><th>屬性</th><th>系統量</th><th>實盤量</th><th>差異</th></tr></thead>
-      <tbody><tr v-for="it in detail.items" :key="it.variant_id" :class="{neg: it.needs_recount}">
+      <thead><tr><th>商品</th><th>屬性</th><th>系統量</th><th>實盤量</th><th>差異</th>
+        <th v-if="canReview"></th><th v-if="canEditCounted" class="cart-col-remove"></th></tr></thead>
+      <tbody><tr v-for="it in detail.items" :key="it.variant_id" :class="{neg: it.needs_recount, 'stocktake-row-returned': marked.includes(it.variant_id)}">
         <td>{{ it.name }}</td><td>{{ attrText(it) }}</td>
         <td>{{ it.system_qty }}</td>
         <td><input type="number" v-model.number="it.counted_qty" min="0" class="w80"
                    :disabled="!canEditCounted" @change="setCounted(it)">
           <button v-if="it.needs_recount && canEditCounted" class="btn-sm" @click="setCounted(it)">確認</button></td>
         <td :class="{neg: it.diff < 0}">{{ it.diff > 0 ? '+' + it.diff : it.diff }}</td>
+        <td v-if="canReview"><button v-if="marked.includes(it.variant_id)" class="btn-sm danger" @click="toggleMark(it)">取消退回</button>
+          <button v-else class="btn-sm" @click="toggleMark(it)">退回</button></td>
+        <td v-if="canEditCounted"><button class="btn-x" title="移除" @click="removeItem(it)">✕</button></td>
       </tr></tbody>
     </table>
   </div>
@@ -212,35 +227,87 @@
 </template>
 <template id="tpl-records">
 <div class="page">
-  <div class="scan-row">
-    <label>起 <input type="date" v-model="dateFrom"></label>
-    <label>迄 <input type="date" v-model="dateTo"></label>
-    <select v-model="payment"><option value="">全部付款方式</option>
-      <option v-for="p in payments" :key="p">{{ p }}</option></select>
-    <button class="primary" @click="reload">查詢</button>
-    <button v-if="isAdmin" @click="exportCsv">匯出 CSV</button>
-  </div>
-  <div v-if="summary" class="pay-panel">
-    <div>{{ dateFrom }} 小結:{{ summary.count }} 筆,共 {{ summary.total }} 元</div>
-    <div v-for="(amt, p) in summary.by_payment" :key="p">{{ p }}:{{ amt }} 元</div>
-  </div>
-  <table>
-    <thead><tr><th>編號</th><th>時間</th><th>員工</th><th>付款</th><th>整單折抵</th><th>應收</th><th></th></tr></thead>
-    <tbody>
-      <template v-for="s in sales" :key="s.sale_id">
-        <tr>
-          <td>{{ s.sale_id }}</td><td>{{ s.ts }}</td><td>{{ s.employee }}</td><td>{{ s.payment }}</td>
-          <td>{{ s.order_discount }}</td><td>{{ s.total }}</td>
-          <td><button @click="expanded = expanded===s.sale_id ? null : s.sale_id">
-            {{ expanded===s.sale_id ? '收合' : '明細' }}</button></td>
-        </tr>
-        <tr v-if="expanded===s.sale_id"><td colspan="7">
-          <div v-for="it in s.items">
-            {{ it.name }}|{{ attrText(it) }}|{{ it.qty }} 件 ×
-            {{ it.unit_price }} 元(折 {{ it.discount }})
-          </div>
-        </td></tr>
+  <!-- 紀錄查詢:左側選類別(比照設定頁側欄),右側查詢與清單 -->
+  <div class="prod-settings">
+    <aside class="cat-list">
+      <div class="cat-list-title">紀錄</div>
+      <div v-for="[key, label] in kinds" :key="key" class="cat-item"
+           :class="{active: kind===key}" @click="selectKind(key)">
+        <span class="cat-name">{{ label }}</span>
+      </div>
+    </aside>
+    <section class="cat-detail">
+      <div class="scan-row">
+        <label>起 <input type="date" v-model="dateFrom"></label>
+        <label>迄 <input type="date" v-model="dateTo"></label>
+        <select v-if="kind==='sales'" v-model="payment"><option value="">全部付款方式</option>
+          <option v-for="p in payments" :key="p">{{ p }}</option></select>
+        <button class="primary" @click="reload">查詢</button>
+        <button v-if="kind==='sales' && isAdmin" @click="exportCsv">匯出 CSV</button>
+      </div>
+      <template v-if="kind==='sales'">
+        <div v-if="summary" class="pay-panel">
+          <div>{{ dateFrom }} 小結:{{ summary.count }} 筆,共 {{ summary.total }} 元</div>
+          <div v-for="(amt, p) in summary.by_payment" :key="p">{{ p }}:{{ amt }} 元</div>
+        </div>
+        <table>
+          <thead><tr><th>編號</th><th>時間</th><th>員工</th><th>付款</th><th>整單折抵</th><th>應收</th><th></th></tr></thead>
+          <tbody>
+            <template v-for="s in sales" :key="s.sale_id">
+              <tr>
+                <td>{{ s.sale_id }}</td><td>{{ s.ts }}</td><td>{{ s.employee }}</td><td>{{ s.payment }}</td>
+                <td>{{ s.order_discount }}</td><td>{{ s.total }}</td>
+                <td><button @click="toggle(s.sale_id)">{{ expanded===s.sale_id ? '收合' : '明細' }}</button></td>
+              </tr>
+              <tr v-if="expanded===s.sale_id"><td colspan="7">
+                <div v-for="it in s.items">
+                  {{ it.name }}|{{ attrText(it) }}|{{ it.qty }} 件 ×
+                  {{ it.unit_price }} 元(折 {{ it.discount }})
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+        </table>
       </template>
+      <table v-else-if="kind==='receive'">
+        <thead><tr><th>時間</th><th>員工</th><th>商品種類</th><th></th></tr></thead>
+        <tbody>
+          <template v-for="(r, i) in receipts" :key="r.receipt_id ?? 'old-' + i">
+            <tr>
+              <td>{{ r.ts }}</td><td>{{ r.employee ?? '—' }}</td>
+              <td>{{ r.items.length }}</td>
+              <td><button @click="toggle('r' + i)">{{ expanded==='r' + i ? '收合' : '明細' }}</button></td>
+            </tr>
+            <tr v-if="expanded==='r' + i"><td colspan="4">
+              <div v-for="it in r.items">
+                {{ it.name }}|{{ attrText(it) }}|進貨 {{ it.qty }} 件(目前庫存 {{ it.stock }} 件)
+              </div>
+            </td></tr>
+          </template>
+        </tbody>
+      </table>
+      <table v-else>
+        <thead><tr><th>單號</th><th>開始時間</th><th>核准時間</th><th>員工</th><th>差異項數</th><th></th></tr></thead>
+        <tbody>
+          <template v-for="t in stocktakes" :key="t.session_id">
+            <tr>
+              <td>{{ t.session_id }}</td><td>{{ t.started_at }}</td><td>{{ t.approved_at || '—' }}</td>
+              <td>{{ t.employee }}</td><td>{{ t.diff_count }}</td>
+              <td><button @click="toggle(t.session_id)">{{ expanded===t.session_id ? '收合' : '明細' }}</button></td>
+            </tr>
+            <tr v-if="expanded===t.session_id"><td colspan="6">
+              <div v-for="it in t.items">
+                {{ it.name }}|{{ attrText(it) }}|系統 {{ it.system_qty }}、實盤 {{ it.counted_qty }}、差異
+                {{ it.diff > 0 ? '+' + it.diff : it.diff }}
+              </div>
+            </td></tr>
+          </template>
+        </tbody>
+      </table>
+    </section>
+  </div>
+</div>
+</template>
     </tbody>
   </table>
 </div>
@@ -615,25 +682,25 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=220"></script>
-<script src="js/api.js?v=220"></script>
-<script src="js/confirm.js?v=220"></script>
-<script src="js/auth.js?v=220"></script>
-<script src="js/pos_shared.js?v=220"></script>
-<script src="js/catalogfields.js?v=220"></script>
-<script src="js/checkout.js?v=220"></script>
-<script src="js/receive.js?v=220"></script>
-<script src="js/stocktake.js?v=220"></script>
-<script src="js/records.js?v=220"></script>
-<script src="js/catalog.js?v=220"></script>
-<script src="js/sortable.js?v=220"></script>
-<script src="js/combobox.js?v=220"></script>
-<script src="js/optpicker.js?v=220"></script>
-<script src="js/modelpicker.js?v=220"></script>
-<script src="js/employeepicker.js?v=220"></script>
-<script src="js/attrfields.js?v=220"></script>
-<script src="js/settings.js?v=220"></script>
-<script src="js/labels.js?v=220"></script>
-<script src="js/app.js?v=220"></script>
+<script src="js/vue.global.prod.js?v=230"></script>
+<script src="js/api.js?v=230"></script>
+<script src="js/confirm.js?v=230"></script>
+<script src="js/auth.js?v=230"></script>
+<script src="js/pos_shared.js?v=230"></script>
+<script src="js/catalogfields.js?v=230"></script>
+<script src="js/checkout.js?v=230"></script>
+<script src="js/receive.js?v=230"></script>
+<script src="js/stocktake.js?v=230"></script>
+<script src="js/records.js?v=230"></script>
+<script src="js/catalog.js?v=230"></script>
+<script src="js/sortable.js?v=230"></script>
+<script src="js/combobox.js?v=230"></script>
+<script src="js/optpicker.js?v=230"></script>
+<script src="js/modelpicker.js?v=230"></script>
+<script src="js/employeepicker.js?v=230"></script>
+<script src="js/attrfields.js?v=230"></script>
+<script src="js/settings.js?v=230"></script>
+<script src="js/labels.js?v=230"></script>
+<script src="js/app.js?v=230"></script>
 </body>
 </html>

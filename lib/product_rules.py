@@ -1,5 +1,7 @@
 """共用商品規則：執行期欄位型別與自取條碼計數器。"""
 
+from datetime import date as calendar_date
+
 from lib.application_errors import ValidationError
 
 
@@ -44,6 +46,32 @@ EMPLOYEE_IDS = range(1, 7)  # 店員以數字代號 1~6 識別
 def require_employee(value):
     if not is_int(value) or value not in EMPLOYEE_IDS:
         raise ValidationError("請選擇員工代號（1～6）")
+
+
+def date_range(payload):
+    """紀錄查詢的起訖日期:皆為選填的 YYYY-MM-DD 字串。"""
+    values = {key: payload.get(key, "") for key in ("date_from", "date_to")}
+    for value in values.values():
+        if not isinstance(value, str):
+            raise ValidationError("篩選條件格式不正確")
+        if not value:
+            continue
+        try:
+            parsed = calendar_date.fromisoformat(value)
+        except ValueError:
+            raise ValidationError("日期格式不正確") from None
+        if len(value) != 10 or parsed.isoformat() != value:
+            raise ValidationError("日期格式不正確")
+    return values
+
+
+def date_sql(values, column):
+    sql, args = "", []
+    for key, operator in (("date_from", ">="), ("date_to", "<=")):
+        if values[key]:
+            sql += f" AND date({column}){operator}?"
+            args.append(values[key])
+    return sql, args
 
 
 def allow_keys(payload, allowed, message="不支援的欄位：{field}"):

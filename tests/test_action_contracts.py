@@ -144,16 +144,21 @@ ACTION_CONTRACTS = {
 
     "stock.receive": schema([I("employee", required=True, constraint="1..6"), field("items", "list[ReceiveItem]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), I("items[].qty", required=True, constraint=">0")]),
     "stock.detail": schema([I("variant_id", required=True)]),
+    "stock.receipts": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject")]),
+    "stocktake.history": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject")]),
     "stocktake.create": schema([I("employee", required=True, constraint="1..6"), S("note", nullable=True, default=None, blank="accept")]),
     "stocktake.list": schema([]),
     "stocktake.detail": schema([I("session_id", required=True)]),
     "stocktake.scan": schema([I("session_id", required=True), I("variant_id", required=True), I("qty", required=True, constraint=">0")], notes=("Desktop contract requires qty.",)),
     "stocktake.set_counted": schema([I("session_id", required=True), I("variant_id", required=True), I("counted_qty", required=True, constraint=">=0")]),
+    "stocktake.remove_item": schema([I("session_id", required=True), I("variant_id", required=True)]),
     "stocktake.close": schema([I("session_id", required=True)]),
     "stocktake.withdraw": schema([I("session_id", required=True)]),
+    "stocktake.return": schema([I("session_id", required=True), LI("variant_ids", required=True, constraint="min_length=1")]),
     "stocktake.approve": schema([I("session_id", required=True)]),
     "stocktake.pending_count": schema([]),
     "payments.list": schema([]),
+    "sales.recent": schema([]),
     "sales.checkout": schema([S("payment", required=True, constraint="must be present in Setting.payments", blank="reject"), I("order_discount", default=0, constraint=">=0"), I("paid", default=0, constraint=">=0"), I("employee", required=True, constraint="1..6"), field("items", "list[ItemIn]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), I("items[].qty", required=True, constraint=">0"), I("items[].unit_price", required=True, constraint=">=0"), I("items[].discount", default=0, constraint="0..qty*unit_price")]),
     "sales.list": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")]),
     "sales.summary": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept"), S("date", default="", constraint="empty|YYYY-MM-DD", blank="reject", normalization="copied to date_from/date_to when both absent")]),
@@ -189,16 +194,21 @@ TARGET_BY_ACTION = {
     **{action:"lib.product_service.ProductFacade._prepare_payload -> _validate_action_payload" for action in PRODUCT_CONTRACT_ACTIONS},
     "stock.receive":"lib.stock_service.StockFacade._prepare_payload -> _validate_payload",
     "stock.detail":"lib.stock_service.StockFacade._prepare_payload -> _validate_payload",
+    "stock.receipts":"lib.stock_service.StockFacade._prepare_payload -> _validate_payload",
+    "stocktake.history":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "stocktake.create":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "stocktake.list":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "stocktake.detail":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "stocktake.scan":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "stocktake.set_counted":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
+    "stocktake.remove_item":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "stocktake.close":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "stocktake.withdraw":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
+    "stocktake.return":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "stocktake.approve":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "stocktake.pending_count":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "payments.list":"lib.sales_service.SalesFacade._prepare_payload -> _strict_mapping",
+    "sales.recent":"lib.sales_service.SalesFacade._prepare_payload -> _strict_mapping",
     "sales.checkout":"lib.sales_service.SalesFacade._prepare_payload -> _checkout_payload",
     "sales.list":"lib.sales_service.SalesFacade._prepare_payload -> _filters",
     "sales.summary":"lib.sales_service.SalesFacade._prepare_payload -> _filters",
@@ -342,6 +352,8 @@ EXPECTED_DEFAULTS = {
         ("sales.export_save","date_to"), ("sales.export_save","payment"),
         ("sales.export","date_from"), ("sales.export","date_to"),
         ("sales.export","payment"),
+        ("stock.receipts","date_from"), ("stock.receipts","date_to"),
+        ("stocktake.history","date_from"), ("stocktake.history","date_to"),
     }, ""),
     **dict.fromkeys({
         ("products.update","fields"), ("variants.create","fields.attributes"),
@@ -471,10 +483,10 @@ class ActionContractTests(FacadeTestCase):
             "products.create":{"name":"新增商品","category_id":self.category_id,"variants":[{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"new-code","source":"store"}]}]}, "products.list":{}, "products.update":{"id":self.product_id,"fields":{}}, "products.delete":{"id":self.delete_product_id}, "catalog.list":{},
             "variants.create":{"product_id":self.product_id,"fields":{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"variant-new","source":"store"}]}}, "variants.update":{"id":self.variant_id,"fields":{}}, "variants.set_models":{"id":self.variant_id,"model_ids":[]}, "variants.update_details":{"id":self.variant_id,"fields":{},"model_ids":[]}, "variants.update_editor":{"id":self.variant_id,"fields":{},"model_ids":[],"deleted_barcodes":[],"factory_barcodes":[],"store_barcode_count":0}, "variants.delete":{"id":self.delete_variant_id}, "variants.batch_create":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"batch-new","source":"store"}]}]}, "variants.field_usage":{"category_id":self.category_id,"field_id":self.field_id}, "variants.model_usage":{"category_id":self.category_id}, "variants.activate":{"id":self.variant_id}, "variants.issues":{},
             "variants.batch_precheck":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"precheck-new","source":"store"}]}]},
-            "barcodes.scan":{"code":"contract-1"}, "stock.receive":{"employee":1,"items":[{"variant_id":self.variant_id,"qty":1}]}, "stock.detail":{"variant_id":self.variant_id},
-            "stocktake.create":{"employee":1}, "stocktake.list":{}, "stocktake.detail":{"session_id":self.session_id}, "stocktake.scan":{"session_id":self.session_id,"variant_id":self.variant_id,"qty":1}, "stocktake.set_counted":{"session_id":self.session_id,"variant_id":self.variant_id,"counted_qty":1}, "stocktake.close":{"session_id":self.session_id},
-            "stocktake.withdraw":{"session_id":self.session_id}, "stocktake.approve":{"session_id":self.session_id}, "stocktake.pending_count":{},
-            "payments.list":{}, "sales.checkout":{"payment":"現金","paid":100,"employee":1,"items":[{"variant_id":self.variant_id,"qty":1,"unit_price":100}]}, "sales.list":{}, "sales.summary":{}, "sales.export_save":{}, "printing.barcode":{"variant_id":self.variant_id,"barcode":"contract-1","copies":1},
+            "barcodes.scan":{"code":"contract-1"}, "stock.receive":{"employee":1,"items":[{"variant_id":self.variant_id,"qty":1}]}, "stock.detail":{"variant_id":self.variant_id}, "stock.receipts":{}, "stocktake.history":{},
+            "stocktake.create":{"employee":1}, "stocktake.list":{}, "stocktake.detail":{"session_id":self.session_id}, "stocktake.scan":{"session_id":self.session_id,"variant_id":self.variant_id,"qty":1}, "stocktake.set_counted":{"session_id":self.session_id,"variant_id":self.variant_id,"counted_qty":1}, "stocktake.remove_item":{"session_id":self.session_id,"variant_id":self.variant_id}, "stocktake.close":{"session_id":self.session_id},
+            "stocktake.withdraw":{"session_id":self.session_id}, "stocktake.return":{"session_id":self.session_id,"variant_ids":[self.variant_id]}, "stocktake.approve":{"session_id":self.session_id}, "stocktake.pending_count":{},
+            "payments.list":{}, "sales.recent":{}, "sales.checkout":{"payment":"現金","paid":100,"employee":1,"items":[{"variant_id":self.variant_id,"qty":1,"unit_price":100}]}, "sales.list":{}, "sales.summary":{}, "sales.export_save":{}, "printing.barcode":{"variant_id":self.variant_id,"barcode":"contract-1","copies":1},
             "printing.preview":{"variant_id":self.variant_id,"barcode":"contract-1"},
             "printing.check":{"items":[{"variant_id":self.variant_id,"barcode":"contract-1"}]},
         }
@@ -498,7 +510,7 @@ class ActionContractTests(FacadeTestCase):
         direct = set().union(self.facade.settings.ACTIONS, self.facade.products.ACTIONS,
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
                              self.facade.stocktake.ACTIONS, self.facade.printing.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 72)
+        self.assertEqual(len(ACTION_CONTRACTS), 77)
         self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS | AUTH_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
@@ -656,7 +668,7 @@ class ActionContractTests(FacadeTestCase):
 
     def assert_valid_action(self, action):
         contract = ACTION_CONTRACTS[action]
-        if action in {"stocktake.create", "stocktake.approve", "stocktake.withdraw"}:
+        if action in {"stocktake.create", "stocktake.approve", "stocktake.withdraw", "stocktake.return"}:
             self.invoke("stocktake.close", {"session_id": self.session_id})
             if action == "stocktake.create":
                 self.invoke("stocktake.approve", {"session_id": self.session_id})
@@ -760,7 +772,7 @@ class ActionContractTests(FacadeTestCase):
                     for action,contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items()
                     for path,spec in contract["fields"].items()
                     if spec["default"] != "missing"}
-        self.assertEqual(len(declared), 93)
+        self.assertEqual(len(declared), 97)
         self.assertEqual(declared, EXPECTED_DEFAULTS)
         executed = {}
         for (action,path), expected in EXPECTED_DEFAULTS.items():
@@ -800,7 +812,7 @@ class ActionContractTests(FacadeTestCase):
         self.assertNotIn("skipped", executed.values())
         self.assertEqual(
             {strategy: list(executed.values()).count(strategy) for strategy in set(executed.values())},
-            {"materialized_by_validator":17, "exact_validator_omission":76},
+            {"materialized_by_validator":17, "exact_validator_omission":80},
         )
 
         field_id = self.invoke("fields.create", {"name":"預設型態"})["field_id"]

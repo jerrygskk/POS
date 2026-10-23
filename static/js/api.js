@@ -26,9 +26,9 @@ const API = {
       "products.create", "products.list", "products.update", "products.delete", "catalog.list",
       "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.update_editor", "variants.delete",
       "variants.batch_create", "variants.batch_precheck", "variants.field_usage", "variants.model_usage", "variants.activate", "variants.issues",
-      "barcodes.scan", "stock.receive", "stock.detail",
-      "stocktake.create", "stocktake.list", "stocktake.detail", "stocktake.scan", "stocktake.set_counted", "stocktake.close", "stocktake.withdraw", "stocktake.approve", "stocktake.pending_count",
-      "payments.list", "sales.checkout", "sales.list", "sales.summary", "sales.export_save", "printing.barcode", "printing.preview", "printing.check",
+      "barcodes.scan", "stock.receive", "stock.detail", "stock.receipts",
+      "stocktake.create", "stocktake.list", "stocktake.history", "stocktake.detail", "stocktake.scan", "stocktake.set_counted", "stocktake.remove_item", "stocktake.close", "stocktake.withdraw", "stocktake.return", "stocktake.approve", "stocktake.pending_count",
+      "payments.list", "sales.checkout", "sales.list", "sales.recent", "sales.summary", "sales.export_save", "printing.barcode", "printing.preview", "printing.check",
       "desktop.child_window.open", "desktop.child_window.context", "desktop.child_window.close"
     ]);
     if (!allowed.has(action)) throw new Error("不支援的桌面操作");
@@ -50,7 +50,11 @@ const API = {
   authLogout: () => API.invoke("auth.logout", {}),
   authTouch: () => API.invoke("auth.touch", {}),
   changePassword: (old_password, new_password) => API.invoke("auth.change_password", {old_password, new_password}),
+  removeStocktakeItem: (session_id, variant_id) => API.invoke("stocktake.remove_item", {session_id, variant_id}),
+  listReceipts: p => API.invoke("stock.receipts", p),
+  stocktakeHistory: p => API.invoke("stocktake.history", p),
   withdrawStocktake: session_id => API.invoke("stocktake.withdraw", {session_id}),
+  returnStocktakeItems: (session_id, variant_ids) => API.invoke("stocktake.return", {session_id, variant_ids}),
   approveStocktake: session_id => API.invoke("stocktake.approve", {session_id}),
   pendingStocktakeCount: () => API.invoke("stocktake.pending_count", {}),
   listCategories: p => API.invoke("categories.list", p), createCategory: p => API.invoke("categories.create", p),
@@ -71,7 +75,7 @@ const API = {
   scanBarcode: code => API.invoke("barcodes.scan", {code}),
   receiveStock: p => API.invoke("stock.receive", p), stockDetail: variant_id => API.invoke("stock.detail", {variant_id}),
   createStocktake: p => API.invoke("stocktake.create", p), listStocktakes: () => API.invoke("stocktake.list", {}), stocktakeDetail: session_id => API.invoke("stocktake.detail", {session_id}), stocktakeScan: p => API.invoke("stocktake.scan", p), setStocktakeCounted: p => API.invoke("stocktake.set_counted", p), closeStocktake: session_id => API.invoke("stocktake.close", {session_id}),
-  listPayments: () => API.invoke("payments.list", {}), checkout: p => API.invoke("sales.checkout", p), listSales: p => API.invoke("sales.list", p), salesSummary: p => API.invoke("sales.summary", p),
+  listPayments: () => API.invoke("payments.list", {}), checkout: p => API.invoke("sales.checkout", p), listSales: p => API.invoke("sales.list", p), recentSales: () => API.invoke("sales.recent", {}), salesSummary: p => API.invoke("sales.summary", p),
   updateVariantDetails(id, fields, modelIds) {
     return this.invoke("variants.update_details", {
       id, fields, model_ids: modelIds

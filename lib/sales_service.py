@@ -111,12 +111,18 @@ class SalesRepository(BaseRepository):
             args.append(filters["payment"])
         return sql, args
 
+    SALE_ROWS_SQL = ("SELECT s.*,i.variant_id,i.qty,i.unit_price,i.discount,p.name FROM Sale s "
+                     "JOIN SaleItem i ON s.sale_id=i.sale_id JOIN Variant v ON i.variant_id=v.variant_id "
+                     "JOIN Product p ON v.product_id=p.product_id WHERE 1=1")
+
     def sale_rows(self, filters):
-        sql = ("SELECT s.*,i.variant_id,i.qty,i.unit_price,i.discount,p.name FROM Sale s "
-               "JOIN SaleItem i ON s.sale_id=i.sale_id JOIN Variant v ON i.variant_id=v.variant_id "
-               "JOIN Product p ON v.product_id=p.product_id WHERE 1=1")
         suffix, args = self.filter_sql(filters)
-        return self.connection.execute(sql + suffix + " ORDER BY s.sale_id DESC", args).fetchall()
+        return self.connection.execute(self.SALE_ROWS_SQL + suffix + " ORDER BY s.sale_id DESC", args).fetchall()
+
+    def recent_rows(self, limit):
+        return self.connection.execute(
+            self.SALE_ROWS_SQL + " AND s.sale_id IN (SELECT sale_id FROM Sale WHERE date(ts)=date('now','localtime') ORDER BY sale_id DESC LIMIT ?)"
+            " ORDER BY s.sale_id DESC", (limit,)).fetchall()
 
     def summary_rows(self, filters):
         suffix, args = self.filter_sql(filters, "")
@@ -158,7 +164,13 @@ class SalesService:
         return {"sale_id": sale_id, "total": total, "change": body["paid"] - total}
 
     def list_sales(self, filters, load_attrs=True):
-        rows = self.repo.sale_rows(filters)
+        return self._group(self.repo.sale_rows(filters), load_attrs)
+
+    # 收銀頁下方只列本日最近 5 筆;其餘到紀錄查詢頁看
+    def recent(self):
+        return self._group(self.repo.recent_rows(5))
+
+    def _group(self, rows, load_attrs=True):
         vids = [row["variant_id"] for row in rows]
         attrs = product_data.attrs_by_variant(self.repo.connection, vids) if load_attrs else {}
         display = product_data.display_attrs(self.repo.connection, vids)
@@ -191,14 +203,14 @@ class SalesService:
 
 
 class SalesFacade(BaseFacade):
-    ACTIONS = {"payments.list", "sales.checkout", "sales.list", "sales.summary", "sales.export"}
+    ACTIONS = {"payments.list", "sales.checkout", "sales.list", "sales.recent", "sales.summary", "sales.export"}
 
     ERROR_MESSAGE = "銷售操作不正確"
 
     def _prepare_payload(self, action, payload):
         if action == "sales.checkout":
             return _checkout_payload(payload)
-        if action == "payments.list":
+        if action in {"payments.list", "sales.recent"}:
             _strict_mapping(payload, set())
             return payload
         return _filters(payload, legacy_date=action == "sales.summary")
@@ -208,5 +220,6 @@ class SalesFacade(BaseFacade):
         if action == "payments.list": return service.repo.payments()
         if action == "sales.checkout": return service.checkout(payload)
         if action == "sales.list": return service.list_sales(payload)
+        if action == "sales.recent": return service.recent()
         if action == "sales.summary": return service.summary(payload)
         return service.export(payload)

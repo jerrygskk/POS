@@ -1,7 +1,7 @@
 import unittest, datetime
 from base import FacadeTestCase
 from lib.application_errors import ApplicationError
-from lib.db import db_conn
+from lib.db import db_conn, get_conn
 
 class TestSales(FacadeTestCase):
     def setUp(self):
@@ -27,6 +27,21 @@ class TestSales(FacadeTestCase):
         self.assertEqual(r["total"], 900)   # 2*500-100
         self.assertEqual(r["change"], 0)
         self.assertEqual(self._stock(), 8)
+
+    def test_recent_returns_latest_five_sales_with_items(self):
+        ids = [self._sale(items=[{"variant_id": self.vid, "qty": 1, "unit_price": 500}], paid=500)["sale_id"]
+               for _ in range(6)]
+        recent = self.invoke("sales.recent")
+        self.assertEqual([s["sale_id"] for s in recent], ids[:0:-1])
+        self.assertEqual(recent[0]["items"][0]["qty"], 1)
+        conn = get_conn(self.db)
+        try:
+            conn.execute("UPDATE Sale SET ts=datetime('now','localtime','-1 day') WHERE sale_id=?", (ids[-1],))
+            conn.commit()
+        finally:
+            conn.close()
+        self.assertEqual([s["sale_id"] for s in self.invoke("sales.recent")], ids[-2::-1])
+        self.assert_application_error("validation_error", "sales.recent", {"limit": 10})
 
     def test_item_discount(self):
         r = self._sale(items=[{"variant_id": self.vid, "qty": 1,

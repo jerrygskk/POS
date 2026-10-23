@@ -18,7 +18,7 @@ EXPECTED_ADMIN_ACTIONS = frozenset({
     "products.create", "products.update", "products.delete",
     "variants.create", "variants.update", "variants.set_models", "variants.update_details",
     "variants.update_editor", "variants.delete", "variants.batch_create", "variants.activate", "variants.issues",
-    "sales.export", "sales.export_save", "stocktake.approve", "stocktake.pending_count",
+    "sales.export", "sales.export_save", "stocktake.approve", "stocktake.return", "stocktake.pending_count",
     "desktop.child_window.open",
 })
 
@@ -44,6 +44,7 @@ class PermissionTests(ConnTestCase):
         before = list(self.conn.iterdump())
         payloads = {"products.delete": {"id": 1}, "categories.create": {"name": "blocked category"},
                     "stocktake.approve": {"session_id": 1},
+                    "stocktake.return": {"session_id": 1, "variant_ids": [1]},
                     "desktop.child_window.open": {"page": "variant_editor", "context": {}},
                     "variants.update_editor": {"id": 1, "fields": {"price": 99}}}
         for action in sorted(EXPECTED_ADMIN_ACTIONS):

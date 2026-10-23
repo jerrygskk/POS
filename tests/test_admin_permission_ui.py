@@ -47,14 +47,18 @@ for(const isAdmin of[false,true])for(const status of["open","pending","closed"])
   detail:{session_id:1,status,items:[{variant_id:1,name:"fictional",counted_qty:0,system_qty:1,diff:-1,needs_recount:0}]}});
  const inputs=all(view.dom,n=>n.tag==="input");
  assert.equal(!!inputs[0].props.disabled,status!=="open");
- assert.equal(!!inputs[1].props.disabled,!(status==="open"||(status==="pending"&&isAdmin)));
- assert.equal(!!button(view.dom,"結案"),status==="open");
+ assert.equal(!!inputs[1].props.disabled,status!=="open");
+ assert.equal(!!button(view.dom,"送出"),status==="open");
  assert.equal(!!button(view.dom,"核准"),status==="pending"&&isAdmin);
- assert.equal(!!button(view.dom,"抽回修改"),status==="pending");
- if(status==="pending")assert.match(text(view.dom),isAdmin?/實盤量僅供修正原盤點時的數量/:/等待管理者核准/);
+ assert.ok(!button(view.dom,"抽回修改"));
+ assert.equal(!!all(view.dom,n=>n.tag==="button"&&n.props?.title==="移除").length,status==="open");
+ assert.equal(!!button(view.dom,"退回"),status==="pending"&&isAdmin);
+ assert.equal(!!button(view.dom,"退回重盤（0 項）"),status==="pending"&&isAdmin);
+ if(status==="pending"&&!isAdmin)assert.match(text(view.dom),/等待管理者核准/);
  view.app.unmount();
  const list=mount(context.window.PosPages["page-stocktake"],template("stocktake"),{sessions:[{session_id:1,status,employee:1}]});
  assert.ok(button(list.dom,status==="open"?"續盤":status==="pending"&&isAdmin?"審核":"檢視"));
+ assert.equal(!!button(list.dom,"抽回修改"),status==="pending");
  assert.equal(!!button(list.dom,"開新盤點單").props.disabled,false);list.app.unmount();
 }
 ''')
@@ -70,7 +74,7 @@ assert.ok(button(view.dom,"確認"));assert.match(text(view.dom),/有 1 項需�
 await click(button(view.dom,"確認"));await tick();
 assert.deepEqual(calls[0],["set",{session_id:1,variant_id:1,counted_qty:0}]);
 assert.ok(!button(view.dom,"確認"));assert.equal(view.state.detail.items[0].needs_recount,0);
-await click(button(view.dom,"結案"));await tick();assert.ok(calls.some(c=>c[0]==="close"&&c[1]===1));view.app.unmount();
+await click(button(view.dom,"送出"));await tick();assert.ok(calls.some(c=>c[0]==="close"&&c[1]===1));view.app.unmount();
 ''')
 
     def test_navigation_hides_settings_redirects_on_logout_and_badge_is_admin_only(self):

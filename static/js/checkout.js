@@ -7,7 +7,7 @@ window.PosPages["page-checkout"] = {
   inject: ["showError"],
   data() {
     return { scanCode: "", searchQ: "", searchResults: [], draft: window.PosCheckoutDraft,
-             payments: [], payment: "現金", paid: null, doneMsg: "",
+             payments: [], payment: "現金", paid: null, doneMsg: "", recent: [],
              employee: window.PosEmployee };
   },
   computed: {
@@ -24,6 +24,7 @@ window.PosPages["page-checkout"] = {
     await this.guard(async () => {
       this.payments = await API.listPayments();
       this.payment = this.payments[0];
+      this.recent = await API.recentSales();
     });
     this.$refs.scan?.focus();
     this._refocus = () => setTimeout(() => {
@@ -34,6 +35,7 @@ window.PosPages["page-checkout"] = {
   },
   unmounted() { document.removeEventListener("click", this._refocus); },
   methods: {
+    itemsText(s) { return s.items.map(i => `${i.name}×${i.qty}`).join("、"); },
     async addItem(r) {
       let price = r.price;
       if (price === null) {
@@ -82,6 +84,7 @@ window.PosPages["page-checkout"] = {
             : `結帳完成，找零 ${r.change} 元(交易編號 ${r.sale_id})`;
           this.draft.cart = []; this.draft.orderDiscount = 0; this.paid = null;
           setTimeout(() => this.doneMsg = "", 5000);
+          this.recent = await API.recentSales();
         });
       } finally {
         this.draft.submitting = false;

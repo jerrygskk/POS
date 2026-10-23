@@ -170,7 +170,7 @@ class TestStocktake(FacadeTestCase):
     def test_negative_rebase_requires_confirmation_then_uses_new_count(self):
         self._negative_rebase()
         error = self.assert_application_error("conflict", "stocktake.close", {"session_id": self.sid})
-        self.assertEqual(error.message, "有 1 項需重新清點，請確認數量後再結案")
+        self.assertEqual(error.message, "有 1 項需重新清點，請確認數量後再送出")
         self.set_counted(1)
         self.assertEqual(self.item()["needs_recount"], 0)
         self.submit()
@@ -191,17 +191,80 @@ class TestStocktake(FacadeTestCase):
         self.assertEqual(self.item()["needs_recount"], 0)
         self.submit()
 
-    def test_pending_employee_cannot_edit_but_admin_correction_is_used(self):
+    def test_pending_count_cannot_be_edited_by_any_role(self):
         self.scan(4)
         self.submit()
-        self.facade.session.logout()
-        self.assert_application_error("forbidden", "stocktake.set_counted", {
-            "session_id": self.sid, "variant_id": self.v1, "counted_qty": 2})
+        for login in (False, True):
+            with self.subTest(admin=login):
+                if login: self.facade.session.login("admin")
+                else: self.facade.session.logout()
+                error = self.assert_application_error("conflict", "stocktake.set_counted", {
+                    "session_id": self.sid, "variant_id": self.v1, "counted_qty": 2})
+                self.assertEqual(error.message, "盤點單待核准中，無法修改數量")
         self.assertEqual(self.item()["counted_qty"], 4)
+
+    def test_return_items_flags_recount_and_rebases_after_sales(self):
+        self.scan(4)  # 系統 5、差 -1
+        self.submit()
+        self.sell(1)
+        self.facade.session.logout()
+        self.assert_application_error("forbidden", "stocktake.return", {
+            "session_id": self.sid, "variant_ids": [self.v1]})
         self.facade.session.login("admin")
-        self.set_counted(2)
+        self.invoke("stocktake.return", {"session_id": self.sid, "variant_ids": [self.v1]})
+        detail = self.invoke("stocktake.detail", {"session_id": self.sid})
+        self.assertEqual(detail["status"], "open")
+        self.assertEqual((self.item()["system_qty"], self.item()["counted_qty"], self.item()["needs_recount"]), (4, 3, 1))
+        self.assert_application_error("conflict", "stocktake.close", {"session_id": self.sid})
+        self.set_counted(4)  # 現場重點:貨架上現有 4 件
+        self.submit()
         self.invoke("stocktake.approve", {"session_id": self.sid})
-        self.assertEqual(self.stock(), 2)
+        self.assertEqual(self.stock(), 4)
+
+    def test_remove_item_only_while_open_and_skips_adjustment(self):
+        self.scan(4)
+        self.facade.session.logout()
+        self.invoke("stocktake.remove_item", {"session_id": self.sid, "variant_id": self.v1})
+        self.assertEqual(self.invoke("stocktake.detail", {"session_id": self.sid})["items"], [])
+        self.assert_application_error("not_found", "stocktake.remove_item", {"session_id": self.sid, "variant_id": self.v1})
+        self.scan(4)
+        self.submit()
+        self.assert_application_error("conflict", "stocktake.remove_item", {"session_id": self.sid, "variant_id": self.v1})
+        self.facade.session.login("admin")
+        self.invoke("stocktake.approve", {"session_id": self.sid})
+        self.assertEqual(self.stock(), 4)
+
+    def test_history_lists_only_closed_sessions_with_diff_count(self):
+        self.scan(4)
+        self.submit()
+        self.assertEqual(self.invoke("stocktake.history", {}), [])
+        self.invoke("stocktake.approve", {"session_id": self.sid})
+        history = self.invoke("stocktake.history", {})
+        self.assertEqual([h["session_id"] for h in history], [self.sid])
+        self.assertEqual(history[0]["diff_count"], 1)
+        self.assertEqual(history[0]["items"][0]["diff"], -1)
+        self.assertEqual(self.invoke("stocktake.history", {"date_from": "2000-01-01", "date_to": "2000-01-02"}), [])
+        self.assert_application_error("validation_error", "stocktake.history", {"date_from": "2026/01/01"})
+
+    def test_list_keeps_latest_ten_sessions(self):
+        self.submit()
+        self.invoke("stocktake.approve", {"session_id": self.sid})
+        for _ in range(11):
+            sid = self.invoke("stocktake.create", {"employee": 1})["session_id"]
+            self.invoke("stocktake.close", {"session_id": sid})
+            self.invoke("stocktake.approve", {"session_id": sid})
+        listed = self.invoke("stocktake.list")
+        self.assertEqual(len(listed), 10)
+        self.assertEqual(listed[0]["session_id"], sid)
+
+    def test_return_items_requires_pending_and_existing_item(self):
+        self.assert_application_error("conflict", "stocktake.return", {
+            "session_id": self.sid, "variant_ids": [self.v1]})
+        self.scan(1)
+        self.submit()
+        self.assert_application_error("not_found", "stocktake.return", {
+            "session_id": self.sid, "variant_ids": [999999]})
+        self.assertEqual(self.invoke("stocktake.detail", {"session_id": self.sid})["status"], "pending")
 
     def test_closed_session_cannot_change_or_apply_adjustment_twice(self):
         self.scan(4)

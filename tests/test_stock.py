@@ -25,6 +25,17 @@ class TestStock(FacadeTestCase):
         self.assertEqual(result["stock"], 5)
         self.assertEqual(result["movements"][0]["kind"], "purchase")
 
+    def test_receipts_group_one_confirmation_as_one_receipt(self):
+        self.invoke("stock.receive", {"employee": 2, "items": [
+            {"variant_id": self.vid, "qty": 2}, {"variant_id": self.vid, "qty": 3}]})
+        self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": self.vid, "qty": 1}]})
+        receipts = self.invoke("stock.receipts", {})
+        self.assertEqual([(r["employee"], len(r["items"])) for r in receipts], [(1, 1), (2, 2)])
+        self.assertEqual([(it["qty"], it["stock"]) for it in receipts[1]["items"]], [(2, 6), (3, 6)])
+        self.assertNotEqual(receipts[0]["receipt_id"], receipts[1]["receipt_id"])
+        self.assertEqual(self.invoke("stock.receipts", {"date_from": "2000-01-01", "date_to": "2000-01-01"}), [])
+        self.assert_application_error("validation_error", "stock.receipts", {"date_to": "bad"})
+
     def test_reject_zero_qty(self):
         self.assert_application_error("validation_error", "stock.receive", {"employee": 1, "items": [{"variant_id": self.vid, "qty": 0}]})
 

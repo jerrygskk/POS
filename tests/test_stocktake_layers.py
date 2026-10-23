@@ -93,7 +93,7 @@ class TestStocktakeLayers(ConnTestCase):
         self.facade.invoke("stocktake.close", {"session_id": sid})
         from lib.application_errors import ForbiddenError
         employee_facade = StocktakeFacade(self.db)
-        for action, payload in (("stocktake.set_counted", {"session_id": sid, "variant_id": 1, "counted_qty": 3}),
+        for action, payload in (("stocktake.return", {"session_id": sid, "variant_ids": [1]}),
                                 ("stocktake.approve", {"session_id": sid}), ("stocktake.pending_count", {})):
             with self.assertRaises(ForbiddenError):
                 employee_facade.invoke(action, payload)

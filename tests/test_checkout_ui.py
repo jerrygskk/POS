@@ -18,7 +18,7 @@ class CheckoutUiTests(unittest.TestCase):
         script = r'''
 const fs = require("fs"), vm = require("vm");
 const context = {
-  window: { PosPages: {}, PosConfirm: {}, PosEmployee: { id: 1 } }, API: {},
+  window: { PosPages: {}, PosConfirm: {}, PosEmployee: { id: 1 } }, API: { recentSales: async () => [] },
   Vue: { reactive: x => x },
   console, setTimeout, clearTimeout,
 };
