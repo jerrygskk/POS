@@ -7,7 +7,7 @@ window.PosPages["page-checkout"] = {
   inject: ["showError"],
   data() {
     return { scanCode: "", searchQ: "", searchResults: [], draft: window.PosCheckoutDraft,
-             payments: [], payment: "現金", paid: 0, doneMsg: "",
+             payments: [], payment: "現金", paid: null, doneMsg: "",
              employee: window.PosEmployee };
   },
   computed: {
@@ -16,6 +16,9 @@ window.PosPages["page-checkout"] = {
         - this.draft.orderDiscount;
       return Math.max(0, t);
     },
+    // 目前只記錄賣了什麼、不實際收款:實收留白視為剛好付清
+    paidBlank() { return this.paid === null || this.paid === ""; },
+    paidAmount() { return this.paidBlank ? this.total : this.paid; },
   },
   async mounted() {
     await this.guard(async () => {
@@ -46,6 +49,7 @@ window.PosPages["page-checkout"] = {
       if (dup) dup.qty += 1;
       else this.draft.cart.push({ variant_id: r.variant_id, name: r.name,
         attributes: r.attributes, attr_display: r.attr_display,
+        label_barcode: r.label_barcode,
         unit_price: price, qty: 1, discount: 0, stock: r.stock });
       this.searchResults = [];
     },
@@ -70,11 +74,13 @@ window.PosPages["page-checkout"] = {
         await this.guard(async () => {
           const r = await API.checkout({
             payment: this.payment, order_discount: this.draft.orderDiscount,
-            paid: this.paid, employee: this.employee.id,
+            paid: this.paidAmount, employee: this.employee.id,
             items: this.draft.cart.map(i => ({ variant_id: i.variant_id, qty: i.qty,
               unit_price: i.unit_price, discount: i.discount })) });
-          this.doneMsg = `結帳完成，找零 ${r.change} 元(交易編號 ${r.sale_id})`;
-          this.draft.cart = []; this.draft.orderDiscount = 0; this.paid = 0;
+          this.doneMsg = this.paidBlank
+            ? `結帳完成(交易編號 ${r.sale_id})`
+            : `結帳完成，找零 ${r.change} 元(交易編號 ${r.sale_id})`;
+          this.draft.cart = []; this.draft.orderDiscount = 0; this.paid = null;
           setTimeout(() => this.doneMsg = "", 5000);
         });
       } finally {

@@ -39,6 +39,30 @@ class TestProducts(FacadeTestCase):
         result = self._create(); self.assertEqual(len(result["variant_ids"]), 2); hit = self.invoke("barcodes.scan", {"code": "FX100000001"})["matches"][0]
         self.assertEqual((hit["price"], hit["attributes"]["color"], hit["stock"]), (590, "blue", 0))
 
+    def test_search_label_barcode_prefers_first_store_code_and_matches_scan(self):
+        vid = self._create()["variant_ids"][0]
+        codes = self.invoke("variants.update_editor", {
+            "id": vid, "store_barcode_count": 2})["store_barcodes"]
+        found = self.invoke("products.list", {"q": "HODA"})[0]
+        scanned = self.invoke("barcodes.scan", {"code": "FX100000001"})["matches"][0]
+        self.assertEqual(found["label_barcode"], min(codes))
+        self.assertEqual(found["label_barcode"], scanned["label_barcode"])
+
+    def test_search_label_barcode_falls_back_to_first_factory_code(self):
+        vid = self._create()["variant_ids"][0]
+        self.invoke("variants.update_editor", {
+            "id": vid, "factory_barcodes": ["ZZ-SECOND", "AA-FIRST"]})
+        found = self.invoke("products.list", {"q": "blue"})[0]
+        scanned = self.invoke("barcodes.scan", {"code": "ZZ-SECOND"})["matches"][0]
+        self.assertEqual(found["label_barcode"], "AA-FIRST")
+        self.assertEqual(found["label_barcode"], scanned["label_barcode"])
+
+    def test_search_label_barcode_is_none_without_codes(self):
+        self._create()
+        found = self.invoke("products.list", {"q": "red"})[0]
+        self.assertIsNone(found["label_barcode"])
+        self.assertEqual(self.invoke("products.list", {"q": "no match"}), [])
+
     def test_variant_price_overrides(self):
         result = self._create(); barcode = self.invoke("variants.update_editor", {"id": result["variant_ids"][1], "store_barcode_count": 1})["store_barcodes"][0]
         self.assertTrue(barcode.startswith("TL")); self.assertEqual(self.invoke("barcodes.scan", {"code": barcode})["matches"][0]["price"], 690)

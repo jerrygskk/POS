@@ -648,7 +648,7 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .cart-col-stock { width: 95px; }
 .cart-col-remove { width: 50px; }
 /* 批次進貨固定欄寬，其餘沿用購物車公版。 */
-.receive-col-barcode { width: 150px; }
+.cart-col-barcode, .receive-col-barcode { width: 150px; }
 .receive-col-qty { width: 110px; }
 .receive-col-label { width: 200px; }
 .receive-table tr.receive-row-hit > td { background: var(--accent-soft); }

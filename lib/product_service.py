@@ -307,9 +307,16 @@ class ProductService:
         display = product_data.display_attrs(self.repo.connection, vids)
         from lib.db import stock_map
         stocks = stock_map(self.repo.connection, vids)
+        codes = {}
+        if vids:
+            codes = {r["variant_id"]: r["label_barcode"] for r in self.repo.all(
+                "SELECT variant_id,COALESCE(MIN(CASE WHEN source='store' THEN barcode END),"
+                "MIN(CASE WHEN source='factory' THEN barcode END)) label_barcode "
+                f"FROM Barcode WHERE variant_id IN ({in_clause(vids)}) GROUP BY variant_id", vids)}
         return [{"variant_id": r["variant_id"], "name": r["name"],
                  "attributes": attrs.get(r["variant_id"], {}), "attr_display": display.get(r["variant_id"], ""),
                  "price": r["price"], "category_name": r["category_name"], "brand_name": r["brand_name"],
+                 "label_barcode": codes.get(r["variant_id"]),
                  "models": models.get(r["variant_id"], []), "stock": stocks.get(r["variant_id"], 0)} for r in rows]
 
     def catalog(self, payload):

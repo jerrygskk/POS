@@ -32,6 +32,8 @@ function mkState(extra) {
     guard: async operation => operation() };
   Object.assign(s, page.data.call(s));
   for (const [name, method] of Object.entries(page.methods)) s[name] = method.bind(s);
+  for (const [name, getter] of Object.entries(page.computed))
+    Object.defineProperty(s, name, { get: getter.bind(s), configurable: true });
   Object.assign(s, extra || {});
   s._errors = errors;
   return s;
@@ -71,7 +73,7 @@ const first = mkState();
             "variant_id": 7, "name": "保護殼", "attributes": {"顏色": "黑"},
             "attr_display": "黑", "unit_price": 250, "qty": 2, "discount": 30}])
         self.assertEqual(out["orderDiscount"], 50)
-        self.assertEqual(out["paid"], 0)
+        self.assertIsNone(out["paid"])
         self.assertEqual(out["total"], 420)
 
     def test_unpriced_item_uses_shared_input_and_cancel_does_not_add(self):
@@ -176,8 +178,27 @@ s.draft.orderDiscount = 50;
             "payment": "現金", "order_discount": 50, "paid": 500, "employee": 1,
             "items": [{"variant_id": 7, "qty": 2, "unit_price": 250, "discount": 30}]})
         self.assertEqual(out["draft"], {"cart": [], "orderDiscount": 0, "submitting": False})
-        self.assertEqual(out["paid"], 0)
+        self.assertIsNone(out["paid"])
         self.assertEqual(out["total"], 0)
+
+    def test_blank_paid_checks_out_as_exact_payment(self):
+        out = self._run(r'''
+let submitted;
+API.checkout = async value => { submitted = value; return {change:0, sale_id:11}; };
+const s = mkState();
+s.draft.cart = [{variant_id:7, qty:2, unit_price:250, discount:30}];
+s.draft.orderDiscount = 50;
+(async () => {
+  out.before = {paidAmount:s.paidAmount, blank:s.paidBlank};
+  await s.checkout();
+  out.paid = submitted.paid; out.msg = s.doneMsg; out.after = s.paid;
+  done();
+})();
+''')
+        self.assertEqual(out["before"], {"paidAmount": 420, "blank": True})
+        self.assertEqual(out["paid"], 420)
+        self.assertEqual(out["msg"], "結帳完成(交易編號 11)")
+        self.assertIsNone(out["after"])
 
     def test_checkout_without_employee_is_blocked_and_selection_is_kept(self):
         out = self._run(r'''
@@ -219,8 +240,50 @@ const s = mkState();
 ''')
         self.assertEqual(out["stock"], 4)
 
+    def test_scan_and_search_additions_keep_display_code_when_adding_again(self):
+        out = self._run(r'''
+const item = {variant_id:7, name:"保護殼", price:300, label_barcode:"TL0000017"};
+context.window.PosScan = async () => ({data:item});
+API.listProducts = async () => [item];
+const s = mkState({scanCode:"FACTORY", searchQ:"保護殼"});
+(async () => {
+  await s.onScan();
+  out.scanned = s.draft.cart[0].label_barcode;
+  s.draft.cart = [];
+  await s.onSearch();
+  await s.addItem(s.searchResults[0]);
+  await s.addItem({...item, label_barcode:"DIFFERENT"});
+  out.searched = s.draft.cart[0].label_barcode;
+  out.qty = s.draft.cart[0].qty;
+  out.rows = s.draft.cart.length;
+  done();
+})();
+''')
+        self.assertEqual(out, {"scanned": "TL0000017", "searched": "TL0000017",
+                               "qty": 2, "rows": 1})
+
+    def test_cart_item_without_code_does_not_use_variant_id(self):
+        out = self._run(r'''
+const s = mkState();
+(async () => {
+  await s.addItem({variant_id:7, name:"無條碼商品", price:300, label_barcode:null});
+  out.code = s.draft.cart[0].label_barcode;
+  done();
+})();
+''')
+        self.assertIsNone(out["code"])
+
 
 class CartTemplateContractTests(unittest.TestCase):
+    def test_number_column_precedes_product_and_uses_shared_barcode_width(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        css = (STATIC / "css" / "pos.css").read_text(encoding="utf-8")
+        checkout = html.split('<template id="tpl-checkout">', 1)[1].split("</template>", 1)[0]
+        self.assertIn('<col class="cart-col-barcode">', checkout)
+        self.assertIn('<th>條碼</th><th>商品</th>', checkout)
+        self.assertIn("<td>{{ it.label_barcode || '—' }}</td>\n        <td>{{ it.name }}</td>", checkout)
+        self.assertRegex(css, r"\.cart-col-barcode,\s*\.receive-col-barcode \{ width: 150px; \}")
+
     def test_cart_numeric_columns_are_narrow_and_remove_button_is_small(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         css = (STATIC / "css" / "pos.css").read_text(encoding="utf-8")
