@@ -95,7 +95,7 @@ done();
 const fs = require("fs"), vm = require("vm");
 let root, mounted;
 const app = {mixin(){},component(){},mount(){ mounted = true; }};
-const context = {window:{addEventListener(){},PosAuth:{isAdmin:true},PosAuthOps:{refresh:async()=>{}}},
+const context = {window:{addEventListener(){},PosAppUpdate:{run(){}},PosAuth:{isAdmin:true},PosAuthOps:{refresh:async()=>{}}},
   document:{addEventListener:(name, callback) => callback()},
   Vue:{createApp: options => {root = options; return app;}},
   console, setTimeout, clearTimeout};
@@ -248,7 +248,7 @@ const add = (name, fn, options) => {
   listeners[name] = fn; registrations.push([name, options || null]);
 };
 const context = {
-  window: {
+  window: {PosAppUpdate:{run(){}},
     scrollX:12, scrollY:34,
     addEventListener:add,
     removeEventListener:(name, fn, options) => removed.push([name, options || null]),

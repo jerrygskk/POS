@@ -1,6 +1,7 @@
 import os, glob, sqlite3, datetime
 
 KEEP = {"day": 7, "week": 4, "month": 12}
+UPGRADE_KEEP = 5
 
 def _snapshot(db_path, dest):
     src = sqlite3.connect(db_path)
@@ -11,6 +12,18 @@ def _snapshot(db_path, dest):
         os.replace(dest + ".tmp", dest)
     finally:
         src.close()
+
+def backup_before_upgrade(db_path, backup_dir, from_version, to_version):
+    """資料庫升級格式前的備份;失敗丟例外,由呼叫端決定停止升級。回傳備份檔路徑。"""
+    bdir = os.fspath(backup_dir)
+    os.makedirs(bdir, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = os.path.join(bdir, f"pos_upgrade_{stamp}_v{from_version}-v{to_version}.db")
+    _snapshot(db_path, dest)
+    files = sorted(glob.glob(os.path.join(bdir, "pos_upgrade_*.db")))
+    for old in files[:-UPGRADE_KEEP]:
+        os.remove(old)
+    return dest
 
 def run_auto_backup(db_path, backup_dir=None, on_error=None):
     try:

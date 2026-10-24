@@ -79,7 +79,9 @@ class AuthTests(ConnTestCase):
         self.assertFalse(self.session.is_admin())
 
     def test_passive_queries_never_extend_session(self):
-        self.assertEqual(PASSIVE_ACTIONS, {"auth.status", "auth.logout", "stocktake.pending_count"})
+        self.assertEqual(PASSIVE_ACTIONS, {"auth.status", "auth.logout", "stocktake.pending_count",
+                                           "desktop.update.check", "desktop.update.start", "desktop.update.status",
+                                           "desktop.update.restart", "desktop.update.busy"})
         self.session.login("admin")
         for _ in range(2):
             self.now += 300
@@ -88,6 +90,18 @@ class AuthTests(ConnTestCase):
         self.now += 1
         self.assertFalse(self.bridge.invoke("auth.status")["data"]["is_admin"])
         self.assertEqual(self.bridge.invoke("stocktake.pending_count")["error"]["code"], "forbidden")
+
+    def test_update_actions_do_not_touch_admin_session(self):
+        # 員工(未登入)也能用線上更新;進度輪詢不延長管理者閒置計時
+        for action in ("desktop.update.check", "desktop.update.start", "desktop.update.status",
+                       "desktop.update.restart", "desktop.update.busy"):
+            response = self.bridge.invoke(action)
+            self.assertNotEqual((response.get("error") or {}).get("code"), "forbidden", action)
+        self.session.login("admin")
+        for _ in range(3):
+            self.now += 300
+            self.bridge.invoke("desktop.update.status")
+        self.assertFalse(self.session.is_admin())
 
     def test_child_bridge_activity_keeps_main_bridge_logged_in(self):
         child = DesktopBridge(facade=self.facade)

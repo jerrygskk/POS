@@ -1,6 +1,7 @@
 import traceback
-from lib.db import init_db
-from lib.backup import run_auto_backup
+from lib.db import init_db, read_schema_version
+from lib.db_schema import SCHEMA_VERSION
+from lib.backup import backup_before_upgrade, run_auto_backup
 from lib.desktop_application import DesktopApplication
 from lib.runtime_paths import RuntimePaths
 
@@ -20,6 +21,19 @@ def try_log_runtime_error(paths, message, exc):
 
 
 def prepare_runtime(paths):
+    # 升級資料庫格式前先備份;讀不到版號就不動資料庫
+    if paths.db_path.is_file():
+        try:
+            version = read_schema_version(paths.db_path)
+        except Exception as exc:
+            try_log_runtime_error(paths, "資料庫初始化失敗", exc)
+            raise
+        if version is not None and version < SCHEMA_VERSION:
+            try:
+                backup_before_upgrade(paths.db_path, paths.backup_dir, version, SCHEMA_VERSION)
+            except Exception as exc:
+                try_log_runtime_error(paths, "升級前備份失敗，已停止升級資料庫", exc)
+                raise
     try:
         init_db(paths.db_path, require_existing=True)
     except Exception as exc:

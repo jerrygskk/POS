@@ -104,4 +104,5 @@ document.addEventListener("DOMContentLoaded", () => {
   for (const [name, comp] of Object.entries(window.PosComponents || {}))
     app.component(name, comp);
   app.mount("#app");
+  window.PosAppUpdate.run();
 });

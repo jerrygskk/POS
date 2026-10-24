@@ -1,6 +1,7 @@
 import os
 import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
 from lib import db_schema
 from lib.db_schema import SCHEMA
 from lib import db_seed
@@ -54,6 +55,21 @@ def _get_schema_version(conn):
     if row is None:
         return db_schema.BASE_VERSION  # 舊版 DB 無版號=初版
     return int(row["value"])
+
+def read_schema_version(db_path):
+    """唯讀讀出既有資料庫的版號;沒有 Setting 表(全新空檔)回 None。
+
+    語意同 _get_schema_version。網址用 as_uri() 產生:自己拼 file:{path} 時,
+    路徑含 #、?、% 會被當成網址符號而開到別的檔案。
+    """
+    conn = sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='Setting'").fetchone() is None:
+            return None
+        return _get_schema_version(conn)
+    finally:
+        conn.close()
 
 def _set_schema_version(conn, version):
     conn.execute(

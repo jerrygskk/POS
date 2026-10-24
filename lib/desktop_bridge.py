@@ -2,7 +2,7 @@ import logging
 import math
 
 from lib.application_errors import ApplicationError, InternalError, ValidationError
-from lib.auth import ADMIN_ACTIONS, PASSIVE_ACTIONS
+from lib.auth import ADMIN_ACTIONS, PASSIVE_ACTIONS, UPDATE_ACTIONS
 
 MAX_DETAILS_DEPTH = 32
 
@@ -11,13 +11,14 @@ class DesktopBridge:
     """將應用操作結果轉為桌面前端使用的固定 envelope。"""
 
     def __init__(self, logger=None, facade=None, window=None, save_dialog_type=None,
-                 file_writer=None, child_window=None):
+                 file_writer=None, child_window=None, updater=None):
         self._logger = logger or logging.getLogger(__name__)
         self._facade = facade
         self._window = window
         self._save_dialog_type = save_dialog_type
         self._file_writer = file_writer or self._write_text
         self._child_window = child_window
+        self._updater = updater
 
     @staticmethod
     def _write_text(path, content):
@@ -31,12 +32,34 @@ class DesktopBridge:
     def _set_child_window(self, child_window):
         self._child_window = child_window
 
+    def _set_updater(self, updater):
+        self._updater = updater
+
+    def _update(self, action):
+        # payload 一律不用:網址與路徑只用後端自己查到的
+        if action == "desktop.update.busy":
+            return {"busy": self._child_window is not None and self._child_window.is_open()}
+        if self._updater is None:
+            if action == "desktop.update.check":
+                return {"available": False, "version": None, "current": None}
+            raise InternalError("線上更新尚未初始化")
+        if action == "desktop.update.check":
+            return self._updater.check()
+        if action == "desktop.update.start":
+            return self._updater.start()
+        if action == "desktop.update.status":
+            return self._updater.status()
+        self._updater.restart(self._window)
+        return {"ok": True}
+
     def invoke(self, action, payload=None):
         return self._respond(lambda: self._invoke(action, payload))
 
     def _invoke(self, action, payload):
         if not isinstance(action, str):
             raise ValidationError("不支援的操作")
+        if action in UPDATE_ACTIONS:
+            return self._update(action)
         if action in ADMIN_ACTIONS and self._facade is None:
             raise InternalError("桌面服務尚未初始化")
         if self._facade is not None:

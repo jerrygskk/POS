@@ -82,7 +82,7 @@ await click(button(view.dom,"送出"));await tick();assert.ok(calls.some(c=>c[0]
 let rootDefinition;
 context.document.addEventListener=(n,f)=>{events[n]=f;};
 context.Vue={...Vue,createApp(def){rootDefinition=def;return{mixin(){},component(){},mount(){}};}};
-load("static/js/app.js");events.DOMContentLoaded();context.Vue=Vue;
+context.window.PosAppUpdate={run(){}};load("static/js/app.js");events.DOMContentLoaded();context.Vue=Vue;
 const nav=html.split("<nav")[1].split("</nav>")[0];
 const view=mount(rootDefinition,"<nav"+nav+"</nav>");
 assert.ok(!button(view.dom,"設定"));assert.ok(button(view.dom,"管理者登入"));

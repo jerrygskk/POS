@@ -116,6 +116,10 @@ class ChildWindowCoordinator:
         with self._lock:
             return self._open(payload)
 
+    def is_open(self):
+        with self._lock:
+            return self._window is not None
+
     def _open(self, payload):
         if not isinstance(payload, dict):
             raise ValidationError("子視窗開啟資料格式錯誤")

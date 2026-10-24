@@ -129,6 +129,37 @@ class DesktopApplicationTest(unittest.TestCase):
         self.assertEqual(webview.create_window_calls, [])
         self.assertEqual(webview.start_calls, [])
 
+    def test_update_warning_written_to_error_log(self):
+        application = DesktopApplication(self.paths, webview_module=FakeWebview())
+        logger = application.updater._logger
+        logger.warning("查詢新版本失敗：offline")
+        for handler in logger.handlers:
+            handler.close()
+        self.assertIn("查詢新版本失敗：offline", self.paths.error_log_path.read_text(encoding="utf-8"))
+
+    def test_run_calls_cleanup_and_shutdown(self):
+        calls = []
+        webview = FakeWebview()
+        webview.start = lambda *a, **k: calls.append("start")
+        updater = Mock()
+        updater.startup_cleanup.side_effect = lambda: calls.append("cleanup")
+        updater.shutdown.side_effect = lambda: calls.append("shutdown")
+        DesktopApplication(self.paths, bridge=DesktopBridge(facade=Mock()),
+                           webview_module=webview, updater=updater).run()
+        self.assertEqual(calls, ["cleanup", "start", "shutdown"])
+
+    def test_child_window_is_open_tracks_window(self):
+        webview = FakeWebview()
+        bridge = DesktopBridge(facade=Mock())
+        DesktopApplication(self.paths, bridge=bridge, webview_module=webview, updater=Mock()).run()
+        child = bridge._child_window
+        self.assertFalse(child.is_open())
+        bridge.invoke("desktop.child_window.open", {"page": "variant_editor",
+            "context": {"product": {"product_id": 10}, "variant": {"variant_id": 20}}})
+        self.assertTrue(child.is_open())
+        webview.windows[-1].events.closed.fire()
+        self.assertFalse(child.is_open())
+
     def test_default_bridge_logs_internal_errors_to_runtime_error_log(self):
         application = DesktopApplication(self.paths, webview_module=FakeWebview())
         application.bridge._respond(lambda: (_ for _ in ()).throw(RuntimeError("private detail")))

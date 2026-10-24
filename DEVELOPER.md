@@ -23,11 +23,13 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 
 | 路徑 | 說明 |
 |---|---|
-| `main.py` | Desktop-only 進入點：偵測路徑→驗證／升級既有 DB→備份→啟動桌面視窗 |
+| `main.py` | Desktop-only 進入點：偵測路徑→升級前備份→驗證／升級既有 DB→備份→啟動桌面視窗 |
 | `lib/runtime_paths.py` | 集中決定開發／onefile 的 DB、備份、錯誤記錄與 static 路徑 |
 | `lib/desktop_application.py` | 建立 pywebview 視窗，串接 `DesktopBridge` 與各 Facade |
 | `lib/desktop_bridge.py` | pywebview JS bridge：轉送 action、統一成功／錯誤 envelope、處理匯出存檔 |
 | `lib/auth.py` | 共用管理者身分、密碼雜湊、閒置逾時與唯一受限動作表 |
+| `lib/selfupdate.py` | 線上更新純邏輯：查 GitHub Releases、下載、核對大小與 SHA-256、換檔、重開、跨行程更新鎖 |
+| `lib/app_update.py` | 線上更新背景下載狀態 `AppUpdater`（查新版→下載→核對→換檔），由 bridge 以 `desktop.update.*` 開放 |
 | `lib/child_window.py` | 子視窗協調器：唯一子視窗、頁面白名單、傳入脈絡、關閉時通知主視窗解鎖 |
 | `lib/version.py` | `VERSION` 字串 |
 | `lib/db.py` | `get_conn` / `db_conn`(context manager)/ `init_db`,純資料層(零框架依賴) |
@@ -36,7 +38,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `lib/db_seed.py` | 付款方式與初始管理者密碼種子、新種類預設欄清單(規格欄由各種類自建,種子不建欄) |
 | `lib/product_rules.py` | 共用商品規則(`FIELD_TYPES`、欄位型別驗證、自取碼取號) |
 | `lib/variant_batch_service.py` | 子產品批次建立與唯讀預檢（共用 `_validate_batch`，`dry=True` 不寫入任何資料） |
-| `lib/backup.py` | GFS 備份(日7/週4/月12) |
+| `lib/backup.py` | GFS 備份(日7/週4/月12)；資料庫升級格式前另備一份(保留 5 份) |
 | `lib/label_printer.py` | NIIMBOT B1 協定與序列埠溝通(自動尋埠、送圖、錯誤轉譯) |
 | `lib/label_layout.py` | 商品標籤版面繪製(純函式,輸入四個字串輸出 Pillow 影像) |
 | `lib/*_service.py` | 正式 Facade／Service／Repository 應用層與資料存取實作 |
@@ -50,10 +52,12 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `static/js/combobox.js` | 可搜尋下拉 `combo-box`（從既有主檔挑一筆，可新增未收錄的值） |
 | `static/js/sortable.js` | 拖拉排序清單 `sortable-list`（⠿ 拖曳＋序號格搬位；`auto-save` 決定拖完直接寫入或交給該區塊的儲存鈕，`disabled` 供清單被過濾時停用排序） |
 | `static/js/confirm.js` | 確認／通知視窗公版 `PosConfirm.ask()`／`notify()`／`input()`／`choose()`（取代瀏覽器內建 confirm／alert；`choose` 為清單選擇） |
+| `static/js/app_update.js` | 線上更新前端：閒置才詢問、鎖畫面顯示下載百分比、完成自動重開 |
 | `static/js/auth.js` | 主、子視窗共用的活動回報；主視窗登入／登出、身分刷新與待核准徽章 |
 | `static/js/employeepicker.js` | 員工代號 1～6 選擇元件 `employee-picker`（收銀／進貨／盤點共用同一個選擇） |
 | `static/css/dialog-theme.css` | 子視窗對話框外觀（`.dialog-*` 公版，沿用 §2 UI 風格色票） |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
+| `tools/publish_release.py` | 發版上傳工具：核對版號與 tag 後建草稿，核對草稿檔案無誤才公開 GitHub Release |
 | `tools/make_standard_db.py` | 產生標準資料庫:最新格式＋商品與設定,不含營業紀錄(見 §2 標準資料庫) |
 | `tests/` | 單元測試（`tests/base.py` 共用 `ConnTestCase`／`FacadeTestCase` 與 fixture helper） |
 
@@ -521,6 +525,36 @@ python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_s
 `pos_standard.db`,已列入 `.gitignore`)→ 自行把舊 `pos.db` 改名或刪除,再把新檔改名為 `pos.db`。
 工具刻意不直接覆蓋 `pos.db`。
 
+### 線上更新
+
+打包後的 `POS.exe` 開啟時查 GitHub Releases（`repos/jerrygskk/POS/releases/latest`），有新版就詢問，
+下載核對後換檔並自動重開。從原始碼執行一律回報無更新。
+
+- **為何用 GitHub Releases**：repo 公開，不必自建伺服器。信任根是維護者的 GitHub 帳號（沒有程式碼簽章，
+  已評估接受），維護者須維持兩項設定：帳號開兩步驟驗證、repo 開「不可變更 release」（公開後檔案不能被抽換）。
+- **只認一種格式**：tag 必須是 `v` 加三段 ASCII 數字；asset 必須叫 `POS.exe`、狀態 `uploaded`、大小 1 byte～500 MB、
+  有 `sha256:` 指紋，下載網址必須正好是 `https://github.com/jerrygskk/POS/releases/download/v{版號}/POS.exe`。
+  任何一項不符就安靜不更新，不會改抓別的檔案。
+- **詢問時機**：查到新版後等閒置才問——沒有對話框、畫面沒鎖、收銀購物車／進貨清單／標籤列印清單都是空的
+  （這三者只存在記憶體，重開會清掉）、規格設定子視窗沒開。可選「稍後」，下次開啟再問；不做「略過此版本」。
+- **員工也能更新**（2026-10-24 議定）：五個 `desktop.update.*` 不列入管理者限定動作，且都不延長管理者閒置計時，
+  否則下載進度的輪詢會讓管理者一直保持登入。
+- **下載與換檔**：按「更新」後整個主視窗鎖住並攔下所有按鍵（條碼槍輸入不會進到收銀畫面），只顯示百分比。
+  下載到 `POS.exe.new`，寫完從硬碟重讀核對大小與 SHA-256，執行中的 exe 改名 `.old`、新檔改回 `POS.exe`
+  （失敗就把舊檔改回），再以乾淨的環境變數啟動新版（onefile 會把 `_MEI*` 傳給子行程，新版會誤用舊版的暫存解壓目錄）。
+  下次開啟刪掉 `.old`／`.new`。
+- **兩個 POS 同時更新**：`POS.exe.update.lock` 以 `msvcrt.locking` 鎖住，從清理、下載、核對到換檔全程持有；
+  拿不到鎖的一方顯示「另一個 POS 視窗正在更新」。行程結束時 Windows 自動放鎖。
+- **關閉程式時**：還在下載就取消、最多等 3 秒；已進入換檔就一直等到換檔或還原完成，
+  不得停在「exe 已改名、新檔還沒放回」之間。「已取消」與「進入換檔」在同一把鎖內二選一。
+- **失敗都安靜**：沒網路、查詢失敗只寫 `error.log` warning（更新用自己的 logger，桌面 logger 門檻是 ERROR 寫不進去）；
+  還沒有任何 release（404）連 log 都不寫。資料夾不能寫、下載失敗、無法自動重開各有固定中文通知。
+- **升級前備份**：開啟時讀到既有資料庫版號小於程式的 `SCHEMA_VERSION`，先備份成
+  `backups/pos_upgrade_{時間}_v{舊}-v{新}.db`（保留最近 5 份）再升級；備份失敗或讀不到版號就停止啟動、不動資料庫。
+  唯讀開檔一律用 `Path(...).resolve().as_uri() + "?mode=ro"`，自己拼 `file:{路徑}` 遇到 `#`、`%` 會開錯檔案。
+- **發版**：`python tools/publish_release.py`（見 §4）。⚠️ 店裡第一次要手動換上含線上更新的版本；
+  真正「舊版自動更新成新版」要發過兩版才能實測。
+
 ### UI 風格規範(源自維護者 theme_guide,Apple HIG 風;定義於 `static/css/pos.css` 檔頭)
 
 - **色票**:背景 `#f2f2f7`|元件底 `#fff`|主文字 `#1c1c1e`|次要 `#636366`|佔位/停用字 `#aeaeb2`|邊框 `#c6c6c8`|hover 底/停用底 `#e5e5ea`|pressed 底/停用框 `#d1d1d6`|強調(焦點/選中/chip.on) `#8fa8c8`|主要鈕 `#a1b4cb`/hover `#4977b1`/pressed `#39649a`|危險 `#e74c3c`/hover `#c0392b`。換主色時全域搜尋一起換。
@@ -556,9 +590,9 @@ python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_s
 python -m unittest discover -s tests
 ```
 
-目前入庫 771 個測試,涵蓋 schema/migration、Desktop action 契約、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
+目前入庫 919 個測試,涵蓋 schema/migration、Desktop action 契約、線上更新、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
 ⚠️ `tests/test_import_excel.py` 與 `tools/import_excel.py` 一樣**不入庫**(直接 import 該工具,
-缺檔會 error 而非 skip);兩者仍在使用中的機器上會多跑 26 項,匯入驗收結束後一起刪除。
+缺檔會 error 而非 skip);兩者仍在使用中的機器上會多跑 29 項,匯入驗收結束後一起刪除。
 
 ⚠️ 前端改動的最終驗證一律以真實 pywebview 走查(`RuntimePaths` 指向 `pos.db` 副本＋repo `static/`),
 走查腳本**只能操作 DOM**,不可去抓 Vue 元件實例——prod 版 Vue 沒有 `__vue_app__`／`__vueParentComponent`
@@ -580,6 +614,17 @@ stdout／stderr 顯示訊息，錯誤一律寫入 exe 同層的 `error.log`（`m
 spec 另外：排除 `tkinter`、`pytest`；剔除打包機器 PATH 上 Git for Windows 混進來的 OpenSSL DLL；
 `upx=False`（UPX 壓縮容易被防毒誤判，公文系統、539 同樣關閉）。
 產出 `dist/POS.exe`。執行前須將既有 `pos.db` 放在 exe 同層；備份寫入同層的 `backups/`。
+
+**發布上傳**（打包完成、版號進版 commit 與 tag 都已推上去之後）：
+
+```powershell
+python tools/publish_release.py
+```
+
+需要已登入的 `gh` CLI。工具依序核對：exe 檔案版本＝原始碼版號、工作區乾淨且 HEAD 就是該版 tag、遠端已有同一個 tag、
+該版尚未公開（殘留草稿會刪掉重建）、根目錄有 `release_note_v{版號}.md`；接著建草稿，**核對草稿上的檔名、大小與
+SHA-256 都對才公開**（repo 開了不可變更 release，公開後檔案改不回來）。任何一關不過就以中文訊息停下。
+`gh release` 指令帶 `-R jerrygskk/POS`；`gh api` 不支援 `-R`，一律寫完整路徑；檔案路徑不得含 `#`。
 
 標籤列印新增的三個相依（`pyserial`、`pillow`、`python-barcode`）不需額外 hidden-import，
 PyInstaller 自動收錄，含尋埠所需的 `serial.tools.list_ports_windows`（實測 v0.1.0 後，

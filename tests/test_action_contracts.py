@@ -257,6 +257,10 @@ def validate_retired_source_metadata(contracts):
                     f"wrong retired source for {action}.{path}: expected {wanted!r}, got {source!r}")
 
 FRONTEND_ACTIONS = set(ACTION_CONTRACTS)
+DESKTOP_UPDATE_ACTIONS = {
+    "desktop.update.check", "desktop.update.start", "desktop.update.status",
+    "desktop.update.restart", "desktop.update.busy",
+}
 AUTH_ACTIONS = {"auth.status", "auth.login", "auth.logout", "auth.touch", "auth.change_password"}
 DESKTOP_WINDOW_ACTIONS = {
     "desktop.child_window.open",
@@ -522,7 +526,7 @@ class ActionContractTests(FacadeTestCase):
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
                              self.facade.stocktake.ACTIONS, self.facade.printing.ACTIONS)
         self.assertEqual(len(ACTION_CONTRACTS), 82)
-        self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS | AUTH_ACTIONS)
+        self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS | AUTH_ACTIONS | DESKTOP_UPDATE_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
         self.assertEqual(set(TARGET_BY_ACTION), FRONTEND_ACTIONS | {"sales.export"})

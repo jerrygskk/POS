@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=241">
+<link rel="stylesheet" href="css/pos.css?v=242">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=241" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=242" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -747,25 +747,26 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=241"></script>
-<script src="js/api.js?v=241"></script>
-<script src="js/confirm.js?v=241"></script>
-<script src="js/auth.js?v=241"></script>
-<script src="js/pos_shared.js?v=241"></script>
-<script src="js/catalogfields.js?v=241"></script>
-<script src="js/checkout.js?v=241"></script>
-<script src="js/receive.js?v=241"></script>
-<script src="js/stocktake.js?v=241"></script>
-<script src="js/records.js?v=241"></script>
-<script src="js/catalog.js?v=241"></script>
-<script src="js/sortable.js?v=241"></script>
-<script src="js/combobox.js?v=241"></script>
-<script src="js/optpicker.js?v=241"></script>
-<script src="js/modelpicker.js?v=241"></script>
-<script src="js/employeepicker.js?v=241"></script>
-<script src="js/attrfields.js?v=241"></script>
-<script src="js/settings.js?v=241"></script>
-<script src="js/labels.js?v=241"></script>
-<script src="js/app.js?v=241"></script>
+<script src="js/vue.global.prod.js?v=242"></script>
+<script src="js/api.js?v=242"></script>
+<script src="js/confirm.js?v=242"></script>
+<script src="js/auth.js?v=242"></script>
+<script src="js/pos_shared.js?v=242"></script>
+<script src="js/catalogfields.js?v=242"></script>
+<script src="js/checkout.js?v=242"></script>
+<script src="js/receive.js?v=242"></script>
+<script src="js/stocktake.js?v=242"></script>
+<script src="js/records.js?v=242"></script>
+<script src="js/catalog.js?v=242"></script>
+<script src="js/sortable.js?v=242"></script>
+<script src="js/combobox.js?v=242"></script>
+<script src="js/optpicker.js?v=242"></script>
+<script src="js/modelpicker.js?v=242"></script>
+<script src="js/employeepicker.js?v=242"></script>
+<script src="js/attrfields.js?v=242"></script>
+<script src="js/settings.js?v=242"></script>
+<script src="js/labels.js?v=242"></script>
+<script src="js/app_update.js?v=242"></script>
+<script src="js/app.js?v=242"></script>
 </body>
 </html>

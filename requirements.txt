@@ -3,3 +3,4 @@ pywebview==6.2.1
 pyserial
 pillow
 python-barcode
+truststore==0.10.4

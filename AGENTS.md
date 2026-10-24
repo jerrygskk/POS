@@ -94,10 +94,11 @@
 - **發布版本標準流程（照順序做到底）**：
   1. 寫文件內文：技術章節補進 DEVELOPER.md；使用者有感的改動 README 也同步
   2. 寫 handover（需跨對話交接才寫）
-  3. 寫 release note
+  3. 寫 release note（第 7 步會把它當 GitHub Release 的發布說明公開，任何人都看得到：不得寫真實人名或個資）
   4. 版號進版
   5. 推上去 + `git tag v{版號}` + push tag
   6. build：onefile 全新 build，回報成功/失敗
+  7. 上傳發布：`python tools/publish_release.py`，回報成功/失敗（release note 檔放專案根目錄 `release_note_v{版號}.md`，不入庫；工具會讀它當發布說明）
 - 發布順序鐵則：**文件／release note 要在「版號進版 commit」之前寫好**，tag 才指向含完整文件的 commit；先打 tag 事後補文件＝退版重做。
 - ⚠️ tag 已 push 後要移動：本地 `git tag -f` 後，遠端**先刪再推**（`git push origin :refs/tags/v{版號}` 再 push）。
 

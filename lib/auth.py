@@ -9,7 +9,12 @@ import time
 from lib.application_errors import ForbiddenError, ValidationError
 
 PASSWORD_ITERATIONS = 200_000
-PASSIVE_ACTIONS = frozenset({"auth.status", "auth.logout", "stocktake.pending_count"})
+# 不延長管理者閒置計時的操作;線上更新員工也能用,進度輪詢不得讓管理者一直保持登入
+UPDATE_ACTIONS = frozenset({
+    "desktop.update.check", "desktop.update.start", "desktop.update.status",
+    "desktop.update.restart", "desktop.update.busy",
+})
+PASSIVE_ACTIONS = frozenset({"auth.status", "auth.logout", "stocktake.pending_count"}) | UPDATE_ACTIONS
 ADMIN_ACTIONS = frozenset({
     "categories.create", "categories.update", "categories.delete", "categories.sort",
     "brands.create", "brands.update", "brands.delete", "brands.sort", "brands.set_categories",

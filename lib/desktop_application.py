@@ -1,6 +1,8 @@
 import logging
 from collections.abc import Mapping
 
+from lib import selfupdate
+from lib.app_update import AppUpdater
 from lib.auth import ADMIN_ACTIONS, AdminSession
 from lib.desktop_bridge import DesktopBridge
 from lib.settings_service import SettingsFacade
@@ -71,8 +73,16 @@ class DesktopFacade:
 class DesktopApplication:
     """建立並執行 POS 的單一 pywebview 桌面視窗。"""
 
-    def __init__(self, paths, bridge=None, webview_module=None):
+    def __init__(self, paths, bridge=None, webview_module=None, updater=None):
         self.paths = paths
+        if updater is None:
+            # 桌面 logger 門檻是 ERROR,更新的 warning(查詢失敗)要另用自己的 logger 才寫得進 error.log
+            update_logger = logging.getLogger(f"pos.update.{id(self)}")
+            update_logger.setLevel(logging.WARNING)
+            update_logger.propagate = False
+            update_logger.addHandler(logging.FileHandler(paths.error_log_path, encoding="utf-8", delay=True))
+            updater = AppUpdater(exe=selfupdate.frozen_exe(), logger=update_logger)
+        self.updater = updater
         if bridge is None:
             logger = logging.getLogger(f"pos.desktop.{id(self)}")
             logger.setLevel(logging.ERROR)
@@ -80,6 +90,7 @@ class DesktopApplication:
             logger.addHandler(logging.FileHandler(paths.error_log_path, encoding="utf-8"))
             bridge = DesktopBridge(logger=logger, facade=DesktopFacade(paths.db_path))
         self.bridge = bridge
+        self.bridge._set_updater(updater)
         self._webview_module = webview_module
 
     def _webview(self):
@@ -114,5 +125,9 @@ class DesktopApplication:
             logger=self.bridge._logger,
         )
         self.bridge._set_child_window(child_window)
-        webview.start(gui="edgechromium")
+        self.updater.startup_cleanup()
+        try:
+            webview.start(gui="edgechromium")
+        finally:
+            self.updater.shutdown()
         return window

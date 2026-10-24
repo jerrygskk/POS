@@ -30,7 +30,8 @@ const API = {
       "barcodes.scan", "stock.receive", "stock.detail", "stock.receipts",
       "stocktake.create", "stocktake.list", "stocktake.history", "stocktake.detail", "stocktake.scan", "stocktake.set_counted", "stocktake.remove_item", "stocktake.close", "stocktake.withdraw", "stocktake.return", "stocktake.approve", "stocktake.pending_count",
       "payments.list", "sales.checkout", "sales.list", "sales.recent", "sales.summary", "sales.export_save", "printing.barcode", "printing.preview", "printing.check",
-      "desktop.child_window.open", "desktop.child_window.context", "desktop.child_window.close"
+      "desktop.child_window.open", "desktop.child_window.context", "desktop.child_window.close",
+      "desktop.update.check", "desktop.update.start", "desktop.update.status", "desktop.update.restart", "desktop.update.busy"
     ]);
     if (!allowed.has(action)) throw new Error("不支援的桌面操作");
     const api = await this._bridge();
