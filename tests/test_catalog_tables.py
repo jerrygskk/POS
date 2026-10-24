@@ -34,29 +34,32 @@ class TestCatalogTables(ConnTestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.conn.execute("INSERT INTO PhoneBrand(name) VALUES('iPhone')")
 
-    # PhoneModel UNIQUE(phone_brand_id,name):同品牌同名重複違反;跨品牌同名可
+    # PhoneModel UNIQUE(phone_brand_id,device_type_id,name):同品牌同類型同名違反;跨品牌或跨類型同名可
     def test_phonemodel_unique(self):
         ip = self.conn.execute(
             "INSERT INTO PhoneBrand(name) VALUES('iPhone')").lastrowid
         sam = self.conn.execute(
             "INSERT INTO PhoneBrand(name) VALUES('SAMSUNG')").lastrowid
-        self.conn.execute("INSERT INTO PhoneModel(phone_brand_id,name) VALUES(?,'15')", (ip,))
+        self.conn.execute("INSERT INTO PhoneModel(phone_brand_id,device_type_id,name) VALUES(?,1,'15')", (ip,))
         with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute("INSERT INTO PhoneModel(phone_brand_id,name) VALUES(?,'15')", (ip,))
+            self.conn.execute("INSERT INTO PhoneModel(phone_brand_id,device_type_id,name) VALUES(?,1,'15')", (ip,))
         # 不同品牌同名可共存
-        self.conn.execute("INSERT INTO PhoneModel(phone_brand_id,name) VALUES(?,'15')", (sam,))
+        self.conn.execute("INSERT INTO PhoneModel(phone_brand_id,device_type_id,name) VALUES(?,1,'15')", (sam,))
+        # 同品牌不同裝置類型同名可共存
+        tablet = self.conn.execute("INSERT INTO DeviceType(name) VALUES('平板')").lastrowid
+        self.conn.execute("INSERT INTO PhoneModel(phone_brand_id,device_type_id,name) VALUES(?,?,'15')", (ip, tablet))
 
     # PhoneModel FK:指向不存在的手機品牌 → 違反
     def test_phonemodel_fk_enforced(self):
         with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute("INSERT INTO PhoneModel(phone_brand_id,name) VALUES(999,'15')")
+            self.conn.execute("INSERT INTO PhoneModel(phone_brand_id,device_type_id,name) VALUES(999,1,'15')")
 
     # VariantModel 複合主鍵
     def test_variantmodel_pk(self):
         self.conn.execute("INSERT INTO Product(name) VALUES('殼')")
         self.conn.execute("INSERT INTO Variant(product_id) VALUES(1)")
         self.conn.execute("INSERT INTO PhoneBrand(name) VALUES('iPhone')")
-        self.conn.execute("INSERT INTO PhoneModel(phone_brand_id,name) VALUES(1,'15')")
+        self.conn.execute("INSERT INTO PhoneModel(phone_brand_id,device_type_id,name) VALUES(1,1,'15')")
         self.conn.execute("INSERT INTO VariantModel(variant_id,model_id) VALUES(1,1)")
         with self.assertRaises(sqlite3.IntegrityError):
             self.conn.execute("INSERT INTO VariantModel(variant_id,model_id) VALUES(1,1)")
@@ -145,7 +148,7 @@ class TestCatalogTables(ConnTestCase):
         fid, oid = self._make_variant_and_option()
         self.conn.execute("INSERT INTO PhoneBrand(name) VALUES('iPhone')")
         mid = self.conn.execute(
-            "INSERT INTO PhoneModel(phone_brand_id,name) VALUES(1,'15')").lastrowid
+            "INSERT INTO PhoneModel(phone_brand_id,device_type_id,name) VALUES(1,1,'15')").lastrowid
         self.conn.execute(
             "INSERT INTO OptionModel(option_id,model_id) VALUES(?,?)", (oid, mid))
         with self.assertRaises(sqlite3.IntegrityError):

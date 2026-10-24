@@ -31,7 +31,7 @@ DEFAULT_OUTPUT = ROOT / "pos_standard.db"
 # 避免交付的資料庫悄悄少掉一張表。
 COPY_TABLES = [
     "Category", "AttributeField", "CategoryField", "AttributeOption", "OptionModel",
-    "Brand", "BrandCategory", "PhoneBrand", "PhoneModel",
+    "Brand", "BrandCategory", "PhoneBrand", "DeviceType", "PhoneModel",
     "Product", "Variant", "VariantAttribute", "VariantModel", "Barcode",
     "VariantIssue",
 ]

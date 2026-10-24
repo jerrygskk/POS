@@ -16,3 +16,6 @@ def seed(conn, fresh=False):
     if conn.execute("SELECT 1 FROM Setting WHERE key='admin_password_hash'").fetchone() is None:
         conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('admin_password_hash',?)",
                      (hash_password("admin"),))
+    # 型號必須掛裝置類型;清單全空時補一個「手機」,管理者刪掉改用別的就不再補
+    if conn.execute("SELECT 1 FROM DeviceType").fetchone() is None:
+        conn.execute("INSERT INTO DeviceType(name,sort) VALUES('手機',1)")

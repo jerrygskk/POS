@@ -32,7 +32,7 @@ class TestSplitSharedStyleField(unittest.TestCase):
         model_id = conn.execute(
             "INSERT INTO PhoneBrand(name) VALUES('iPhone')").lastrowid
         model_id = conn.execute(
-            "INSERT INTO PhoneModel(phone_brand_id,name) VALUES(?, 'iPhone 17')",
+            "INSERT INTO PhoneModel(phone_brand_id,device_type_id,name) VALUES(?,1,'iPhone 17')",
             (model_id,)).lastrowid
         conn.execute("INSERT INTO OptionModel(option_id,model_id) VALUES(?,?)",
                      (opts["磁吸支架"], model_id))

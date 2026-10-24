@@ -9,10 +9,10 @@ from lib.product_rules import FIELD_TYPES
 
 
 _ACTION_RULES = {
-    **{f"{kind}.{op}": ({}, {}) for kind in ("categories", "brands", "phone_brands") for op in ("list", "create", "update", "delete", "sort")},
+    **{f"{kind}.{op}": ({}, {}) for kind in ("categories", "brands", "phone_brands", "device_types") for op in ("list", "create", "update", "delete", "sort")},
     "brands.set_categories": ({"id": int, "category_ids": "int_list"}, {}),
     "models.list": ({}, {"all": (bool, int), "phone_brand_id": (int, type(None))}),
-    "models.create": ({"phone_brand_id": int, "name": str}, {"alias": (str, type(None)), "series": (str, type(None)), "sort": (int, type(None))}),
+    "models.create": ({"phone_brand_id": int, "device_type_id": int, "name": str}, {"alias": (str, type(None)), "sort": (int, type(None))}),
     "models.update": ({"id": int, "fields": Mapping}, {}),
     "models.delete": ({"id": int}, {}),
     "models.sort": ({"ids": "int_list"}, {}),
@@ -36,11 +36,12 @@ _UPDATE_FIELD_RULES = {
     "categories.update": {"name": str, "sort": int, "active": (bool, int), "model_mode": str},
     "brands.update": {"name": str, "sort": int, "active": (bool, int)},
     "phone_brands.update": {"name": str, "sort": int, "active": (bool, int)},
+    "device_types.update": {"name": str, "sort": int, "active": (bool, int)},
     "models.update": {
         "phone_brand_id": int,
+        "device_type_id": int,
         "name": str,
         "alias": (str, type(None)),
-        "series": (str, type(None)),
         "sort": int,
         "active": (bool, int),
     },
@@ -59,7 +60,7 @@ _UPDATE_FIELD_RULES = {
         "active": (bool, int),
     },
 }
-for _kind in ("categories", "brands", "phone_brands"):
+for _kind in ("categories", "brands", "phone_brands", "device_types"):
     _ACTION_RULES[f"{_kind}.create"] = ({"name": str}, {"sort": (int, type(None))})
     _ACTION_RULES[f"{_kind}.update"] = ({"id": int, "fields": Mapping}, {})
     _ACTION_RULES[f"{_kind}.delete"] = ({"id": int}, {})
@@ -137,7 +138,8 @@ class SettingsService:
     SIMPLE = {
         "categories": ("Category", "category_id", "category_id", "查無此種類"),
         "brands": ("Brand", "brand_id", "brand_id", "查無此廠牌"),
-        "phone_brands": ("PhoneBrand", "phone_brand_id", "phone_brand_id", "查無此手機品牌"),
+        "phone_brands": ("PhoneBrand", "phone_brand_id", "phone_brand_id", "查無此機型品牌"),
+        "device_types": ("DeviceType", "device_type_id", "device_type_id", "查無此裝置類型"),
     }
     NO_ACTIVE = {"brands"}  # 廠牌無 active(規格 §7.2:不參與營運狀態)
 
@@ -184,7 +186,8 @@ class SettingsService:
         refs = {
             "categories": [("Product", "category_id", "仍有商品屬於此種類，無法刪除，請改用停用")],
             "brands": [("Product", "brand_id", "仍有商品屬於此廠牌，無法刪除，請改用停用")],
-            "phone_brands": [("PhoneModel", "phone_brand_id", "仍有型號屬於此手機品牌，無法刪除，請改用停用")],
+            "phone_brands": [("PhoneModel", "phone_brand_id", "仍有型號屬於此機型品牌，無法刪除，請改用停用")],
+            "device_types": [("PhoneModel", "device_type_id", "仍有型號屬於此裝置類型，無法刪除，請改用停用")],
         }[kind]
         for ref_table, ref_col, ref_message in refs:
             if self.repo.one(f"SELECT 1 FROM {ref_table} WHERE {ref_col}=? LIMIT 1", (item_id,)):
@@ -238,26 +241,43 @@ class SettingsService:
         return {"ok": True}
 
     def list_models(self, all=False, phone_brand_id=None):
-        sql = "SELECT m.model_id,m.phone_brand_id,m.name,m.alias,m.series,m.sort,m.active,pb.name AS brand_name FROM PhoneModel m JOIN PhoneBrand pb ON m.phone_brand_id=pb.phone_brand_id"
+        sql = ("SELECT m.model_id,m.phone_brand_id,m.device_type_id,m.name,m.alias,m.sort,m.active,"
+               "pb.name AS brand_name,dt.name AS device_type_name FROM PhoneModel m "
+               "JOIN PhoneBrand pb ON m.phone_brand_id=pb.phone_brand_id "
+               "JOIN DeviceType dt ON m.device_type_id=dt.device_type_id")
         clauses, args = [], []
-        if not all: clauses += ["m.active=1", "pb.active=1"]
+        if not all: clauses += ["m.active=1", "pb.active=1", "dt.active=1"]
         if phone_brand_id is not None: clauses.append("m.phone_brand_id=?"); args.append(phone_brand_id)
         if clauses: sql += " WHERE " + " AND ".join(clauses)
-        return self.repo.rows(sql + " ORDER BY pb.sort,m.sort,m.model_id", args)
+        # 排序值相同(匯入建的品牌都是 0)時以建立先後為第二順序,同品牌型號才不會被拆成好幾段
+        return self.repo.rows(sql + " ORDER BY pb.sort,pb.phone_brand_id,dt.sort,dt.device_type_id,m.sort,m.model_id", args)
+
+    def _check_model_refs(self, fields):
+        if "phone_brand_id" in fields and not self.repo.one("SELECT 1 FROM PhoneBrand WHERE phone_brand_id=?", (fields["phone_brand_id"],)):
+            raise ValidationError("機型品牌不存在")
+        if "device_type_id" in fields and not self.repo.one("SELECT 1 FROM DeviceType WHERE device_type_id=?", (fields["device_type_id"],)):
+            raise ValidationError("裝置類型不存在")
+
+    def _write_model(self, sql, args):
+        # 同品牌、同裝置類型不可同名;不同類型可同名(手機與平板可能都叫 Pro)
+        try:
+            return self.repo.execute(sql, args)
+        except sqlite3.IntegrityError as exc:
+            raise ConflictError("同品牌、同裝置類型已有此型號") from exc
 
     def create_model(self, p):
-        if not self.repo.one("SELECT 1 FROM PhoneBrand WHERE phone_brand_id=?", (p["phone_brand_id"],)):
-            raise ValidationError("手機品牌不存在")
+        self._check_model_refs(p)
         sort = p.get("sort") if p.get("sort") is not None else next_sort(self.repo.connection, "PhoneModel")
-        cur = self.repo.execute("INSERT INTO PhoneModel(phone_brand_id,name,alias,series,sort) VALUES(?,?,?,?,?)", (p["phone_brand_id"], p["name"], p.get("alias"), (p.get("series") or "").strip() or None, sort))
+        cur = self._write_model("INSERT INTO PhoneModel(phone_brand_id,device_type_id,name,alias,sort) VALUES(?,?,?,?,?)",
+                                (p["phone_brand_id"], p["device_type_id"], p["name"], p.get("alias"), sort))
         return {"model_id": cur.lastrowid}
 
     def update_model(self, item_id, fields):
         self.repo.require("PhoneModel", "model_id", item_id, "查無此型號")
-        fields = {k:v for k,v in fields.items() if k in {"phone_brand_id","name","alias","series","sort","active"}}
-        if "series" in fields: fields["series"] = (fields["series"] or "").strip() or None
+        fields = {k:v for k,v in fields.items() if k in {"phone_brand_id","device_type_id","name","alias","sort","active"}}
+        self._check_model_refs(fields)
         if fields:
-            self.repo.execute("UPDATE PhoneModel SET " + ",".join(f"{k}=?" for k in fields) + " WHERE model_id=?", (*fields.values(), item_id))
+            self._write_model("UPDATE PhoneModel SET " + ",".join(f"{k}=?" for k in fields) + " WHERE model_id=?", (*fields.values(), item_id))
         return {"ok": True}
 
     def delete_model(self, item_id):
@@ -564,7 +584,7 @@ class SettingsFacade(BaseFacade):
         return payload
     def _dispatch(self, action, payload, conn):
         s=SettingsService(SettingsRepository(conn)); parts=action.split("."); kind=parts[0]; op=parts[1] if len(parts)==2 else ""
-        simple={"categories":"categories","brands":"brands","phone_brands":"phone_brands"}
+        simple={"categories":"categories","brands":"brands","phone_brands":"phone_brands","device_types":"device_types"}
         if kind in simple and op in {"list","create","update","delete","sort"}:
             if kind=="brands" and op=="list": return s.list_brands(bool(payload.get("all")),payload.get("category_id"),bool(payload.get("with_products")))
             if op=="list": return s.simple_list(simple[kind],bool(payload.get("all")))

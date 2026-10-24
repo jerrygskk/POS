@@ -203,6 +203,7 @@ tr.inactive > td { opacity: 0.55; }
 .error-bar.section-bar { margin: 0 0 10px; }
 /* 型號分組標題:收合鈕緊接在品牌名右邊 */
 .model-group-head { display: flex; align-items: center; gap: 8px; }
+.brand-bar { margin: 14px 0 10px; }
 /* 搜尋列與上面的新增列拉開,並以細線分隔——兩者長得像,靠太近會誤按 */
 .model-search { margin-top: 26px; padding-top: 18px;
   border-top: 1px solid var(--hover); }
@@ -259,6 +260,7 @@ tr.inactive > td { opacity: 0.55; }
 .spec-tags { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
 .spec-toggle { margin-left: auto; white-space: nowrap; }
 .spec-hint { display: block; margin-bottom: 12px; }
+.spec-head .spec-title { margin: 0; white-space: nowrap; }
 /* 產品表格標題列:「加入廠牌(供應商)」放標題右邊,不用捲到表格底才找得到 */
 .prod-head { margin: 20px 0 8px; }
 .prod-head .grp-title { margin: 0; }
@@ -333,7 +335,8 @@ button.primary:active { background: var(--primary-active); transform: translateY
 .model-picker { max-height: 200px; overflow-y: auto; border: 1px solid var(--border);
   border-radius: 8px; padding: 6px 8px; max-width: 350px; }
 .mp-brand { font-weight: bold; color: var(--text); padding: 4px 2px; }
-.mp-series { font-size: 12px; color: var(--text-3); padding: 4px 0 0 18px; }
+.mp-type { font-size: 12px; color: var(--text-3); padding: 4px 0 0 18px; }
+.mp-types { margin: 2px 0; }
 .mp-items { padding: 2px 0 8px 18px; }
 
 /* 編輯中的變體列:淡藍灰底 */

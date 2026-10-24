@@ -198,11 +198,11 @@ class VariantBatchTests(ConnTestCase):
         from lib.product_data import model_usage_in_category
         conn = self._fresh()
         pb = conn.execute("INSERT INTO PhoneBrand(name) VALUES('iPhone')").lastrowid
-        m1 = conn.execute("INSERT INTO PhoneModel(phone_brand_id,name) VALUES(?,?)",
+        m1 = conn.execute("INSERT INTO PhoneModel(phone_brand_id,device_type_id,name) VALUES(?,1,?)",
                           (pb, "15")).lastrowid
-        m2 = conn.execute("INSERT INTO PhoneModel(phone_brand_id,name) VALUES(?,?)",
+        m2 = conn.execute("INSERT INTO PhoneModel(phone_brand_id,device_type_id,name) VALUES(?,1,?)",
                           (pb, "16")).lastrowid
-        m3 = conn.execute("INSERT INTO PhoneModel(phone_brand_id,name) VALUES(?,?)",
+        m3 = conn.execute("INSERT INTO PhoneModel(phone_brand_id,device_type_id,name) VALUES(?,1,?)",
                           (pb, "17")).lastrowid
         bid = conn.execute("INSERT INTO Brand(name) VALUES('某廠')").lastrowid
         conn.execute("UPDATE Product SET brand_id=? WHERE product_id=?", (bid, self.pid))
@@ -284,8 +284,8 @@ class VariantBatchTests(ConnTestCase):
     def test_models_participate_in_dedup(self):
         conn = self._fresh()
         pb = conn.execute("INSERT INTO PhoneBrand(name) VALUES('iPhone')").lastrowid
-        m1 = conn.execute("INSERT INTO PhoneModel(phone_brand_id,name) VALUES(?,?)", (pb, "15")).lastrowid
-        m2 = conn.execute("INSERT INTO PhoneModel(phone_brand_id,name) VALUES(?,?)", (pb, "16")).lastrowid
+        m1 = conn.execute("INSERT INTO PhoneModel(phone_brand_id,device_type_id,name) VALUES(?,1,?)", (pb, "15")).lastrowid
+        m2 = conn.execute("INSERT INTO PhoneModel(phone_brand_id,device_type_id,name) VALUES(?,1,?)", (pb, "16")).lastrowid
         conn.commit(); conn.close()
         # 同規格但不同型號 → 不重複
         res = self.facade.invoke("variants.batch_create", {

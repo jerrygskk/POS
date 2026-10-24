@@ -58,7 +58,7 @@ BODY
         out = self._run(r'''
 window.addEventListener = () => {};
 API.listCategories = async () => [{category_id:1}, {category_id:3}];
-API.listBrands = API.listPhoneBrands = API.listModels = async () => [];
+API.listBrands = API.listPhoneBrands = API.listDeviceTypes = API.listModels = async () => [];
 const loaded = [];
 (async () => {
   for (const ctx of [{category_id:3}, {category_id:99}, null]) {
@@ -101,15 +101,16 @@ const savedBrands = [
   {phone_brand_id:20, name:"品牌乙", active:1, sort:2},
 ];
 const savedModels = [
-  {model_id:1, phone_brand_id:10, brand_name:"品牌甲", name:"型號一", alias:"別名一", series:"系列一", active:1, sort:1},
-  {model_id:2, phone_brand_id:10, brand_name:"品牌甲", name:"型號二", alias:null, series:null, active:1, sort:2},
-  {model_id:3, phone_brand_id:20, brand_name:"品牌乙", name:"型號三", alias:null, series:null, active:1, sort:1},
+  {model_id:1, phone_brand_id:10, brand_name:"品牌甲", name:"型號一", alias:"別名一", device_type_id:1, active:1, sort:1},
+  {model_id:2, phone_brand_id:10, brand_name:"品牌甲", name:"型號二", alias:null, device_type_id:1, active:1, sort:2},
+  {model_id:3, phone_brand_id:20, brand_name:"品牌乙", name:"型號三", alias:null, device_type_id:1, active:1, sort:1},
 ];
 const clone = value => JSON.parse(JSON.stringify(value));
 const lists = [];
 API.listCategories = async () => { lists.push("categories"); return []; };
 API.listBrands = async () => { lists.push("brands"); return [{brand_id:7,name:"廠牌"}]; };
 API.listPhoneBrands = async () => { lists.push("phoneBrands"); return clone(savedBrands); };
+API.listDeviceTypes = async () => [{device_type_id:1,name:"手機",active:1,sort:1},{device_type_id:2,name:"平板",active:1,sort:2}];
 API.listModels = async () => { lists.push("models"); return clone(savedModels); };
 const s = mkState({phoneBrands:clone(savedBrands), models:clone(savedModels),
   brands:[{brand_id:7,name:"廠牌"}]});
@@ -119,17 +120,17 @@ s._takeSnap();
 const modelSnap = s.snap["models:1"];
 s.models[0].name = "型號一修改";
 s.models[0].alias = "別名修改";
-s.models[0].series = "系列修改";
+s.models[0].device_type_id = 2;
 s.brands[0].name = "廠牌修改";
 s.models = [s.models[1], s.models[0], s.models[2]];
 s.onModelSortPending("品牌甲", [2,1]);
-s.collapsedBrands = {"品牌甲":true, "品牌乙":false};
+s.openBrands = {"品牌甲":true, "品牌乙":false};
 function collect() {
   out.models = s.models;
   out.lists = lists;
   out.errors = errors;
   out.pending = s.pendingModelSort;
-  out.collapsed = s.collapsedBrands;
+  out.collapsed = s.openBrands;
   out.modelUnsaved = s.hasUnsaved("models");
   out.brandUnsaved = s.hasUnsaved("phoneBrands");
   out.otherUnsaved = s.hasUnsaved("brands");
@@ -142,8 +143,8 @@ function collect() {
     def _assert_model_edits_preserved(self, out, ids=(2, 1, 3)):
         self.assertEqual([m["model_id"] for m in out["models"]], list(ids))
         edited = next(m for m in out["models"] if m["model_id"] == 1)
-        self.assertEqual([edited["name"], edited["alias"], edited["series"]],
-                         ["型號一修改", "別名修改", "系列修改"])
+        self.assertEqual([edited["name"], edited["alias"], edited["device_type_id"]],
+                         ["型號一修改", "別名修改", 2])
         self.assertTrue(out["modelUnsaved"])
         self.assertTrue(out["otherUnsaved"])
         self.assertTrue(out["modelSnapUnchanged"])
@@ -225,7 +226,7 @@ API.updatePhoneBrand = (id, body) => new Promise(resolve => {
   out.afterB = {
     savedName:JSON.parse(s.snap["phoneBrands:10"]).name,
     name:s.phoneBrands[0].name, unsaved:s.hasUnsaved("phoneBrands"),
-    pending:clone(s.pendingModelSort), collapsed:clone(s.collapsedBrands),
+    pending:clone(s.pendingModelSort), collapsed:clone(s.openBrands),
     modelBrands:s.models.map(m => m.brand_name),
   };
   pending[1].resolve();

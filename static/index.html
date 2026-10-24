@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=236">
+<link rel="stylesheet" href="css/pos.css?v=241">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=236" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=241" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -326,7 +326,7 @@
     </select>
     <select v-model="fModel" @change="reload">
       <option :value="null">全部型號</option>
-      <option v-for="m in models" :key="m.model_id" :value="m.model_id">{{ m.brand_name }} {{ m.alias || m.name }}</option>
+      <option v-for="m in models" :key="m.model_id" :value="m.model_id">{{ modelLabel(m) }}</option>
     </select>
     <input v-model="q" @keyup.enter="reload" class="catalog-search-input"
            placeholder="搜尋名稱、規格或條碼">
@@ -443,7 +443,7 @@
       </div>
       <div class="cat-item" :class="{active: section==='models'}"
            @click="selectSection('models')">
-        <span class="cat-name">手機品牌與型號</span>
+        <span class="cat-name">適用機型</span>
       </div>
       <div class="cat-item" :class="{active: section==='password'}"
            @click="selectSection('password')">
@@ -485,7 +485,7 @@
         </select>
         <button class="primary" @click="addTemplateField">新增</button>
       </div>
-      <!-- 固定項目(手機型號、特性詞條):名稱與型態以純文字呈現,只留啟用開關 -->
+      <!-- 固定項目(適用機型、特性詞條):名稱與型態以純文字呈現,只留啟用開關 -->
       <div class="maint-row fixed-row" v-for="f in fixedRows" :key="f.field_id">
         <span class="fixed-name name">{{ f.name }}</span>
         <button class="switch" type="button" role="switch"
@@ -592,13 +592,53 @@
       </sortable-list>
     </section>
 
-    <!-- 基礎資料:手機品牌與型號 -->
+    <!-- 基礎資料:適用機型(裝置類型、機型品牌、型號) -->
     <section class="cat-detail" v-else-if="section==='models'">
-      <div class="card-head"><h3>手機品牌</h3></div>
+      <!-- 平常收成一行摘要(只列啟用中的),要改才展開 -->
+      <div class="spec-head">
+        <h3 class="spec-title">裝置類型</h3>
+        <span v-if="!editDeviceTypes" class="spec-tags">
+          <span class="tag" v-for="x in deviceTypes.filter(x => x.active)" :key="x.device_type_id">{{ x.name }}</span>
+          <span v-if="!deviceTypes.some(x => x.active)" class="hint">尚無啟用中的裝置類型</span>
+        </span>
+        <button class="btn-sm spec-toggle" @click="editDeviceTypes = !editDeviceTypes">
+          {{ editDeviceTypes ? '完成' : '編輯裝置類型' }}</button>
+      </div>
+      <div v-if="pageError && errorScope==='deviceTypes'" class="error-bar section-bar">⚠ {{ pageError }}</div>
+      <template v-if="editDeviceTypes">
+      <div class="inline-add add-before-list">
+        <input class="w60" v-model="newSeq.deviceTypes" placeholder="排序">
+        <input v-model="newItem.deviceTypes" placeholder="新裝置類型名稱(如 平板)"
+               @keyup.enter="addItem('deviceTypes')">
+        <button class="primary" @click="addItem('deviceTypes')">新增</button>
+      </div>
+      <sortable-list :items="deviceTypes" item-key="device_type_id" :auto-save="true"
+                     @save="saveSort('deviceTypes', $event)">
+        <template #row="{ item: dt }">
+          <input class="name" v-model="dt.name"
+                 @keyup.enter="saveItemName('deviceTypes', dt)"
+                 @blur="saveItemName('deviceTypes', dt)">
+          <button @click="toggleActive('deviceTypes', dt)">{{ dt.active ? '停用' : '啟用' }}</button>
+          <button @click="deleteItem('deviceTypes', dt)">刪除</button>
+        </template>
+      </sortable-list>
+      </template>
+
+      <!-- 平常收成一行摘要(只列啟用中的),要改才展開 -->
+      <div class="spec-head">
+        <h3 class="spec-title">機型品牌</h3>
+        <span v-if="!editPhoneBrands" class="spec-tags">
+          <span class="tag" v-for="x in phoneBrands.filter(x => x.active)" :key="x.phone_brand_id">{{ x.name }}</span>
+          <span v-if="!phoneBrands.some(x => x.active)" class="hint">尚無啟用中的機型品牌</span>
+        </span>
+        <button class="btn-sm spec-toggle" @click="editPhoneBrands = !editPhoneBrands">
+          {{ editPhoneBrands ? '完成' : '編輯機型品牌' }}</button>
+      </div>
       <div v-if="pageError && errorScope==='phoneBrands'" class="error-bar section-bar">⚠ {{ pageError }}</div>
+      <template v-if="editPhoneBrands">
       <div class="inline-add add-before-list">
         <input class="w60" v-model="newSeq.phoneBrands" placeholder="排序">
-        <input v-model="newItem.phoneBrands" placeholder="新手機品牌名稱(如 iPhone)"
+        <input v-model="newItem.phoneBrands" placeholder="新機型品牌名稱(如 Apple)"
                @keyup.enter="addItem('phoneBrands')">
         <button class="primary" @click="addItem('phoneBrands')">新增</button>
       </div>
@@ -612,8 +652,9 @@
           <button @click="deleteItem('phoneBrands', pb)">刪除</button>
         </template>
       </sortable-list>
+      </template>
 
-      <div class="card-head" style="margin-top:16px"><h3>手機型號</h3>
+      <div class="card-head" style="margin-top:16px"><h3>型號</h3>
         <span class="card-actions">
           <button v-if="hasUnsaved('models')" @click="revertAll('models')">復原</button>
           <button class="primary" @click="saveAll('models')">儲存修改</button>
@@ -623,27 +664,34 @@
       <div v-if="pageError && errorScope==='models'" class="error-bar section-bar">⚠ {{ pageError }}</div>
       <div class="inline-add add-before-list">
         <select v-model.number="newModel.phone_brand_id">
-          <option :value="null">選擇手機品牌</option>
+          <option :value="null">選擇機型品牌</option>
           <option v-for="pb in phoneBrands" :key="pb.phone_brand_id"
                   :value="pb.phone_brand_id">{{ pb.name }}</option>
         </select>
         <input class="w60" v-model="newSeq.models" placeholder="排序">
         <input v-model="newModel.name" placeholder="型號名稱" @keyup.enter="addModel">
-        <input class="w120" v-model="newModel.series" placeholder="系列(選填)" @keyup.enter="addModel">
+        <select v-model.number="newModel.device_type_id">
+          <option :value="null">選擇裝置類型</option>
+          <option v-for="dt in deviceTypes" :key="dt.device_type_id"
+                  :value="dt.device_type_id">{{ dt.name }}</option>
+        </select>
         <button class="primary" @click="addModel">新增</button>
       </div>
       <div class="inline-add add-before-list model-search">
         <span class="search-label">快速搜尋</span>
-        <input v-model="modelQuery" placeholder="搜尋型號、別名或系列">
+        <input v-model="modelQuery" placeholder="搜尋型號、別名或裝置類型">
         <button v-if="modelQuery" @click="modelQuery = ''">清除</button>
         <span v-if="modelQuery" class="hint">搜尋中不可調整順序</span>
       </div>
+      <!-- 品牌排成一列當開關,點了在下方展開該品牌型號(一次一個,點別的會收起目前的) -->
+      <div class="chip-wrap brand-bar">
+        <button v-for="g in modelGroups" :key="'bar-' + g.brand" type="button"
+                class="chip-toggle" :class="{on: isBrandOpen(g.brand)}"
+                :aria-pressed="isBrandOpen(g.brand)" @click="toggleBrand(g.brand)">
+          {{ g.brand }}（{{ g.items.length }}）</button>
+      </div>
       <div v-for="g in modelGroups" :key="g.brand" class="model-group">
-        <div class="grp-title model-group-head">
-          <span>{{ g.brand }}</span>
-          <button class="btn-sm" @click="toggleBrand(g.brand)">
-            {{ isBrandOpen(g.brand) ? '收合' : '展開' }}</button>
-        </div>
+        <div v-if="isBrandOpen(g.brand)" class="grp-title model-group-head">{{ g.brand }}</div>
         <transition name="collapse">
         <sortable-list v-if="isBrandOpen(g.brand)" :items="g.items" item-key="model_id"
                        :disabled="!!modelQuery.trim()"
@@ -651,7 +699,10 @@
           <template #row="{ item: m }">
             <input class="name" v-model="m.name">
             <input class="w120" v-model="m.alias" placeholder="別名(選填)">
-            <input class="w120" v-model="m.series" placeholder="系列(選填)">
+            <select v-model.number="m.device_type_id" title="裝置類型">
+              <option v-for="dt in deviceTypes" :key="dt.device_type_id"
+                      :value="dt.device_type_id">{{ dt.name }}</option>
+            </select>
             <button @click="toggleActive('models', m)">{{ m.active ? '停用' : '啟用' }}</button>
             <button @click="deleteItem('models', m)">刪除</button>
           </template>
@@ -696,25 +747,25 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=236"></script>
-<script src="js/api.js?v=236"></script>
-<script src="js/confirm.js?v=236"></script>
-<script src="js/auth.js?v=236"></script>
-<script src="js/pos_shared.js?v=236"></script>
-<script src="js/catalogfields.js?v=236"></script>
-<script src="js/checkout.js?v=236"></script>
-<script src="js/receive.js?v=236"></script>
-<script src="js/stocktake.js?v=236"></script>
-<script src="js/records.js?v=236"></script>
-<script src="js/catalog.js?v=236"></script>
-<script src="js/sortable.js?v=236"></script>
-<script src="js/combobox.js?v=236"></script>
-<script src="js/optpicker.js?v=236"></script>
-<script src="js/modelpicker.js?v=236"></script>
-<script src="js/employeepicker.js?v=236"></script>
-<script src="js/attrfields.js?v=236"></script>
-<script src="js/settings.js?v=236"></script>
-<script src="js/labels.js?v=236"></script>
-<script src="js/app.js?v=236"></script>
+<script src="js/vue.global.prod.js?v=241"></script>
+<script src="js/api.js?v=241"></script>
+<script src="js/confirm.js?v=241"></script>
+<script src="js/auth.js?v=241"></script>
+<script src="js/pos_shared.js?v=241"></script>
+<script src="js/catalogfields.js?v=241"></script>
+<script src="js/checkout.js?v=241"></script>
+<script src="js/receive.js?v=241"></script>
+<script src="js/stocktake.js?v=241"></script>
+<script src="js/records.js?v=241"></script>
+<script src="js/catalog.js?v=241"></script>
+<script src="js/sortable.js?v=241"></script>
+<script src="js/combobox.js?v=241"></script>
+<script src="js/optpicker.js?v=241"></script>
+<script src="js/modelpicker.js?v=241"></script>
+<script src="js/employeepicker.js?v=241"></script>
+<script src="js/attrfields.js?v=241"></script>
+<script src="js/settings.js?v=241"></script>
+<script src="js/labels.js?v=241"></script>
+<script src="js/app.js?v=241"></script>
 </body>
 </html>

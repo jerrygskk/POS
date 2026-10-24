@@ -100,6 +100,13 @@ window.PosPages["page-catalog"] = {
     window.removeEventListener("pos-child-window-closed", this._childWindowClosed);
   },
   methods: {
+    // 篩選選單的型號標籤:同品牌有同名型號(如手機與平板都叫 Pro)時補上裝置類型
+    modelLabel(m) {
+      const shown = m.alias || m.name;
+      const twin = this.models.some(x => x.model_id !== m.model_id
+        && x.brand_name === m.brand_name && (x.alias || x.name) === shown);
+      return `${m.brand_name} ${shown}` + (twin ? `（${m.device_type_name}）` : "");
+    },
     // 只重撈資料,不動編輯狀態(條碼即時新增/刪除用,避免把使用者踢出編輯)
     async refresh() {
       const token = ++this._refreshToken;

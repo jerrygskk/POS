@@ -23,15 +23,21 @@ CREATE TABLE IF NOT EXISTS PhoneBrand(
   sort INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS DeviceType(        -- 裝置類型:手機／平板／耳機…(管理者維護)
+  device_type_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  sort INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1
+);
 CREATE TABLE IF NOT EXISTS PhoneModel(
   model_id INTEGER PRIMARY KEY AUTOINCREMENT,
   phone_brand_id INTEGER NOT NULL REFERENCES PhoneBrand(phone_brand_id),
+  device_type_id INTEGER NOT NULL REFERENCES DeviceType(device_type_id),
   name TEXT NOT NULL,
   alias TEXT,                       -- 顯示別名(空=顯示全名)
-  series TEXT,                      -- 系列(自由文字,如「17 系列」;空=未分系列)
   sort INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
-  UNIQUE(phone_brand_id, name)
+  UNIQUE(phone_brand_id, device_type_id, name)  -- 不同類型可同名(如手機與平板同叫 Pro)
 );
 CREATE TABLE IF NOT EXISTS Product(
   product_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -449,6 +455,49 @@ def _mig_stocktake_approval(conn):
                  "ON StocktakeSession((status IN ('open','pending'))) WHERE status IN ('open','pending')")
 
 
+def _mig_device_type(conn):
+    """型號加裝置類型、移除系列;既有型號一律歸「手機」。
+
+    外鍵全程開啟(交易內關不掉,見 PITFALLS SQL-2):先把參照型號的
+    VariantModel／OptionModel 暫存後拆掉,重建 PhoneModel,再依現行 SCHEMA
+    重建兩張子表並搬回。任何一步失敗由 init_db 整串回復。
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(PhoneModel)")}
+    if "device_type_id" in cols:
+        return
+    if not conn.in_transaction:
+        conn.execute("BEGIN")
+    # executescript(SCHEMA) 在 migration 前已建出空表,這裡只補缺
+    conn.execute("CREATE TABLE IF NOT EXISTS DeviceType(" + _schema_ddl("DeviceType"))
+    conn.execute("INSERT INTO DeviceType(name,sort) SELECT '手機',1 "
+                 "WHERE NOT EXISTS (SELECT 1 FROM DeviceType WHERE name='手機')")
+    phone_id = conn.execute("SELECT device_type_id FROM DeviceType WHERE name='手機'").fetchone()[0]
+    previous = conn.execute("SELECT seq FROM sqlite_sequence WHERE name='PhoneModel'").fetchone()
+    for child in ("VariantModel", "OptionModel"):
+        conn.execute(f"CREATE TABLE {child}_mig AS SELECT * FROM {child}")
+        conn.execute(f"DROP TABLE {child}")
+    conn.execute("CREATE TABLE PhoneModel_mig(" + _schema_ddl("PhoneModel"))
+    conn.execute("INSERT INTO PhoneModel_mig(model_id,phone_brand_id,device_type_id,name,alias,sort,active) "
+                 "SELECT model_id,phone_brand_id,?,name,alias,sort,active FROM PhoneModel", (phone_id,))
+    conn.execute("DROP TABLE PhoneModel")
+    conn.execute("ALTER TABLE PhoneModel_mig RENAME TO PhoneModel")
+    conn.execute("CREATE TABLE VariantModel(" + _schema_ddl("VariantModel"))
+    conn.execute("INSERT INTO VariantModel(variant_id,model_id) SELECT variant_id,model_id FROM VariantModel_mig")
+    conn.execute("CREATE TABLE OptionModel(" + _schema_ddl("OptionModel"))
+    conn.execute("INSERT INTO OptionModel(option_id,model_id) SELECT option_id,model_id FROM OptionModel_mig")
+    conn.execute("DROP TABLE VariantModel_mig")
+    conn.execute("DROP TABLE OptionModel_mig")
+    if previous is not None:
+        conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='PhoneModel'", (previous[0],))
+        conn.execute("INSERT INTO sqlite_sequence(name,seq) SELECT 'PhoneModel',? "
+                     "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name='PhoneModel')", (previous[0],))
+
+
+def _schema_ddl(table):
+    """取現行 SCHEMA 裡該表括號內的定義(含結尾右括號),避免 migration 另抄一份。"""
+    return SCHEMA.split(f"CREATE TABLE IF NOT EXISTS {table}(", 1)[1].split(";", 1)[0]
+
+
 MIGRATIONS = [
     (BASE_VERSION + 1, _mig_phone_brand),
     (BASE_VERSION + 2, _mig_variant_attributes),
@@ -467,6 +516,7 @@ MIGRATIONS = [
     (BASE_VERSION + 15, _mig_employee),
     (BASE_VERSION + 16, _mig_shared_factory_barcode),
     (BASE_VERSION + 17, _mig_stocktake_approval),
+    (BASE_VERSION + 18, _mig_device_type),
 ]
 
 # 最新版號 = 初版 + 遷移筆數;全新 DB 建 SCHEMA 即為此版

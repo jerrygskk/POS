@@ -31,7 +31,7 @@ class VariantEditorTemplateTests(unittest.TestCase):
         # 適用型號依種類設定顯示(model_mode=required 才出現)
         self.assertIn('<section class="dialog-section" v-if="usesModel">', html)
         self.assertNotIn("<fieldset", html)
-        for title in ("規格", "適用手機型號", "售價", "條碼"):
+        for title in ("規格", "適用機型", "售價", "條碼"):
             self.assertIn(f'<h2>{title}</h2>', html)
         self.assertIn('<div class="dialog-content">', html)
         self.assertIn('<footer class="dialog-footer">', html)
@@ -101,25 +101,28 @@ class VariantEditorTemplateTests(unittest.TestCase):
         self.assertIn('["select", "multi", "tags"]', editor)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is required")
-    def test_model_picker_keeps_authoritative_order_across_interleaved_series(self):
+    def test_model_picker_groups_and_filters_by_device_type_in_authoritative_order(self):
         script = r'''
 const fs=require("fs"),vm=require("vm");
 const context={window:{PosComponents:{}}}; vm.createContext(context);
 vm.runInContext(fs.readFileSync(process.argv[1],"utf8"),context);
 const c=context.window.PosComponents["model-picker"];
 const s={models:[
- {model_id:1,brand_name:"Apple",series:"Pro",name:"A"},
- {model_id:2,brand_name:"Apple",series:"Air",name:"B"},
- {model_id:3,brand_name:"Apple",series:"Pro",name:"C"},
- {model_id:4,brand_name:"Samsung",series:null,name:"D"}], model_ids:[3,1], query:"",
- usage:[], showMore:false};
+ {model_id:1,brand_name:"Apple",device_type_id:1,device_type_name:"手機",name:"Pro"},
+ {model_id:2,brand_name:"Apple",device_type_id:2,device_type_name:"平板",name:"Air"},
+ {model_id:3,brand_name:"Apple",device_type_id:1,device_type_name:"手機",name:"Pro Max"},
+ {model_id:4,brand_name:"Samsung",device_type_id:1,device_type_name:"手機",name:"D"}], model_ids:[3,1], query:"",
+ usage:[], showMore:false, typeFilter:null};
 s.leadIds=c.computed.leadIds.call(s);
 s.matchedModels=c.computed.matchedModels.call(s);
 s.visibleModels=c.computed.visibleModels.call(s);
 const groups=c.computed.filteredGroups.call(s);
-// 搜尋比對名稱／別名／系列/廠牌
+// 搜尋比對名稱／別名／裝置類型/品牌;類型篩選疊在搜尋上
 const hit={...s, query:"pro"};
 hit.matchedModels=c.computed.matchedModels.call(hit);
+const byTypeName=c.computed.matchedModels.call({...s, query:"平板"});
+const filtered=c.computed.matchedModels.call({...s, typeFilter:1, query:"pro"});
+const types=c.computed.deviceTypes.call(s);
 hit.visibleModels=c.computed.visibleModels.call(hit);
 // 有前排資料時,收合狀態只顯示前排＋已選;搜尋中一律搜全部
 const lead={...s, usage:[{model_id:2,lead:true}], model_ids:[], showMore:false};
@@ -129,7 +132,10 @@ lead.visibleModels=c.computed.visibleModels.call(lead);
 lead.hiddenCount=c.computed.hiddenCount.call(lead);
 const selected=c.computed.selectedModels.call(s);
 process.stdout.write(JSON.stringify({
- sections:groups.map(g=>[g.brand,g.sections.map(x=>[x.series,x.items.map(m=>m.model_id)])]),
+ sections:groups.map(g=>[g.brand,g.sections.map(x=>[x.type,x.items.map(m=>m.model_id)])]),
+ types:types.map(t=>[t.id,t.name]),
+ byTypeName:byTypeName.map(m=>m.model_id),
+ filtered:filtered.map(m=>m.model_id),
  selected:selected.map(m=>m.model_id),
  searched:hit.matchedModels.map(m=>m.model_id),
  leadVisible:lead.visibleModels.map(m=>m.model_id),
@@ -140,8 +146,11 @@ process.stdout.write(JSON.stringify({
             text=True, capture_output=True, encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {
-            "sections": [["Apple", [["Pro", [1]], ["Air", [2]], ["Pro", [3]]]],
+            "sections": [["Apple", [["手機", [1]], ["平板", [2]], ["手機", [3]]]],
                          ["Samsung", [["", [4]]]]],
+            "types": [[1, "手機"], [2, "平板"]],
+            "byTypeName": [2],
+            "filtered": [1, 3],
             "selected": [1, 3],
             "searched": [1, 3],
             "leadVisible": [2],

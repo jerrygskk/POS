@@ -73,18 +73,51 @@ class TestCatalogApi(FacadeTestCase):
         rows = self.invoke("models.list", {"phone_brand_id": ip}); self.assertEqual((len(rows), rows[0]["model_id"], rows[0]["brand_name"]), (1, mid, "iPhone"))
 
     def test_model_alias_roundtrip_and_display(self):
-        cid = self.create_category("case"); pbid = self._add_phone_brand("iPhone"); mid = self.invoke("models.create", {"phone_brand_id": pbid, "name": "iPhone 17 Pro Max", "alias": "17PM"})["model_id"]
+        cid = self.create_category("case"); pbid = self._add_phone_brand("iPhone"); mid = self.invoke("models.create", {"phone_brand_id": pbid, "device_type_id": self.phone_type_id(), "name": "iPhone 17 Pro Max", "alias": "17PM"})["model_id"]
         self.assertEqual(self.invoke("models.list")[0]["alias"], "17PM"); self.invoke("products.create", {"name": "case", "category_id": cid, "variants": [{"attributes": {}, "model_ids": [mid], "barcodes": [{"barcode": "BA1", "source": "store"}]}]})
         self.assertEqual(self.invoke("catalog.list")[0]["variants"][0]["models"], ["17PM"]); self.invoke("models.update", {"id": mid, "fields": {"alias": None}}); self.assertEqual(self.invoke("catalog.list")[0]["variants"][0]["models"], ["iPhone 17 Pro Max"])
 
-    def test_model_series_roundtrip(self):
-        pbid = self._add_phone_brand("iPhone"); mid = self.invoke("models.create", {"phone_brand_id": pbid, "name": "17 Pro Max", "series": "17"})["model_id"]
-        self.assertEqual(self.invoke("models.list")[0]["series"], "17"); self.invoke("models.update", {"id": mid, "fields": {"series": "17 Pro"}}); self.assertEqual(self.invoke("models.list")[0]["series"], "17 Pro")
-        self.invoke("models.update", {"id": mid, "fields": {"series": "  "}}); self.assertIsNone(self.invoke("models.list")[0]["series"]); mid2 = self.create_model(pbid, "16")
-        self.assertIsNone(next(row for row in self.invoke("models.list") if row["model_id"] == mid2)["series"])
+    def test_model_device_type_roundtrip(self):
+        pbid = self._add_phone_brand("Apple"); tablet = self.invoke("device_types.create", {"name": "平板"})["device_type_id"]
+        mid = self.create_model(pbid, "Air", tablet); row = self.invoke("models.list")[0]
+        self.assertEqual((row["device_type_id"], row["device_type_name"]), (tablet, "平板")); self.assertNotIn("series", row)
+        self.invoke("models.update", {"id": mid, "fields": {"device_type_id": self.phone_type_id()}}); self.assertEqual(self.invoke("models.list")[0]["device_type_name"], "手機")
+
+    def test_model_same_name_allowed_across_device_types_only(self):
+        pbid = self._add_phone_brand("Apple"); tablet = self.invoke("device_types.create", {"name": "平板"})["device_type_id"]
+        self.create_model(pbid, "Pro"); self.create_model(pbid, "Pro", tablet)
+        self.assertEqual(sorted(r["device_type_name"] for r in self.invoke("models.list")), ["平板", "手機"])
+        self.assert_application_error("conflict", "models.create", {"phone_brand_id": pbid, "device_type_id": tablet, "name": "Pro"})
+        mid = self.create_model(pbid, "Mini", tablet)
+        self.assert_application_error("conflict", "models.update", {"id": mid, "fields": {"name": "Pro"}})
+
+    def test_models_of_same_brand_stay_together_when_brand_sorts_tie(self):
+        a = self.invoke("phone_brands.create", {"name": "A牌", "sort": 0})["phone_brand_id"]; b = self.invoke("phone_brands.create", {"name": "B牌", "sort": 0})["phone_brand_id"]
+        self.create_model(a, "a1"); self.create_model(b, "b1"); self.create_model(a, "a2")
+        self.assertEqual([r["brand_name"] for r in self.invoke("models.list")], ["A牌", "A牌", "B牌"])
+
+    def test_model_requires_existing_device_type(self):
+        pbid = self._add_phone_brand("Apple")
+        self.assert_application_error("validation_error", "models.create", {"phone_brand_id": pbid, "name": "15"})
+        self.assert_application_error("validation_error", "models.create", {"phone_brand_id": pbid, "device_type_id": 999, "name": "15"})
+        mid = self.create_model(pbid, "15")
+        self.assert_application_error("validation_error", "models.update", {"id": mid, "fields": {"device_type_id": 999}})
+
+    def test_device_type_delete_blocked_while_models_use_it(self):
+        pbid = self._add_phone_brand("Apple"); tablet = self.invoke("device_types.create", {"name": "平板"})["device_type_id"]
+        mid = self.create_model(pbid, "Air", tablet)
+        self.assert_application_error("conflict", "device_types.delete", {"id": tablet})
+        self.invoke("models.delete", {"id": mid}); self.assertTrue(self.invoke("device_types.delete", {"id": tablet})["ok"])
+
+    def test_inactive_device_type_hides_its_models(self):
+        pbid = self._add_phone_brand("Apple"); tablet = self.invoke("device_types.create", {"name": "平板"})["device_type_id"]
+        self.create_model(pbid, "Air", tablet); self.create_model(pbid, "15")
+        self.invoke("device_types.update", {"id": tablet, "fields": {"active": 0}})
+        self.assertEqual([r["name"] for r in self.invoke("models.list")], ["15"]); self.assertEqual(len(self.invoke("models.list", {"all": True})), 2)
+        self.assertNotIn(tablet, [t["device_type_id"] for t in self.invoke("device_types.list")])
 
     def test_model_add_with_missing_brand_raises_validation_error(self):
-        self.assert_application_error("validation_error", "models.create", {"phone_brand_id": 999, "name": "15"})
+        self.assert_application_error("validation_error", "models.create", {"phone_brand_id": 999, "device_type_id": self.phone_type_id(), "name": "15"})
 
     def test_model_delete_with_variant_raises_conflict(self):
         cid = self.create_category("case"); pbid = self._add_phone_brand("iPhone"); mid = self.create_model(pbid, "15"); self.invoke("products.create", {"name": "case", "category_id": cid, "variants": [{"attributes": {}, "model_ids": [mid], "barcodes": []}]})

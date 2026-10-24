@@ -1,13 +1,14 @@
 window.PosPages = window.PosPages || {};
 
-// 廠牌／手機品牌／型號沿用通用清單維護;種類與產品改走商品設定單頁。
+// 廠牌／機型品牌／裝置類型／型號沿用通用清單維護;種類與產品改走商品設定單頁。
 const _MAINT = {
   brands: { id: "brand_id", label: "廠牌", list: "listBrands", create: "createBrand", update: "updateBrand", delete: "deleteBrand", sort: "sortBrands" },
-  phoneBrands: { id: "phone_brand_id", label: "手機品牌", list: "listPhoneBrands", create: "createPhoneBrand", update: "updatePhoneBrand", delete: "deletePhoneBrand", sort: "sortPhoneBrands" },
+  phoneBrands: { id: "phone_brand_id", label: "機型品牌", list: "listPhoneBrands", create: "createPhoneBrand", update: "updatePhoneBrand", delete: "deletePhoneBrand", sort: "sortPhoneBrands" },
+  deviceTypes: { id: "device_type_id", label: "裝置類型", list: "listDeviceTypes", create: "createDeviceType", update: "updateDeviceType", delete: "deleteDeviceType", sort: "sortDeviceTypes" },
   models: { id: "model_id", label: "型號", list: "listModels", create: "createModel", update: "updateModel", delete: "deleteModel", sort: "sortModels" },
 };
 
-// 規格模板固定列:每個種類都有一列「手機型號」,點列切換該種類是否使用適用型號
+// 規格模板固定列:每個種類都有一列「適用機型」,點列切換該種類是否使用適用型號
 // (讀寫 Category.model_mode)。型號實際存於 VariantModel 關聯表,不是規格欄,
 // 故以固定列呈現而非真的建 AttributeField。
 const MODEL_ROW_ID = "__model__";
@@ -23,10 +24,10 @@ window.PosPages["page-settings"] = {
   // ——訊息離發生的地方太遠,店員看不到自己剛剛按的那顆鈕出了什麼事。
   data() {
     return {
-      categories: [], brands: [], phoneBrands: [], models: [],
-      newItem: { brands: "", phoneBrands: "" },
-      newModel: { phone_brand_id: null, name: "", series: "" },
-      newSeq: { brands: "", phoneBrands: "", models: "" },
+      categories: [], brands: [], phoneBrands: [], deviceTypes: [], models: [],
+      newItem: { brands: "", phoneBrands: "", deviceTypes: "" },
+      newModel: { phone_brand_id: null, device_type_id: null, name: "" },
+      newSeq: { brands: "", phoneBrands: "", deviceTypes: "", models: "" },
       // 商品設定單頁
       section: "category",
       passwordForm: { old: "", next: "", confirm: "" },
@@ -34,25 +35,26 @@ window.PosPages["page-settings"] = {
       tplFields: [], bigProducts: [],
       newField: { name: "", field_type: "select" },
       specEditing: false,    // 規格區是否展開編輯;切種類時收回摘要
+      editDeviceTypes: false, editPhoneBrands: false,  // 適用機型頁:裝置類型／機型品牌平常收成摘要
       // 規格模板 popup(單層)
       // 產品 popup(單層)
       prodPopup: null,
       // 廠牌經營種類
       openBrand: null, openBrandName: "", brandCatChecked: {}, brandLoadSeq: 0,
       snap: {},   // 載入時的名稱快照,用來判斷哪幾筆被改過(提醒條與批次儲存共用)
-      pendingSort: {},       // kind → 拖過但還沒儲存的新順序(廠牌、手機品牌)
+      pendingSort: {},       // kind → 拖過但還沒儲存的新順序(廠牌、機型品牌、裝置類型)
       pendingModelSort: {},  // 品牌 → 該品牌型號拖過但還沒儲存的新順序
       pageError: "", errorScope: "category",  // 錯誤訊息與它屬於哪個區塊
       modelQuery: "",        // 型號搜尋字串
-      collapsedBrands: {},   // 手動收合的品牌(brand → true)
+      openBrands: {},        // 已展開的品牌(brand → true,最多一個);預設全部收起,點品牌列才展開
     };
   },
   computed: {
-    // 型號依品牌分組;有搜尋字串時只留符合的型號(比對名稱、別名、系列),
+    // 型號依品牌分組;有搜尋字串時只留符合的型號(比對名稱、別名、裝置類型),
     // 沒有任何符合的品牌整組不顯示。
     modelGroups() {
       const q = this.modelQuery.trim().toLowerCase();
-      const match = (m) => !q || [m.name, m.alias, m.series]
+      const match = (m) => !q || [m.name, m.alias, m.device_type_name]
         .some(v => String(v || "").toLowerCase().includes(q));
       const g = {};
       for (const m of this.models)
@@ -88,7 +90,7 @@ window.PosPages["page-settings"] = {
     selectedCat() {
       return this.categories.find(c => c.category_id === this.selCatId) || null;
     },
-    // 固定列:手機型號與特性詞條,兩者都只是「這個種類要不要用」的開關。
+    // 固定列:適用機型與特性詞條,兩者都只是「這個種類要不要用」的開關。
     // 特性詞條每個種類各自一份,沒有就補一列佔位(顯示未使用)。
     fixedRows() {
       if (!this.selectedCat) return [];
@@ -97,7 +99,7 @@ window.PosPages["page-settings"] = {
           required: 0, cf_active: 0, default_option_id: null, sort: -1 };
       const on = this.selectedCat.model_mode === "required";
       return [
-        { field_id: MODEL_ROW_ID, name: "手機型號", field_type: "model",
+        { field_id: MODEL_ROW_ID, name: "適用機型", field_type: "model",
           required: on, cf_active: on, default_option_id: null, sort: -1 },
         feat,
       ];
@@ -151,6 +153,7 @@ window.PosPages["page-settings"] = {
         this.categories = await API.listCategories({ all: 1 });
         this.brands = await API.listBrands({ all: 1 });
         this.phoneBrands = await API.listPhoneBrands({ all: 1 });
+        this.deviceTypes = await API.listDeviceTypes({ all: 1 });
         this.models = await API.listModels({ all: 1 });
         this._takeSnap();
         if (!this.categories.some(c => c.category_id === this.selCatId))
@@ -247,7 +250,7 @@ window.PosPages["page-settings"] = {
     },
     // 特性詞條開關:沒有就替本種類建一份(每個種類各自一份,選項不互通),
     // 已有就照一般規格欄的移除語意處理(先問影響筆數)。
-    // 固定列的開關:手機型號改 model_mode,特性詞條建立/移除本種類那一份
+    // 固定列的開關:適用機型改 model_mode,特性詞條建立/移除本種類那一份
     toggleFixedRow(f) {
       if (this.isModelRow(f)) return this.toggleModelMode();
       return this.toggleFeatureField(f);
@@ -443,12 +446,12 @@ window.PosPages["page-settings"] = {
       });
     },
 
-    // ==== 通用清單維護(廠牌/手機品牌/型號)====
+    // ==== 通用清單維護(廠牌/機型品牌/裝置類型/型號)====
     _itemBody(kind, item) {
       const body = { name: (item.name || "").trim() };
       if (kind === "models") {
         body.alias = (item.alias || "").trim() || null;
-        body.series = (item.series || "").trim() || null;
+        body.device_type_id = item.device_type_id;
       }
       return body;
     },
@@ -481,7 +484,7 @@ window.PosPages["page-settings"] = {
     _renamePhoneBrandLocally(phoneBrandId, oldName, newName) {
       for (const model of this.models)
         if (model.phone_brand_id === phoneBrandId) model.brand_name = newName;
-      for (const state of [this.pendingModelSort, this.collapsedBrands]) {
+      for (const state of [this.pendingModelSort, this.openBrands]) {
         if (!Object.prototype.hasOwnProperty.call(state, oldName) || oldName === newName) continue;
         state[newName] = state[oldName];
         delete state[oldName];
@@ -627,14 +630,15 @@ window.PosPages["page-settings"] = {
       if (kind === "models" && Object.keys(this.pendingModelSort).length) return true;
       return !!this.pendingSort[kind] || this.dirtyCount(kind) > 0;
     },
-    // 搜尋中一律展開(要看到結果);沒搜尋才看手動收合的狀態
+    // 搜尋中一律展開(要看到結果);沒搜尋才看品牌列點開了哪幾個
     isBrandOpen(brand) {
       if (this.modelQuery.trim()) return true;
-      return !this.collapsedBrands[brand];
+      return !!this.openBrands[brand];
     },
     toggleBrand(brand) {
       if (this.modelQuery.trim()) return;   // 搜尋結果不收合
-      this.collapsedBrands[brand] = !this.collapsedBrands[brand];
+      // 一次只開一個品牌:點別的品牌就把目前開著的收起來
+      this.openBrands = this.openBrands[brand] ? {} : { [brand]: true };
     },
     // 復原:丟掉未儲存的名稱修改與拖過的順序,重新讀回資料庫的內容
     async revertAll(kind) {
@@ -668,12 +672,13 @@ window.PosPages["page-settings"] = {
     },
     async addModel() {
       this.errorScope = "models";
-      const pbid = this.newModel.phone_brand_id, name = this.newModel.name.trim();
-      if (!pbid || !name) { this.showError("請選擇手機品牌並輸入型號名稱"); return; }
-      const series = (this.newModel.series || "").trim() || null;
+      const pbid = this.newModel.phone_brand_id, dtid = this.newModel.device_type_id;
+      const name = this.newModel.name.trim();
+      if (!pbid || !dtid || !name) { this.showError("請選擇機型品牌、裝置類型並輸入型號名稱"); return; }
       await this.keepEdits("models", () => this.guard(async () => {
-        const r = await API.createModel({ phone_brand_id: pbid, name, series });
-        this.newModel = { phone_brand_id: null, name: "", series: "" };
+        const r = await API.createModel({ phone_brand_id: pbid, device_type_id: dtid, name });
+        // 品牌與類型留著:連續建同品牌同類型的型號不用每次重選
+        this.newModel = { phone_brand_id: pbid, device_type_id: dtid, name: "" };
         await this.reloadAll();
         const grp = this.models.filter(m => m.phone_brand_id === pbid);
         await this._applyNewSeq("models", grp, r.model_id);

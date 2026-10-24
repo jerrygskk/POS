@@ -50,7 +50,8 @@ class SettingsLayersTests(unittest.TestCase):
             ("fields.list", {"category_id": True}),
             ("fields.create", {"name": "版型", "category_id": True}),
             ("fields.create", {"name": "版型", "default_option_id": True}),
-            ("models.create", {"phone_brand_id": True, "name": "15"}),
+            ("models.create", {"phone_brand_id": True, "device_type_id": 1, "name": "15"}),
+            ("models.create", {"phone_brand_id": 1, "device_type_id": True, "name": "15"}),
             ("models.list", {"phone_brand_id": True}),
         ]
         for action, payload in cases:
@@ -79,12 +80,13 @@ class SettingsLayersTests(unittest.TestCase):
             ("categories", "categories.create", "category_id", {"name": "類別"}),
             ("brands", "brands.create", "brand_id", {"name": "廠牌"}),
             ("phone_brands", "phone_brands.create", "phone_brand_id", {"name": "手機廠牌"}),
+            ("device_types", "device_types.create", "device_type_id", {"name": "類型"}),
         ]
         phone_brand_id = self.facade.invoke(
             "phone_brands.create", {"name": "型號廠牌"}
         )["phone_brand_id"]
         model_id = self.facade.invoke(
-            "models.create", {"phone_brand_id": phone_brand_id, "name": "型號"}
+            "models.create", {"phone_brand_id": phone_brand_id, "device_type_id": 1, "name": "型號"}
         )["model_id"]
         field_id = self.facade.invoke("fields.create", {"name": "欄位"})["field_id"]
         self.facade.invoke("options.create", {"field_id": field_id, "value": "選項"})
@@ -95,6 +97,7 @@ class SettingsLayersTests(unittest.TestCase):
             "categories": ("Category", "category_id"),
             "brands": ("Brand", "brand_id"),
             "phone_brands": ("PhoneBrand", "phone_brand_id"),
+            "device_types": ("DeviceType", "device_type_id"),
         }
         for action_prefix, create_action, id_key, create_payload in cases:
             item_id = self.facade.invoke(create_action, create_payload)[id_key]
@@ -174,9 +177,9 @@ class SettingsLayersTests(unittest.TestCase):
     def test_settings_template_list_has_model_row_and_row_actions(self):
         source = (Path(__file__).parents[1] / "static/js/settings.js").read_text(encoding="utf-8")
         html = (Path(__file__).parents[1] / "static/index.html").read_text(encoding="utf-8")
-        # 手機型號為模板固定列,點列或列上按鈕切換 model_mode
+        # 適用機型為模板固定列,點列或列上按鈕切換 model_mode
         self.assertIn('const MODEL_ROW_ID = "__model__"', source)
-        self.assertIn('name: "手機型號", field_type: "model"', source)
+        self.assertIn('name: "適用機型", field_type: "model"', source)
         self.assertIn('cat.model_mode === "required" ? "hidden" : "required"', source)
         self.assertIn('v-for="f in fixedRows"', html)
         self.assertIn('@click.stop="toggleFixedRow(f)"', html)

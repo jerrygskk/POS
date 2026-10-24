@@ -46,11 +46,13 @@ class TestSchema(ConnTestCase):
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(AttributeField)")}
         self.assertNotIn("category_id", cols)
 
-    def test_phonemodel_has_series_column(self):
-        # 全新 DB 建表即含 series 欄
+    def test_phonemodel_has_device_type_and_no_series(self):
+        # 全新 DB:型號掛裝置類型、系列欄已移除;種子補一個「手機」
         conn = get_conn(self.db)
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(PhoneModel)")}
-        self.assertIn("series", cols)
+        self.assertIn("device_type_id", cols)
+        self.assertNotIn("series", cols)
+        self.assertEqual([r["name"] for r in conn.execute("SELECT name FROM DeviceType")], ["手機"])
 
 
 class TestPhoneBrandMigration(unittest.TestCase):
@@ -199,7 +201,7 @@ class TestVariantAttributeMigration(unittest.TestCase):
 
 
 class TestModelSeriesMigration(unittest.TestCase):
-    """v5→v6:PhoneModel 加 series 欄;舊 DB 升級後有欄、既有型號資料保留。"""
+    """v5 舊 DB 一路升到最新:型號資料保留,系列欄先加後移除,型號歸「手機」。"""
 
     def _make_v5_db(self):
         db = os.path.join(tempfile.mkdtemp(), "v5.db")
@@ -228,12 +230,11 @@ class TestModelSeriesMigration(unittest.TestCase):
         conn = get_conn(db)
         try:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(PhoneModel)")}
-            self.assertIn("series", cols)
-            # 既有型號保留、新欄預設 NULL
+            self.assertNotIn("series", cols)
             row = conn.execute(
-                "SELECT alias, series FROM PhoneModel WHERE name='iPhone 17 Pro Max'").fetchone()
-            self.assertEqual(row["alias"], "17PM")
-            self.assertIsNone(row["series"])
+                "SELECT m.alias, t.name FROM PhoneModel m JOIN DeviceType t USING(device_type_id) "
+                "WHERE m.name='iPhone 17 Pro Max'").fetchone()
+            self.assertEqual((row["alias"], row["name"]), ("17PM", "手機"))
             ver = int(conn.execute(
                 "SELECT value FROM Setting WHERE key='schema_version'").fetchone()["value"])
             self.assertEqual(ver, db_schema.SCHEMA_VERSION)

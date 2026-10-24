@@ -113,9 +113,15 @@ class FacadeTestCase(unittest.TestCase):
     def create_phone_brand(self, name):
         return self.invoke("phone_brands.create", {"name": name})["phone_brand_id"]
 
-    def create_model(self, phone_brand_id, name):
+    def phone_type_id(self):
+        """種子建的「手機」裝置類型 id。"""
+        return next(t["device_type_id"] for t in self.invoke("device_types.list", {})
+                    if t["name"] == "手機")
+
+    def create_model(self, phone_brand_id, name, device_type_id=None):
         return self.invoke("models.create", {
             "phone_brand_id": phone_brand_id, "name": name,
+            "device_type_id": device_type_id or self.phone_type_id(),
         })["model_id"]
 
     def make_category_with_field(self, name, field_type="select", options=(),

@@ -12,6 +12,7 @@ EXPECTED_ADMIN_ACTIONS = frozenset({
     "categories.set_common_fields", "categories.set_field", "categories.delete_field",
     "brands.create", "brands.update", "brands.delete", "brands.sort", "brands.set_categories",
     "phone_brands.create", "phone_brands.update", "phone_brands.delete", "phone_brands.sort",
+    "device_types.create", "device_types.update", "device_types.delete", "device_types.sort",
     "models.create", "models.update", "models.delete", "models.sort",
     "fields.create", "fields.update",
     "options.create", "options.update", "options.delete", "options.set_models", "options.cleanup",
