@@ -363,6 +363,19 @@ class MainDesktopOrchestrationTest(unittest.TestCase):
         self.assertIn("桌面視窗啟動失敗", log)
         self.assertIn("WebView2 unavailable", log)
 
+    def test_missing_database_shows_dialog_and_exits(self):
+        dialog = Mock()
+        factory = Mock()
+
+        with patch("main.RuntimePaths.detect", return_value=self.paths):
+            with self.assertRaises(SystemExit) as ctx:
+                main.main(application_factory=factory, error_dialog=dialog)
+
+        self.assertEqual(ctx.exception.code, 1)
+        dialog.assert_called_once()
+        self.assertIn(str(self.paths.db_path), dialog.call_args.args[1])
+        factory.assert_not_called()
+
 
 class ChildWindowFitSizeTests(unittest.TestCase):
     """子視窗尺寸夾進可視工作區:避免在小螢幕或高縮放環境開出畫面外。"""

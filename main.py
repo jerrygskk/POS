@@ -49,9 +49,21 @@ def prepare_runtime(paths):
     except Exception as exc:
         try_log_runtime_error(paths, "自動備份失敗", exc)
 
-def main(application_factory=None):
+def show_error_dialog(title, message):
+    import ctypes
+    ctypes.windll.user32.MessageBoxW(None, message, title, 0x10)
+
+
+def main(application_factory=None, error_dialog=show_error_dialog):
     paths = RuntimePaths.detect(module_file=__file__)
-    prepare_runtime(paths)
+    try:
+        prepare_runtime(paths)
+    except FileNotFoundError:
+        error_dialog(
+            "POS 無法啟動",
+            f"找不到資料庫檔案：\n{paths.db_path}\n\n請將資料庫檔案 pos.db 放到程式所在資料夾後再重新啟動。",
+        )
+        raise SystemExit(1)
     application_factory = application_factory or DesktopApplication
     try:
         application_factory(paths).run()
