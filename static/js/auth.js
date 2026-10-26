@@ -1,4 +1,4 @@
-window.PosAuth = Vue.reactive({ isAdmin: false, pendingStocktakes: 0 });
+window.PosAuth = Vue.reactive({ isAdmin: false, pendingStocktakes: 0, pendingReturns: 0 });
 window.PosAuthOps = {
   _refreshToken: 0,
   async refresh() {
@@ -6,10 +6,12 @@ window.PosAuthOps = {
     const status = await API.authStatus();
     if (token !== this._refreshToken) return;
     window.PosAuth.isAdmin = status.is_admin;
-    if (!status.is_admin) { window.PosAuth.pendingStocktakes = 0; return; }
-    const result = await API.pendingStocktakeCount();
-    if (token === this._refreshToken && window.PosAuth.isAdmin)
-      window.PosAuth.pendingStocktakes = result.count;
+    if (!status.is_admin) { window.PosAuth.pendingStocktakes = 0; window.PosAuth.pendingReturns = 0; return; }
+    const [stocktakes, returns] = await Promise.all([API.pendingStocktakeCount(), API.pendingReturnCount()]);
+    if (token === this._refreshToken && window.PosAuth.isAdmin) {
+      window.PosAuth.pendingStocktakes = stocktakes.count;
+      window.PosAuth.pendingReturns = returns.count;
+    }
   },
   async login() {
     const password = await PosConfirm.input({

@@ -3,10 +3,12 @@ window.PosPages["page-records"] = {
   template: "#tpl-records",
   inject: ["showError"],
   data() {
-    const today = new Date().toISOString().slice(0, 10);
-    return { kinds: [["sales", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"]], kind: "sales",
+    // 用本機日期;toISOString 是 UTC,台灣早上 8 點前會變成昨天
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    return { kinds: [["sales", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"], ["returns", "退貨"]], kind: "sales",
              dateFrom: today, dateTo: today, payment: "", payments: [],
-             sales: [], summary: null, receipts: [], stocktakes: [], expanded: null };
+             sales: [], summary: null, receipts: [], stocktakes: [], returns: [], expanded: null };
   },
   computed: { isAdmin() { return window.PosAuth.isAdmin; } },
   async mounted() {
@@ -31,6 +33,8 @@ window.PosPages["page-records"] = {
           this.summary = await API.salesSummary(filters);
         } else if (this.kind === "receive") {
           this.receipts = await API.listReceipts(range);
+        } else if (this.kind === "returns") {
+          this.returns = await API.returnHistory(range);
         } else {
           this.stocktakes = await API.stocktakeHistory(range);
         }

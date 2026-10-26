@@ -1,0 +1,121 @@
+window.PosPages = window.PosPages || {};
+window.PosPages["page-returns"] = {
+  template: "#tpl-returns",
+  inject: ["showError"],
+  data() {
+    return { sessions: [], current: null, detail: null, scanCode: "",
+             employee: window.PosEmployee,
+             dispositions: [["restock", "加回庫存"], ["discard", "退貨不入庫"], ["reject", "不同意退貨"]] };
+  },
+  computed: {
+    isAdmin() { return window.PosAuth.isAdmin; },
+    canEdit() { return this.detail?.status === "open"; },
+    canReview() { return this.detail?.status === "pending" && this.isAdmin; },
+  },
+  watch: {
+    isAdmin(isAdmin) {
+      if (!isAdmin && this.current && this.detail?.status === "pending")
+        this.guard(() => this.enter(this.current));
+    },
+  },
+  async mounted() { await this.guard(() => this.reload()); },
+  methods: {
+    async reload() { this.sessions = await API.listReturns(); },
+    async refreshDetail() {
+      this.detail = await API.returnDetail(this.current);
+    },
+    async openNew() {
+      if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
+      await this.guard(async () => {
+        const r = await API.createReturn({ employee: this.employee.id });
+        await this.enter(r.return_id);
+      });
+    },
+    async enter(rid) {
+      // 資料載入完成才切入詳細畫面，避免 await 期間渲染到空的 detail。
+      const detail = await API.returnDetail(rid);
+      this.detail = detail;
+      this.current = rid;
+      this.$nextTick(() => this.$refs.scan?.focus());
+    },
+    // 寫入失敗一律重新載入，還原畫面上未儲存的輸入值
+    async write(fn) {
+      try { await fn(); }
+      catch (e) { this.showError(e.message); }
+      await this.guard(() => this.refreshDetail());
+    },
+    async onScan() {
+      if (!this.canEdit) return;
+      await this.guard(async () => {
+        const query = await window.PosScan(this.scanCode);
+        if (!query) { this.scanCode = ""; return; }
+        if (!this.canEdit) return;
+        await API.returnScan(this.current, query.data.variant_id, 1);
+        await this.refreshDetail();
+        this.scanCode = "";
+      });
+    },
+    async setQty(it) {
+      if (!this.canEdit) { this.showError("退貨單不是進行中，無法修改數量"); return; }
+      await this.write(() => API.setReturnQty(this.current, it.variant_id, it.qty));
+    },
+    async setSale(it) {
+      if (!this.canEdit) { this.showError("退貨單不是進行中，無法修改銷售單編號"); return; }
+      const text = String(it.sale_id ?? "").trim();
+      if (text && !/^[0-9]+$/.test(text)) { this.showError("銷售單編號必須是數字"); await this.guard(() => this.refreshDetail()); return; }
+      await this.write(() => API.setReturnSale(this.current, it.variant_id, text ? Number(text) : null));
+    },
+    async setReason(it) {
+      if (!this.canEdit) { this.showError("退貨單不是進行中，無法修改原因"); return; }
+      await this.write(() => API.setReturnReason(this.current, it.variant_id, it.reason || null));
+    },
+    async removeItem(it) {
+      if (!this.canEdit) { this.showError("退貨單不是進行中，無法移除品項"); return; }
+      await this.write(() => API.removeReturnItem(this.current, it.variant_id));
+    },
+    async setDisposition(it) {
+      if (!this.canReview) { this.showError("需要管理者權限"); await this.guard(() => this.refreshDetail()); return; }
+      await this.write(() => API.setReturnDisposition(this.current, it.variant_id, it.disposition));
+    },
+    async close() {
+      if (!this.canEdit) return;
+      const rid = this.current;
+      if (!await PosConfirm.ask(`共 ${this.detail.items.length} 項。送出後交由管理者決定處理方式，核准前不會調整庫存。確定送出?`)) return;
+      if (this.current !== rid || !this.canEdit) return;
+      await this.guard(async () => {
+        await API.closeReturn(rid);
+        this.current = null; this.detail = null;
+        await this.reload();
+        await window.PosAuthOps.refresh();
+        await PosConfirm.notify("已送交管理者核准。");
+      });
+    },
+    async withdraw(rid) {
+      if (!await PosConfirm.ask("抽回後退貨單回到進行中，可修改後再次送出。確定抽回?")) return;
+      try { await API.withdrawReturn(rid); } catch (e) { this.showError(e.message); }
+      await this.guard(() => this.reload());
+      await this.guard(() => window.PosAuthOps.refresh());
+    },
+    async cancel(s) {
+      if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
+      if (s.status === "pending" && !this.isAdmin) { this.showError("需要管理者權限"); return; }
+      if (!await PosConfirm.ask(`作廢退貨單 ${s.return_id}?作廢後不會調整庫存，紀錄保留於紀錄查詢。`)) return;
+      try { await API.cancelReturn(s.return_id, this.employee.id); } catch (e) { this.showError(e.message); }
+      await this.guard(() => this.reload());
+      await this.guard(() => window.PosAuthOps.refresh());
+    },
+    async approve() {
+      if (!this.canReview) { this.showError("需要管理者權限"); return; }
+      const rid = this.current;
+      const count = key => this.detail.items.filter(i => i.disposition === key).length;
+      if (!await PosConfirm.ask(`加回庫存 ${count("restock")} 項、退貨不入庫 ${count("discard")} 項、不同意 ${count("reject")} 項。核准後依此調整庫存。確定核准?`)) return;
+      if (!this.canReview || this.current !== rid) { this.showError("需要管理者權限"); return; }
+      try {
+        await API.approveReturn(rid);
+      } catch (e) { this.showError(e.message); }
+      this.current = null; this.detail = null;
+      await this.guard(() => this.reload());
+      await this.guard(() => window.PosAuthOps.refresh());
+    },
+  },
+};

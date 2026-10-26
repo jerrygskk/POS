@@ -4,16 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=242">
+<link rel="stylesheet" href="css/pos.css?v=246">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=242" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=246" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
-              class="badge">{{ auth.pendingStocktakes }}</span></button>
+              class="badge">{{ auth.pendingStocktakes }}</span><span
+              v-if="key==='returns' && auth.isAdmin && auth.pendingReturns > 0"
+              class="badge">{{ auth.pendingReturns }}</span></button>
     <button style="margin-left:auto; white-space:nowrap" @click="toggleAdmin"><span
       v-if="auth.isAdmin" class="badge">管理者</span>{{ auth.isAdmin ? '登出管理者' : '管理者登入' }}</button>
   </nav>
@@ -187,11 +189,13 @@
       <thead><tr><th>單號</th><th>開始時間</th><th>狀態</th><th>員工</th><th></th></tr></thead>
       <tbody><tr v-for="s in sessions" :key="s.session_id">
         <td>{{ s.session_id }}</td><td>{{ s.started_at }}</td>
-        <td>{{ s.status === 'open' ? '進行中' : s.status === 'pending' ? '待核准' : '已結案' }}</td><td>{{ s.employee }}</td>
+        <td>{{ statusText(s.status) }}</td><td>{{ s.employee }}</td>
         <td><div class="card-actions">
             <button v-if="s.status==='open'" @click="enter(s.session_id)">續盤</button>
             <button v-else @click="enter(s.session_id)">{{ s.status==='pending' && isAdmin ? '審核' : '檢視' }}</button>
-            <button v-if="s.status==='pending'" @click="withdraw(s.session_id)">抽回修改</button></div></td>
+            <button v-if="s.status==='pending'" @click="withdraw(s.session_id)">抽回修改</button>
+            <button v-if="s.status==='open' || (s.status==='pending' && isAdmin)"
+                    @click="cancel(s)">作廢</button></div></td>
       </tr></tbody>
     </table>
   </div>
@@ -208,7 +212,7 @@
     <div v-if="detail.status==='pending' && !isAdmin" class="notice-bar">等待管理者核准</div>
     <div v-if="recountCount" class="notice-bar">有 {{ recountCount }} 項需重新清點</div>
     <table>
-      <thead><tr><th>商品</th><th>屬性</th><th>系統量</th><th>實盤量</th><th>差異</th>
+      <thead><tr><th>商品</th><th>屬性</th><th>系統量</th><th>實盤量</th><th>差異</th><th>差異原因</th>
         <th v-if="canReview"></th><th v-if="canEditCounted" class="cart-col-remove"></th></tr></thead>
       <tbody><tr v-for="it in detail.items" :key="it.variant_id" :class="{neg: it.needs_recount, 'stocktake-row-returned': marked.includes(it.variant_id)}">
         <td>{{ it.name }}</td><td>{{ attrText(it) }}</td>
@@ -217,9 +221,63 @@
                    :disabled="!canEditCounted" @change="setCounted(it)">
           <button v-if="it.needs_recount && canEditCounted" class="btn-sm" @click="setCounted(it)">確認</button></td>
         <td :class="{neg: it.diff < 0}">{{ it.diff > 0 ? '+' + it.diff : it.diff }}</td>
+        <td><input v-if="it.diff !== 0 && canEditCounted" v-model="it.note" maxlength="100"
+                   placeholder="選填" @change="setNote(it)"><template v-else>{{ it.note }}</template></td>
         <td v-if="canReview"><button v-if="marked.includes(it.variant_id)" class="btn-sm danger" @click="toggleMark(it)">取消退回</button>
           <button v-else class="btn-sm" @click="toggleMark(it)">退回</button></td>
         <td v-if="canEditCounted"><button class="btn-x" title="移除" @click="removeItem(it)">✕</button></td>
+      </tr></tbody>
+    </table>
+  </div>
+</div>
+</template>
+<template id="tpl-returns">
+<div class="page">
+  <div v-if="!current">
+    <div class="scan-row">
+      <employee-picker></employee-picker>
+      <button class="primary" @click="openNew">開新退貨單</button>
+    </div>
+    <table>
+      <thead><tr><th>單號</th><th>開單時間</th><th>狀態</th><th>員工</th><th></th></tr></thead>
+      <tbody><tr v-for="s in sessions" :key="s.return_id">
+        <td>{{ s.return_id }}</td><td>{{ s.started_at }}</td>
+        <td>{{ statusText(s.status) }}</td><td>{{ s.employee }}</td>
+        <td><div class="card-actions">
+            <button v-if="s.status==='open'" @click="enter(s.return_id)">繼續</button>
+            <button v-else @click="enter(s.return_id)">{{ s.status==='pending' && isAdmin ? '審核' : '檢視' }}</button>
+            <button v-if="s.status==='pending'" @click="withdraw(s.return_id)">抽回修改</button>
+            <button v-if="s.status==='open' || (s.status==='pending' && isAdmin)"
+                    @click="cancel(s)">作廢</button></div></td>
+      </tr></tbody>
+    </table>
+  </div>
+  <div v-else>
+    <div class="scan-row">
+      <input ref="scan" v-model="scanCode" @keyup.enter="onScan"
+             class="scan-input" placeholder="掃描條碼(重複掃自動累加)"
+             :disabled="!canEdit">
+      <button @click="current=null; detail=null; reload()">返回列表</button>
+      <button class="primary" v-if="canEdit" @click="close">送出</button>
+      <button class="primary" v-if="canReview" @click="approve">核准</button>
+    </div>
+    <div v-if="detail.status==='pending' && !isAdmin" class="notice-bar">等待管理者核准</div>
+    <table>
+      <thead><tr><th>商品</th><th>屬性</th><th>數量</th><th>銷售單編號</th><th>退貨原因</th>
+        <th v-if="detail.status!=='open'">處理方式</th><th v-if="canEdit" class="cart-col-remove"></th></tr></thead>
+      <tbody><tr v-for="it in detail.items" :key="it.variant_id">
+        <td>{{ it.name }}</td><td>{{ attrText(it) }}</td>
+        <td><input type="number" v-model.number="it.qty" min="1" class="w80"
+                   :disabled="!canEdit" @change="setQty(it)"></td>
+        <td><input v-if="canEdit" v-model="it.sale_id" class="w100" placeholder="選填"
+                   @change="setSale(it)"><template v-else>{{ it.sale_id ?? '' }}</template></td>
+        <td><input v-if="canEdit" v-model="it.reason" maxlength="100" placeholder="選填"
+                   @change="setReason(it)"><template v-else>{{ it.reason }}</template></td>
+        <td v-if="detail.status!=='open'">
+          <select v-if="canReview" v-model="it.disposition" @change="setDisposition(it)">
+            <option v-for="[key, label] in dispositions" :key="key" :value="key">{{ label }}</option>
+          </select><template v-else>{{ dispositionText(it.disposition) }}</template></td>
+        <td v-if="canEdit"><button class="btn-x" title="移除" @click="removeItem(it)">✕</button></td>
       </tr></tbody>
     </table>
   </div>
@@ -286,19 +344,40 @@
           </template>
         </tbody>
       </table>
+      <table v-else-if="kind==='returns'">
+        <thead><tr><th>單號</th><th>開單時間</th><th>狀態</th><th>核准／作廢時間</th><th>員工</th><th>品項數</th><th></th></tr></thead>
+        <tbody>
+          <template v-for="t in returns" :key="t.return_id">
+            <tr>
+              <td>{{ t.return_id }}</td><td>{{ t.started_at }}</td>
+              <td>{{ t.status==='cancelled' ? '已作廢（員工 ' + t.cancelled_by + '）' : '已核准' }}</td>
+              <td>{{ t.approved_at || t.cancelled_at }}</td>
+              <td>{{ t.employee }}</td><td>{{ t.items.length }}</td>
+              <td><button @click="toggle('t' + t.return_id)">{{ expanded==='t' + t.return_id ? '收合' : '明細' }}</button></td>
+            </tr>
+            <tr v-if="expanded==='t' + t.return_id"><td colspan="7">
+              <div v-for="it in t.items">
+                {{ it.name }}|{{ attrText(it) }}|{{ it.qty }} 件<template v-if="it.sale_id">（銷售單 {{ it.sale_id }}）</template>|{{ t.status==='cancelled' ? '—' : dispositionText(it.disposition) }}<template v-if="it.reason">（原因：{{ it.reason }}）</template>
+              </div>
+            </td></tr>
+          </template>
+        </tbody>
+      </table>
       <table v-else>
-        <thead><tr><th>單號</th><th>開始時間</th><th>核准時間</th><th>員工</th><th>差異項數</th><th></th></tr></thead>
+        <thead><tr><th>單號</th><th>開始時間</th><th>狀態</th><th>核准／作廢時間</th><th>員工</th><th>差異項數</th><th></th></tr></thead>
         <tbody>
           <template v-for="t in stocktakes" :key="t.session_id">
             <tr>
-              <td>{{ t.session_id }}</td><td>{{ t.started_at }}</td><td>{{ t.approved_at || '—' }}</td>
+              <td>{{ t.session_id }}</td><td>{{ t.started_at }}</td>
+              <td>{{ t.status==='cancelled' ? '已作廢（員工 ' + t.cancelled_by + '）' : '已核准' }}</td>
+              <td>{{ t.approved_at || t.cancelled_at }}</td>
               <td>{{ t.employee }}</td><td>{{ t.diff_count }}</td>
               <td><button @click="toggle(t.session_id)">{{ expanded===t.session_id ? '收合' : '明細' }}</button></td>
             </tr>
-            <tr v-if="expanded===t.session_id"><td colspan="6">
+            <tr v-if="expanded===t.session_id"><td colspan="7">
               <div v-for="it in t.items">
                 {{ it.name }}|{{ attrText(it) }}|系統 {{ it.system_qty }}、實盤 {{ it.counted_qty }}、差異
-                {{ it.diff > 0 ? '+' + it.diff : it.diff }}
+                {{ it.diff > 0 ? '+' + it.diff : it.diff }}<template v-if="it.note">（原因：{{ it.note }}）</template>
               </div>
             </td></tr>
           </template>
@@ -747,26 +826,27 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=242"></script>
-<script src="js/api.js?v=242"></script>
-<script src="js/confirm.js?v=242"></script>
-<script src="js/auth.js?v=242"></script>
-<script src="js/pos_shared.js?v=242"></script>
-<script src="js/catalogfields.js?v=242"></script>
-<script src="js/checkout.js?v=242"></script>
-<script src="js/receive.js?v=242"></script>
-<script src="js/stocktake.js?v=242"></script>
-<script src="js/records.js?v=242"></script>
-<script src="js/catalog.js?v=242"></script>
-<script src="js/sortable.js?v=242"></script>
-<script src="js/combobox.js?v=242"></script>
-<script src="js/optpicker.js?v=242"></script>
-<script src="js/modelpicker.js?v=242"></script>
-<script src="js/employeepicker.js?v=242"></script>
-<script src="js/attrfields.js?v=242"></script>
-<script src="js/settings.js?v=242"></script>
-<script src="js/labels.js?v=242"></script>
-<script src="js/app_update.js?v=242"></script>
-<script src="js/app.js?v=242"></script>
+<script src="js/vue.global.prod.js?v=246"></script>
+<script src="js/api.js?v=246"></script>
+<script src="js/confirm.js?v=246"></script>
+<script src="js/auth.js?v=246"></script>
+<script src="js/pos_shared.js?v=246"></script>
+<script src="js/catalogfields.js?v=246"></script>
+<script src="js/checkout.js?v=246"></script>
+<script src="js/receive.js?v=246"></script>
+<script src="js/stocktake.js?v=246"></script>
+<script src="js/returns.js?v=246"></script>
+<script src="js/records.js?v=246"></script>
+<script src="js/catalog.js?v=246"></script>
+<script src="js/sortable.js?v=246"></script>
+<script src="js/combobox.js?v=246"></script>
+<script src="js/optpicker.js?v=246"></script>
+<script src="js/modelpicker.js?v=246"></script>
+<script src="js/employeepicker.js?v=246"></script>
+<script src="js/attrfields.js?v=246"></script>
+<script src="js/settings.js?v=246"></script>
+<script src="js/labels.js?v=246"></script>
+<script src="js/app_update.js?v=246"></script>
+<script src="js/app.js?v=246"></script>
 </body>
 </html>

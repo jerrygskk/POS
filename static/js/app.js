@@ -63,7 +63,7 @@ document.addEventListener("DOMContentLoaded", () => {
     },
     computed: {
       pages() { return [
-        ["checkout", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"],
+        ["checkout", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"], ["returns", "退貨"],
         ["records", "紀錄查詢"], ["catalog", "商品資料庫"], ["labels", "標籤列印"], ["settings", "設定"]]
         .filter(([key]) => key !== "settings" || this.auth.isAdmin); },
     },

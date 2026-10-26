@@ -54,7 +54,8 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `static/js/confirm.js` | 確認／通知視窗公版 `PosConfirm.ask()`／`notify()`／`input()`／`choose()`（取代瀏覽器內建 confirm／alert；`choose` 為清單選擇） |
 | `static/js/app_update.js` | 線上更新前端：閒置才詢問、鎖畫面顯示下載百分比、完成自動重開 |
 | `static/js/auth.js` | 主、子視窗共用的活動回報；主視窗登入／登出、身分刷新與待核准徽章 |
-| `static/js/employeepicker.js` | 員工代號 1～6 選擇元件 `employee-picker`（收銀／進貨／盤點共用同一個選擇） |
+| `static/js/employeepicker.js` | 員工代號 1～6 選擇元件 `employee-picker`（收銀／進貨／盤點／退貨共用同一個選擇） |
+| `static/js/returns.js` | 退貨頁：開單、掃描、每項銷售單編號與退貨原因、送審／抽回、管理者選處理方式與核准、作廢 |
 | `static/css/dialog-theme.css` | 子視窗對話框外觀（`.dialog-*` 公版，沿用 §2 UI 風格色票） |
 | `tools/bump_version.py` | 進版工具(改 `version.py` + 產 `version_info.txt`) |
 | `tools/publish_release.py` | 發版上傳工具：核對版號與 tag 後建草稿，核對草稿檔案無誤才公開 GitHub Release |
@@ -63,7 +64,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 
 ## 2. 慣例
 
-- **庫存採異動流水制**:不存「目前庫存」欄位,一律由 `StockMovement` 加總取得（`lib/product_data.py:stock_of`）。`kind` 為 `purchase`(進貨,+)、`sale`(銷售,-)、`adjust`(盤點調整,±)。
+- **庫存採異動流水制**:不存「目前庫存」欄位,一律由 `StockMovement` 加總取得（`lib/product_data.py:stock_of`）。`kind` 為 `purchase`(進貨,+)、`sale`(銷售,-)、`adjust`(盤點調整,±)、`return`(退貨加回,+)。
 - **金額一律 int**:新台幣元,無小數;數量亦為 int。
 - **商品結構**:`Category`/`Brand`/`PhoneModel` 為正式資料表;`Product`(款)以 `category_id`/`brand_id` FK 掛種類/廠牌;`Variant`(變體)以 `VariantModel` 多對多掛適用型號(共用款可掛多筆型號);規格欄 `AttributeField` 為欄位主檔,以 `CategoryField` 掛種類(一律一個欄只掛一個種類,見「新種類的預設模板」);`AttributeOption` 無 parent 連動。
 - **規格值正規化**:變體規格不再存 JSON,改由 `VariantAttribute(variant_id, field_id, option_id?, text_value?)` 關聯表承載(`CHECK` 約束 `option_id`/`text_value` 恰一非 NULL:select 欄存 `option_id`、text 欄存 `text_value`)。Desktop action 以 `attributes:{欄名:值}` dict 進出，讀寫由 `lib/product_data.py` 的 `set_variant_attributes`/`attrs_by_variant` 在 dict 與關聯列間轉換（讀取一次 JOIN 撈齊避免 N+1）。因此**改欄名/改選項值即生效**,不需回掃變體;寫入時 select 值查無對應選項會回傳 validation error。
@@ -78,6 +79,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 - **自取碼交易語意**:`lib/product_rules.py:next_store_barcode` 使用呼叫端的同一條資料庫連線更新計數器,由呼叫端決定 commit;商品或條碼建立失敗造成 transaction rollback 時,計數器亦一併回復。
 - **關鍵輸入驗證**:進貨數量與盤點掃描數量須大於 0,盤點實數不得小於 0;結帳單品折扣不可超過品項小計、總額不得為負,付款方式須存在設定清單。規格欄型別統一由 `lib/product_rules.py` 驗證。
 - **盤點送審／核准**：結案只送審、不動庫存；核准才依快照差額寫入調整。狀態與防重規則見下方「盤點兩段式」。
+- **退貨送審／核准**：與盤點同為兩段式，規則見下方「退貨單」。
 - **有效售價**:`Variant.price` 不為 NULL 時採用,否則退回 `Product.default_price`,兩者皆 NULL 則售價為 `null`。
 - **同名欄去重提醒**:`AttributeField` 沒有 `category_id`,同名欄可能有多份(各種類一份);SQLite 的 `UNIQUE` 也不套正規化,故去重不能靠資料庫唯一鍵,一律先以「欄名＋型別＋種類」查再插。
 - **設定頁模板列與型號**:見下方「固定列：適用型號與特性詞條」「規格欄的移除」「新種類的預設模板」三節。
@@ -96,6 +98,10 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | 收銀（含單項折扣、整單折抵）、進貨 | 可 | 可 |
 | 盤點開單、掃描、修改進行中實盤量、結案送審、抽回 | 可 | 可 |
 | 待核准盤點修改實盤量、核准、查詢待核准數量 | 不可 | 可 |
+| 作廢進行中的盤點單／退貨單 | 可 | 可 |
+| 作廢待核准的盤點單／退貨單 | 不可 | 可 |
+| 退貨開單、掃描、改數量／銷售單編號／原因、送審、抽回 | 可 | 可 |
+| 退貨選處理方式、核准、查詢待核准數量 | 不可 | 可 |
 | 銷售紀錄任意日期查詢與小結 | 可 | 可 |
 | 銷售紀錄匯出 CSV | 不可 | 可 |
 | 商品資料庫查詢（含已停用）、標籤列印 | 可 | 可 |
@@ -106,7 +112,8 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 必須決定歸屬，並同步更新逐項列出權限表的測試。`DesktopFacade.invoke`
 在分派前檢查管理者；Bridge 直接處理的編輯子視窗入口另檢查，
 匯出存檔在對話框結束、實際寫檔前再次檢查。未授權回傳 `forbidden`。
-待核准盤點的數量修改另依狀態檢查身分。
+待核准盤點的數量修改、待核准單的作廢另依狀態檢查身分（作廢動作本身不在 `ADMIN_ACTIONS`，
+由服務層依單據狀態決定）。
 
 員工畫面直接隱藏受限操作；每個前端進入點仍須檢查權限，確認視窗後的
 刪除／核准等操作在實際執行前再次檢查身分及目標狀態，不能只靠藏按鈕。
@@ -129,7 +136,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 
 ### 盤點兩段式
 
-狀態僅有 `open`（進行中）、`pending`（待核准）、`closed`（已結案）。
+狀態有 `open`（進行中）、`pending`（待核准）、`closed`（已結案）、`cancelled`（已作廢）。
 結案由進行中送往待核准，只寫 `submitted_at`、不動庫存；任何身分皆可將待核准單
 抽回為進行中；只有管理者可核准。核准才寫 `approved_at`、`ended_at`
 及 `adjust` 庫存異動。同時只能有一張進行中或待核准單，由
@@ -150,6 +157,32 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 狀態更新與異動在同一交易，重複核准不得再寫入調整。
 schema v18 重建盤點父子表以擴充狀態與欄位，搬表前明確開交易，保留明細、原編號
 及流水號；失敗須完整回復，不關閉外鍵檢查。
+
+**作廢**：進行中或待核准的單可作廢（待核准限管理者），寫 `cancelled_at`、`cancelled_by`
+（員工代號必填），不動庫存、保留紀錄；已核准不可作廢，數量有誤以新的盤點單修正。
+作廢後不再占用「同時只能有一張」的名額。不提供真正刪除，避免做錯的單不留痕跡。
+
+**差異原因**：`StocktakeItem.note` 選填，只在進行中可改；畫面只在差異不為 0 的列顯示輸入格。
+
+紀錄查詢只列已核准與已作廢的單，日期以 `COALESCE(approved_at,cancelled_at)` 篩選；
+進行中、待核准的單在盤點頁列表處理。
+
+### 退貨單
+
+`ReturnSession`／`ReturnItem`，狀態與盤點相同（`open`／`pending`／`closed`／`cancelled`），
+但**不限同時一張**，也不受盤點進行中影響。員工開單、掃描（重複掃累加數量）、
+每項可填銷售單編號（選填，填了須存在於 `Sale`）與退貨原因，送審後不可再改。
+
+管理者審核時每項選處理方式 `disposition`：`restock`（加回庫存，預設）、
+`discard`（退貨不入庫，單次使用產品）、`reject`（不同意退貨）。核准以條件式更新
+`pending→closed`，同一交易內只替 `restock` 品項寫 `kind='return'` 的正數異動。
+待核准的盤點單抽回時會以目前庫存重新快照，退貨加回的數量自然併入，無需特別處理。
+
+作廢規則與盤點相同。`ReturnSession.refund_amount` 為退款金額預留欄位，目前沒有
+畫面與報表使用。紀錄查詢的「退貨」只列已核准與已作廢的單。
+
+schema v20 重建 `StockMovement`（`kind` 加 `return`）與盤點父子表（加作廢狀態、
+作廢欄位、品項備註），沿用 v18 的搬表方式保留編號與流水號；退貨兩張新表由 `SCHEMA` 建立。
 
 ### 子視窗(pywebview 款式修改／新增款式)
 
@@ -590,7 +623,7 @@ python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_s
 python -m unittest discover -s tests
 ```
 
-目前入庫 919 個測試,涵蓋 schema/migration、Desktop action 契約、線上更新、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
+目前入庫 979 個測試,涵蓋 schema/migration、Desktop action 契約、線上更新、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、退貨、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
 ⚠️ `tests/test_import_excel.py` 與 `tools/import_excel.py` 一樣**不入庫**(直接 import 該工具,
 缺檔會 error 而非 skip);兩者仍在使用中的機器上會多跑 29 項,匯入驗收結束後一起刪除。
 
@@ -652,3 +685,4 @@ onefile 產出約 32.6 MB，其中 Pillow 為大宗）。`python-barcode` 內附
 | 0.1.0 | 首版:收銀/進貨/盤點/銷售紀錄,PyInstaller 單一 exe 打包 |
 | 0.1.1 | 首次進版(累積 0.1.0 之後全部改動):Desktop-only 架構(移除 HTTP adapter)、schema v7–v15(規格值正規化、規格欄依種類專屬)、商品資料庫款式編輯子視窗與多關鍵字搜尋、新增款式組合展開＋批次工作表、設定頁改版、NIIMBOT B1 標籤列印(列印清單、預覽、6 位元組尺寸指令)、自取碼帶檢查碼新格式、標準資料庫工具、打包改用入庫的 `POS.spec` |
 | 0.1.2 | 線上更新(GitHub Releases、閒置才問、鎖畫面下載、核對後換檔重開)與 `tools/publish_release.py`、資料庫升級前備份；管理者／員工兩層權限與盤點送審核准、結帳進貨盤點記錄員工代號、原廠碼可共用與批次進貨、型號改掛裝置類型(移除系列)、schema v16–v19 |
+| 0.1.3 | 退貨單(送審、管理者逐項選加回庫存／不入庫／不同意、每項銷售單編號與原因)、盤點單與退貨單作廢、盤點差異原因、紀錄查詢預設日期改用本機時間、找不到資料庫時跳出提示、schema v20 |

@@ -79,7 +79,7 @@ class AuthTests(ConnTestCase):
         self.assertFalse(self.session.is_admin())
 
     def test_passive_queries_never_extend_session(self):
-        self.assertEqual(PASSIVE_ACTIONS, {"auth.status", "auth.logout", "stocktake.pending_count",
+        self.assertEqual(PASSIVE_ACTIONS, {"auth.status", "auth.logout", "stocktake.pending_count", "returns.pending_count",
                                            "desktop.update.check", "desktop.update.start", "desktop.update.status",
                                            "desktop.update.restart", "desktop.update.busy"})
         self.session.login("admin")

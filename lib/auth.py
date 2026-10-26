@@ -14,7 +14,7 @@ UPDATE_ACTIONS = frozenset({
     "desktop.update.check", "desktop.update.start", "desktop.update.status",
     "desktop.update.restart", "desktop.update.busy",
 })
-PASSIVE_ACTIONS = frozenset({"auth.status", "auth.logout", "stocktake.pending_count"}) | UPDATE_ACTIONS
+PASSIVE_ACTIONS = frozenset({"auth.status", "auth.logout", "stocktake.pending_count", "returns.pending_count"}) | UPDATE_ACTIONS
 ADMIN_ACTIONS = frozenset({
     "categories.create", "categories.update", "categories.delete", "categories.sort",
     "brands.create", "brands.update", "brands.delete", "brands.sort", "brands.set_categories",
@@ -28,6 +28,7 @@ ADMIN_ACTIONS = frozenset({
     "variants.create", "variants.update", "variants.set_models", "variants.update_details",
     "variants.update_editor", "variants.delete", "variants.batch_create", "variants.activate", "variants.issues",
     "sales.export", "sales.export_save", "stocktake.approve", "stocktake.return", "stocktake.pending_count",
+    "returns.set_disposition", "returns.approve", "returns.pending_count",
     "desktop.child_window.open",
 })
 

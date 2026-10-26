@@ -65,6 +65,25 @@ window.PosPages["page-stocktake"] = {
         this.detail = await API.stocktakeDetail(this.current);
       }
     },
+    async setNote(it) {
+      if (!this.canEditCounted) { this.showError("盤點單不是進行中，無法修改原因"); return; }
+      try {
+        await API.setStocktakeNote(this.current, it.variant_id, it.note || null);
+      } catch (e) {
+        this.showError(e.message);
+        this.detail = await API.stocktakeDetail(this.current);
+      }
+    },
+    async cancel(s) {
+      if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
+      if (s.status === "pending" && !this.isAdmin) { this.showError("需要管理者權限"); return; }
+      if (!await PosConfirm.ask(`作廢盤點單 ${s.session_id}?作廢後不會調整庫存，紀錄保留於紀錄查詢。`)) return;
+      try {
+        await API.cancelStocktake(s.session_id, this.employee.id);
+      } catch (e) { this.showError(e.message); }
+      await this.guard(() => this.reload());
+      await this.guard(() => window.PosAuthOps.refresh());
+    },
     async removeItem(it) {
       if (!this.canEditCounted) { this.showError("盤點單不是進行中，無法移除品項"); return; }
       await this.guard(async () => {

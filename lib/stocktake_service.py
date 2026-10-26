@@ -13,6 +13,8 @@ def _validate(action, payload):
         "stocktake.detail":{"session_id"}, "stocktake.scan":{"session_id","variant_id","qty"},
         "stocktake.set_counted":{"session_id","variant_id","counted_qty"},
         "stocktake.remove_item":{"session_id","variant_id"},
+        "stocktake.set_note":{"session_id","variant_id","note"},
+        "stocktake.cancel":{"session_id","employee"},
         "stocktake.close":{"session_id"}, "stocktake.withdraw":{"session_id"},
         "stocktake.return":{"session_id","variant_ids"},
         "stocktake.approve":{"session_id"}, "stocktake.pending_count":set()}[action]
@@ -29,6 +31,11 @@ def _validate(action, payload):
             raise ValidationError("variant_ids 必須是非空整數陣列")
     if action == "stocktake.history":
         date_range(payload)
+    if action == "stocktake.set_note":
+        if "note" not in payload: raise ValidationError("note 為必填")
+        if payload["note"] is not None and not isinstance(payload["note"], str): raise ValidationError("note 必須是字串")
+    if action == "stocktake.cancel":
+        require_employee(payload.get("employee"))
     if action == "stocktake.create":
         require_employee(payload.get("employee"))
         if payload.get("note") is not None and not isinstance(payload["note"], str): raise ValidationError("note 必須是字串")
@@ -68,8 +75,8 @@ class StocktakeService:
     # 盤點頁只列最近 10 筆;更早的到紀錄查詢頁看
     def list(self): return [dict(r) for r in self.repo.all("SELECT * FROM StocktakeSession ORDER BY session_id DESC LIMIT 10")]
     def history(self, filters):
-        suffix, args = date_sql(filters, "approved_at")
-        sessions = self.repo.all("SELECT * FROM StocktakeSession WHERE status='closed'" + suffix +
+        suffix, args = date_sql(filters, "COALESCE(approved_at,cancelled_at)")
+        sessions = self.repo.all("SELECT * FROM StocktakeSession WHERE status IN ('closed','cancelled')" + suffix +
                                  " ORDER BY session_id DESC", args)
         out = []
         for session in sessions:
@@ -104,12 +111,29 @@ class StocktakeService:
         if self.repo.execute("DELETE FROM StocktakeItem WHERE session_id=? AND variant_id=?", (sid, vid)).rowcount == 0:
             raise NotFoundError("找不到盤點品項")
         return {"ok": True}
+    def set_note(self, sid, vid, note):
+        self.repo.require_open(sid)
+        note = (note or "").strip() or None
+        if self.repo.execute("UPDATE StocktakeItem SET note=? WHERE session_id=? AND variant_id=?",
+                             (note, sid, vid)).rowcount == 0:
+            raise NotFoundError("找不到盤點品項")
+        return {"ok": True}
+    def cancel(self, sid, employee, is_admin):
+        # 作廢保留紀錄、不動庫存;待核准要管理者才能作廢,已核准不可作廢
+        session = self.repo.session(sid)
+        if session is None: raise NotFoundError("找不到盤點作業")
+        if session["status"] == "pending" and not is_admin: raise ForbiddenError()
+        if self.repo.execute("UPDATE StocktakeSession SET status='cancelled',cancelled_at=datetime('now','localtime'),"
+                             "cancelled_by=? WHERE session_id=? AND status IN ('open','pending')",
+                             (employee, sid)).rowcount == 0:
+            raise ConflictError("盤點單已結案或已作廢，無法作廢")
+        return {"ok": True}
     def detail(self,sid):
         session=self.repo.session(sid)
         if session is None: raise NotFoundError("找不到盤點作業")
         rows=self.repo.all("SELECT si.*,p.name FROM StocktakeItem si JOIN Variant v ON si.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id WHERE si.session_id=?",(sid,))
         vids=[r["variant_id"] for r in rows]; attrs=product_data.attrs_by_variant(self.repo.connection,vids); disp=product_data.display_attrs(self.repo.connection,vids)
-        items=[{"variant_id":r["variant_id"],"name":r["name"],"attributes":attrs.get(r["variant_id"],{}),"attr_display":disp.get(r["variant_id"],""),"system_qty":r["system_qty"],"counted_qty":r["counted_qty"],"diff":r["counted_qty"]-r["system_qty"],"needs_recount":r["needs_recount"]} for r in rows]
+        items=[{"variant_id":r["variant_id"],"name":r["name"],"attributes":attrs.get(r["variant_id"],{}),"attr_display":disp.get(r["variant_id"],""),"system_qty":r["system_qty"],"counted_qty":r["counted_qty"],"diff":r["counted_qty"]-r["system_qty"],"needs_recount":r["needs_recount"],"note":r["note"]} for r in rows]
         return {**dict(session),"items":items}
     def close(self,sid):
         self.repo.require_open(sid)
@@ -146,7 +170,7 @@ class StocktakeService:
         return {"count": self.repo.one("SELECT COUNT(*) AS n FROM StocktakeSession WHERE status='pending'")["n"]}
 
 class StocktakeFacade(BaseFacade):
-    ACTIONS={"stocktake.create","stocktake.list","stocktake.history","stocktake.detail","stocktake.scan","stocktake.set_counted","stocktake.remove_item","stocktake.close","stocktake.withdraw","stocktake.return","stocktake.approve","stocktake.pending_count"}
+    ACTIONS={"stocktake.create","stocktake.list","stocktake.history","stocktake.detail","stocktake.scan","stocktake.set_counted","stocktake.remove_item","stocktake.set_note","stocktake.cancel","stocktake.close","stocktake.withdraw","stocktake.return","stocktake.approve","stocktake.pending_count"}
     ERROR_MESSAGE="不支援的盤點操作"
     def __init__(self, db_path, session=None):
         super().__init__(db_path)
@@ -170,6 +194,9 @@ class StocktakeFacade(BaseFacade):
         if action=="stocktake.scan": return s.scan(payload["session_id"],payload["variant_id"],payload["qty"])
         if action=="stocktake.set_counted": return s.set_counted(payload["session_id"],payload["variant_id"],payload["counted_qty"])
         if action=="stocktake.remove_item": return s.remove_item(payload["session_id"],payload["variant_id"])
+        if action=="stocktake.set_note": return s.set_note(payload["session_id"],payload["variant_id"],payload["note"])
+        if action=="stocktake.cancel":
+            return s.cancel(payload["session_id"],payload["employee"],self.session is not None and self.session.is_admin())
         if action=="stocktake.close": return s.close(payload["session_id"])
         if action=="stocktake.withdraw": return s.withdraw(payload["session_id"])
         if action=="stocktake.return":

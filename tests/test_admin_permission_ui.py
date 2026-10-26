@@ -114,6 +114,7 @@ context.Date={now:()=>now};
 API.authTouch=async()=>{touches++;return{is_admin:false};};
 API.authStatus=async()=>{statuses++;return{is_admin:false};};
 API.pendingStocktakeCount=async()=>{pending++;return{count:9};};
+API.pendingReturnCount=async()=>({count:4});
 load("static/js/auth.js");
 assert.equal(statuses,0);assert.equal(pending,0);
 events.pointerdown();events.keydown();assert.equal(touches,1);
@@ -122,8 +123,9 @@ now=60000;events.keydown();assert.equal(touches,2);
 await context.window.PosAuthOps.refresh();assert.equal(pending,0);
 API.authStatus=async()=>({is_admin:true});await context.window.PosAuthOps.refresh();
 assert.equal(context.window.PosAuth.pendingStocktakes,9);assert.equal(pending,1);
+assert.equal(context.window.PosAuth.pendingReturns,4);
 API.authStatus=async()=>({is_admin:false});await context.window.PosAuthOps.refresh();
-assert.equal(context.window.PosAuth.pendingStocktakes,0);
+assert.equal(context.window.PosAuth.pendingStocktakes,0);assert.equal(context.window.PosAuth.pendingReturns,0);
 ''')
 
     def test_forbidden_response_refreshes_auth_and_preserves_error(self):

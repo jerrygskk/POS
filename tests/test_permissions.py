@@ -20,6 +20,7 @@ EXPECTED_ADMIN_ACTIONS = frozenset({
     "variants.create", "variants.update", "variants.set_models", "variants.update_details",
     "variants.update_editor", "variants.delete", "variants.batch_create", "variants.activate", "variants.issues",
     "sales.export", "sales.export_save", "stocktake.approve", "stocktake.return", "stocktake.pending_count",
+    "returns.set_disposition", "returns.approve", "returns.pending_count",
     "desktop.child_window.open",
 })
 

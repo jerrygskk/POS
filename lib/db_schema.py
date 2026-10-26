@@ -114,9 +114,9 @@ CREATE TABLE IF NOT EXISTS CategoryField(       -- 種類模板:承載排序、�
 CREATE TABLE IF NOT EXISTS StockMovement(
   move_id INTEGER PRIMARY KEY AUTOINCREMENT,
   variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
-  qty INTEGER NOT NULL,           -- 進貨+/銷售-/盤點±
-  kind TEXT NOT NULL CHECK(kind IN ('purchase','sale','adjust')),
-  ref_id INTEGER,                 -- sale_id 或 session_id
+  qty INTEGER NOT NULL,           -- 進貨+/銷售-/盤點±/退貨加回+
+  kind TEXT NOT NULL CHECK(kind IN ('purchase','sale','adjust','return')),
+  ref_id INTEGER,                 -- sale_id、session_id 或 return_id
   note TEXT,
   employee INTEGER CHECK(employee BETWEEN 1 AND 6),  -- 進貨操作員工代號(銷售看 Sale、盤點看 StocktakeSession)
   ts TEXT NOT NULL DEFAULT (datetime('now','localtime'))
@@ -146,8 +146,10 @@ CREATE TABLE IF NOT EXISTS StocktakeSession(
   ended_at TEXT,
   submitted_at TEXT,
   approved_at TEXT,
+  cancelled_at TEXT,
   employee INTEGER CHECK(employee BETWEEN 1 AND 6),  -- 盤點員工代號
-  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','pending','closed')),
+  cancelled_by INTEGER CHECK(cancelled_by BETWEEN 1 AND 6),  -- 作廢員工代號
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','pending','closed','cancelled')),
   note TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_stocktake_one_active
@@ -159,7 +161,30 @@ CREATE TABLE IF NOT EXISTS StocktakeItem(
   system_qty INTEGER NOT NULL,    -- 首次掃描或最近一次抽回時的庫存快照
   counted_qty INTEGER NOT NULL DEFAULT 0,
   needs_recount INTEGER NOT NULL DEFAULT 0 CHECK(needs_recount IN (0,1)),
+  note TEXT,                      -- 差異原因(選填)
   UNIQUE(session_id, variant_id)
+);
+CREATE TABLE IF NOT EXISTS ReturnSession(      -- 退貨單:送審後由管理者決定各品項處理方式
+  return_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  submitted_at TEXT,
+  approved_at TEXT,
+  cancelled_at TEXT,
+  employee INTEGER CHECK(employee BETWEEN 1 AND 6),
+  cancelled_by INTEGER CHECK(cancelled_by BETWEEN 1 AND 6),
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','pending','closed','cancelled')),
+  refund_amount INTEGER                         -- 退款金額:預留,尚未使用
+);
+CREATE TABLE IF NOT EXISTS ReturnItem(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  return_id INTEGER NOT NULL REFERENCES ReturnSession(return_id),
+  variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
+  qty INTEGER NOT NULL CHECK(qty > 0),
+  sale_id INTEGER REFERENCES Sale(sale_id),     -- 原銷售單(選填)
+  reason TEXT,
+  disposition TEXT NOT NULL DEFAULT 'restock'
+    CHECK(disposition IN ('restock','discard','reject')),  -- 加回庫存／退貨不入庫／不同意
+  UNIQUE(return_id, variant_id)
 );
 CREATE TABLE IF NOT EXISTS Setting(
   key TEXT PRIMARY KEY,
@@ -493,6 +518,45 @@ def _mig_device_type(conn):
                      "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name='PhoneModel')", (previous[0],))
 
 
+def _mig_returns(conn):
+    """退貨:庫存流水加 return 種類;盤點加作廢狀態與品項備註。
+
+    退貨兩張新表由 executescript(SCHEMA) 建好;這裡只重建 CHECK 改變的三張表。
+    盤點子表先暫存拆掉再重建父表(外鍵全程開啟,見 _mig_stocktake_approval)。
+    """
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' "
+                       "AND name='StockMovement'").fetchone()[0]
+    if "'return'" in sql:
+        return
+    if not conn.in_transaction:
+        conn.execute("BEGIN")
+    sequences = dict(conn.execute("SELECT name,seq FROM sqlite_sequence WHERE name IN "
+                                  "('StockMovement','StocktakeSession','StocktakeItem')"))
+    conn.execute("CREATE TABLE StockMovement_mig(" + _schema_ddl("StockMovement"))
+    conn.execute("INSERT INTO StockMovement_mig(move_id,variant_id,qty,kind,ref_id,note,employee,ts) "
+                 "SELECT move_id,variant_id,qty,kind,ref_id,note,employee,ts FROM StockMovement")
+    conn.execute("DROP TABLE StockMovement")
+    conn.execute("ALTER TABLE StockMovement_mig RENAME TO StockMovement")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_move_variant ON StockMovement(variant_id)")
+    conn.execute("CREATE TABLE StocktakeItem_mig AS SELECT * FROM StocktakeItem")
+    conn.execute("DROP TABLE StocktakeItem")
+    conn.execute("CREATE TABLE StocktakeSession_mig(" + _schema_ddl("StocktakeSession"))
+    conn.execute("INSERT INTO StocktakeSession_mig(session_id,started_at,ended_at,submitted_at,approved_at,employee,status,note) "
+                 "SELECT session_id,started_at,ended_at,submitted_at,approved_at,employee,status,note FROM StocktakeSession")
+    conn.execute("DROP TABLE StocktakeSession")
+    conn.execute("ALTER TABLE StocktakeSession_mig RENAME TO StocktakeSession")
+    conn.execute("CREATE TABLE StocktakeItem(" + _schema_ddl("StocktakeItem"))
+    conn.execute("INSERT INTO StocktakeItem(id,session_id,variant_id,system_qty,counted_qty,needs_recount) "
+                 "SELECT id,session_id,variant_id,system_qty,counted_qty,needs_recount FROM StocktakeItem_mig")
+    conn.execute("DROP TABLE StocktakeItem_mig")
+    for name, previous in sequences.items():
+        conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name=?", (previous, name))
+        conn.execute("INSERT INTO sqlite_sequence(name,seq) SELECT ?,? "
+                     "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name=?)", (name, previous, name))
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stocktake_one_active "
+                 "ON StocktakeSession((status IN ('open','pending'))) WHERE status IN ('open','pending')")
+
+
 def _schema_ddl(table):
     """取現行 SCHEMA 裡該表括號內的定義(含結尾右括號),避免 migration 另抄一份。"""
     return SCHEMA.split(f"CREATE TABLE IF NOT EXISTS {table}(", 1)[1].split(";", 1)[0]
@@ -517,6 +581,7 @@ MIGRATIONS = [
     (BASE_VERSION + 16, _mig_shared_factory_barcode),
     (BASE_VERSION + 17, _mig_stocktake_approval),
     (BASE_VERSION + 18, _mig_device_type),
+    (BASE_VERSION + 19, _mig_returns),
 ]
 
 # 最新版號 = 初版 + 遷移筆數;全新 DB 建 SCHEMA 即為此版
