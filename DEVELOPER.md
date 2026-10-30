@@ -37,6 +37,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `lib/legacy_migrations.py` | 凍結的 v1–v13 migration DDL；僅供既有資料庫按版本升級，不作為現行 schema 定義 |
 | `lib/db_seed.py` | 付款方式與初始管理者密碼種子、新種類預設欄清單(規格欄由各種類自建,種子不建欄) |
 | `lib/product_rules.py` | 共用商品規則(`FIELD_TYPES`、欄位型別驗證、自取碼取號) |
+| `lib/price_fill.py` | 補售價子視窗的清單查詢與批次寫回(§2「補售價」) |
 | `lib/variant_batch_service.py` | 子產品批次建立與唯讀預檢（共用 `_validate_batch`，`dry=True` 不寫入任何資料） |
 | `lib/backup.py` | GFS 備份(日7/週4/月12)；資料庫升級格式前另備一份(保留 5 份) |
 | `lib/label_printer.py` | NIIMBOT B1 協定與序列埠溝通(自動尋埠、送圖、錯誤轉譯) |
@@ -47,6 +48,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 | `static/variant_batch.html` | 新增款式子視窗頁面（`variant_batch_window.js` 外殼＋組合輸入區與批次工作表樣板） |
 | `static/js/variant_batch_logic.js` | 新增款式的純邏輯（組合展開、算式、條碼展開規則、欄寬計算、預檢結果分流）；不碰 API，可單獨以 Node 測試 |
 | `static/field_editor.html` | 規格選項子視窗頁面（`field_editor.js`；設定頁自訂規格列的「✎ 選項」由此開窗，只管選項清單與建檔預設帶入值） |
+| `static/price_fill.html` | 補售價子視窗頁面（`price_fill.js`；設定頁「工具 → 補售價」開窗） |
 | `static/js/pos_shared.js` | 主視窗與子視窗共用的全域 mixin（`guard`／`guardReload`／`attrText`）與掃描解析 `PosScan`（同一條碼對應多個子產品時跳選擇品項） |
 | `static/js/optpicker.js` | 規格值候選選取器 `opt-picker`／`tag-selector`（前排常用值＋搜尋＋當場新增；檔頭寫明三種輸入公版的分工） |
 | `static/js/combobox.js` | 可搜尋下拉 `combo-box`（從既有主檔挑一筆，可新增未收錄的值） |
@@ -191,7 +193,7 @@ schema v20 重建 `StockMovement`（`kind` 加 `return`）與盤點父子表（�
 售價、條碼這些內容在單一網頁對話框裡會逼出巢狀彈窗與捲動層層相疊,違反 UI 從簡;
 子視窗可獨立調整大小、由作業系統管理焦點。
 
-**頁面白名單**:`CHILD_PAGES` 決定可開啟的頁面(`variant_editor`／`variant_batch`／`field_editor`)
+**頁面白名單**:`CHILD_PAGES` 決定可開啟的頁面(`variant_editor`／`variant_batch`／`field_editor`／`price_fill`)
 與各自標題、尺寸。前端只送 key,**不送檔名**,避免任意本機檔被載入。
 
 **尺寸與位置**:`CHILD_PAGES` 的預設尺寸開窗前會被 `fit_size()` 夾進工作區
@@ -558,6 +560,22 @@ python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_s
 `pos_standard.db`,已列入 `.gitignore`)→ 自行把舊 `pos.db` 改名或刪除,再把新檔改名為 `pos.db`。
 工具刻意不直接覆蓋 `pos.db`。
 
+### 補售價(子視窗 `price_fill`)
+
+設定頁左欄「工具 → 補售價」開子視窗,列出啟用中子產品,逐筆或批次填售價。原為 `docs/`
+下的 tkinter 小工具,2026-10-30 併入主程式:隨 `POS.exe` 一起打包、上傳、更新,不另出 exe。
+
+- **後端**:`lib/price_fill.py`,經 `ProductFacade` 的 `variants.price_list`／`variants.price_save`,
+  兩者都在 `ADMIN_ACTIONS`。存檔整批同一交易,任一筆不合格(非正整數、重複、子產品或商品已停用)
+  整批不寫;逐筆走 `ProductService.update_variant`,待處理筆重驗與一般改價一致。
+  不另做存檔前備份(與其他改價入口一致,靠每週自動備份)。
+- **選列**:比照桌面程式,單擊單選、Ctrl 加選／取消、Shift 從上次點的列連選(不用勾選框,維護者
+  要求)。「填入選取列」只套用目前畫面上看得到的已選列。
+- **未儲存修改**:售價框主色粗字(只用公版色票,不上整列底色),按「儲存」才寫回;「關閉」鈕與 Esc 會確認放棄,視窗 X 與其他子視窗相同直接放棄。
+- **前三欄截斷**:種類、廠牌、品名太長直接截斷(不換行),完整文字看滑鼠提示;規格、型號、條碼照常換行。
+- **小解析度**:預設 1220×720,在 1280×750 工作區夾成 1220×670;最小 940×560 時工具列仍一排,
+  由關鍵字欄讓位,售價框、按鈕與售價欄固定寬。
+
 ### 線上更新
 
 打包後的 `POS.exe` 開啟時查 GitHub Releases（`repos/jerrygskk/POS/releases/latest`），有新版就詢問，
@@ -615,6 +633,11 @@ python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_s
   文字選取反白(`#8fa8c8`)與按鈕 hover/pressed 灰階(`#e5e5ea`／`#d1d1d6`)取自維護者
   另一個專案已調校過的彈窗公版(`PoliceDocSys/lib/theme.py`);該專案的 checkbox 色塊
   刻意不採用(勾選狀態辨識度不足),本專案維持自己的 checkbox 樣式。
+- **小解析度標準 1280×750**(2026-10-30 維護者規定,沿用 Lottery539):實際筆電 1920×1200 縮放 150%,
+  扣掉工作列可用約 1280×750(含標題列)。主視窗、子視窗、`docs/` 下的小工具都以這個大小放得下為準。
+  **檢查方式**:用資料庫副本開視窗,移到 (0, 0)、大小設為 1278×720,逐一打開受影響的畫面,確認
+  外框沒超出、按鈕與輸入框沒被擠到比需要的寬度小、表格下方內容沒被推出畫面。以量測(DOM 尺寸／
+  元件實際寬度對需要寬度)為證據,不要只看大螢幕。
 - ⚠️ **勿在 v-if/v-else 元素上掛動態 `:key`**:與 prod 版 Vue(`vue.global.prod.js`)的 `stringifyStatic` 靜態節點快取衝突,key 變動重建區塊後快取 vnode 的 DOM 參照被清空,之後所有畫面更新拋 TypeError、整個 app 卡死;dev 版 Vue 測不出來,務必以 prod 版驗證(v0.1.0 後設定頁曾因此崩潰)。內容全走資料綁定即可,不需 key 強制重建。
 
 ## 3. 測試

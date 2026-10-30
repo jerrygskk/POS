@@ -344,6 +344,10 @@ window.PosPages["page-settings"] = {
         context: { category_id: this.selCatId, field_id: f.field_id },
       });
     },
+    // 補售價:獨立子視窗,不切換右側內容
+    async openPriceFill() {
+      await this.openChildWindow({ page: "price_fill", title: "補售價", context: {} });
+    },
     async onChildWindowClosed(event) {
       const saved = !!(event && event.detail && event.detail.saved);
       if (!saved || this.selCatId == null) return;

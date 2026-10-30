@@ -26,7 +26,7 @@ const API = {
       "options.list", "options.create", "options.update", "options.delete", "options.models", "options.set_models", "options.cleanup",
       "products.create", "products.list", "products.update", "products.delete", "catalog.list",
       "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.update_editor", "variants.delete",
-      "variants.batch_create", "variants.batch_precheck", "variants.field_usage", "variants.model_usage", "variants.activate", "variants.issues",
+      "variants.batch_create", "variants.batch_precheck", "variants.field_usage", "variants.model_usage", "variants.activate", "variants.issues", "variants.price_list", "variants.price_save",
       "barcodes.scan", "stock.receive", "stock.detail", "stock.receipts",
       "stocktake.create", "stocktake.list", "stocktake.history", "stocktake.detail", "stocktake.scan", "stocktake.set_counted", "stocktake.remove_item", "stocktake.close", "stocktake.withdraw", "stocktake.return", "stocktake.approve", "stocktake.pending_count", "stocktake.set_note", "stocktake.cancel",
       "returns.create", "returns.list", "returns.history", "returns.detail", "returns.scan", "returns.set_qty", "returns.set_sale", "returns.set_reason", "returns.remove_item", "returns.close", "returns.withdraw", "returns.set_disposition", "returns.approve", "returns.cancel", "returns.pending_count",

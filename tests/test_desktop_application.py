@@ -78,6 +78,17 @@ class DesktopApplicationTest(unittest.TestCase):
             "batch", encoding="utf-8")
         self.paths = RuntimePaths.from_root(self.root)
 
+    def test_main_window_fits_small_laptop_work_area(self):
+        # 1920×1200 縮放 150%:工作區約 1280×750,768 高會被切
+        webview = FakeWebview()
+        application = DesktopApplication(
+            self.paths, bridge=DesktopBridge(facade=Mock()), webview_module=webview)
+        with patch("lib.desktop_application.screen_work_size", return_value=(1280, 750)):
+            application.run()
+        _, kwargs = webview.create_window_calls[0]
+        self.assertEqual((kwargs["width"], kwargs["height"]), (1124, 670))
+        self.assertLessEqual(kwargs["y"] + kwargs["height"], 750)
+
     def test_creates_one_local_window_with_bridge_and_starts_webview2(self):
         webview = FakeWebview()
         bridge = DesktopBridge(facade=Mock())
@@ -87,7 +98,8 @@ class DesktopApplicationTest(unittest.TestCase):
             webview_module=webview,
         )
 
-        window = application.run()
+        with patch("lib.desktop_application.screen_work_size", return_value=(1920, 1040)):
+            window = application.run()
 
         self.assertIs(window, webview.window)
         self.assertEqual(len(webview.create_window_calls), 1)
@@ -96,6 +108,7 @@ class DesktopApplicationTest(unittest.TestCase):
         self.assertEqual(args[1], self.paths.static_dir.joinpath("index.html").as_uri())
         self.assertIs(kwargs["js_api"], bridge)
         self.assertEqual((kwargs["width"], kwargs["height"]), (1124, 768))
+        self.assertEqual(kwargs["min_size"], (940, 600))
         self.assertEqual(kwargs.get("x", 0), 0)   # 主視窗靠左
         self.assertEqual(webview.start_calls, [((), {"gui": "edgechromium"})])
 

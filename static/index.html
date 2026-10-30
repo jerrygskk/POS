@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=246">
+<link rel="stylesheet" href="css/pos.css?v=251">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=246" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=251" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -528,6 +528,10 @@
            @click="selectSection('password')">
         <span class="cat-name">管理者密碼</span>
       </div>
+      <div class="cat-list-title cat-list-group">工具</div>
+      <div class="cat-item" @click="openPriceFill">
+        <span class="cat-name">補售價</span>
+      </div>
     </aside>
 
     <section class="cat-detail" v-if="section==='category' && selectedCat">
@@ -826,27 +830,27 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=246"></script>
-<script src="js/api.js?v=246"></script>
-<script src="js/confirm.js?v=246"></script>
-<script src="js/auth.js?v=246"></script>
-<script src="js/pos_shared.js?v=246"></script>
-<script src="js/catalogfields.js?v=246"></script>
-<script src="js/checkout.js?v=246"></script>
-<script src="js/receive.js?v=246"></script>
-<script src="js/stocktake.js?v=246"></script>
-<script src="js/returns.js?v=246"></script>
-<script src="js/records.js?v=246"></script>
-<script src="js/catalog.js?v=246"></script>
-<script src="js/sortable.js?v=246"></script>
-<script src="js/combobox.js?v=246"></script>
-<script src="js/optpicker.js?v=246"></script>
-<script src="js/modelpicker.js?v=246"></script>
-<script src="js/employeepicker.js?v=246"></script>
-<script src="js/attrfields.js?v=246"></script>
-<script src="js/settings.js?v=246"></script>
-<script src="js/labels.js?v=246"></script>
-<script src="js/app_update.js?v=246"></script>
-<script src="js/app.js?v=246"></script>
+<script src="js/vue.global.prod.js?v=251"></script>
+<script src="js/api.js?v=251"></script>
+<script src="js/confirm.js?v=251"></script>
+<script src="js/auth.js?v=251"></script>
+<script src="js/pos_shared.js?v=251"></script>
+<script src="js/catalogfields.js?v=251"></script>
+<script src="js/checkout.js?v=251"></script>
+<script src="js/receive.js?v=251"></script>
+<script src="js/stocktake.js?v=251"></script>
+<script src="js/returns.js?v=251"></script>
+<script src="js/records.js?v=251"></script>
+<script src="js/catalog.js?v=251"></script>
+<script src="js/sortable.js?v=251"></script>
+<script src="js/combobox.js?v=251"></script>
+<script src="js/optpicker.js?v=251"></script>
+<script src="js/modelpicker.js?v=251"></script>
+<script src="js/employeepicker.js?v=251"></script>
+<script src="js/attrfields.js?v=251"></script>
+<script src="js/settings.js?v=251"></script>
+<script src="js/labels.js?v=251"></script>
+<script src="js/app_update.js?v=251"></script>
+<script src="js/app.js?v=251"></script>
 </body>
 </html>

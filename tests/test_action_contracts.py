@@ -147,6 +147,8 @@ ACTION_CONTRACTS = {
     "variants.model_usage": schema([I("category_id", required=True), I("brand_id", nullable=True), I("product_id", nullable=True)], notes=("Desktop-only action.", "型號候選前排範圍(產品→廠牌→無);其餘型號收進「更多…」。")),
     "variants.activate": schema([I("id", required=True)], notes=("Desktop-only action.",)),
     "variants.issues": schema([], notes=("Desktop-only action.",)),
+    "variants.price_list": schema([], notes=("Desktop-only action.",)),
+    "variants.price_save": schema([field("changes", "list[PriceChange]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("changes[].variant_id", required=True), I("changes[].price", required=True, constraint="gt=0")], notes=("Desktop-only action.", "整批同一交易;同一子產品不得重複。")),
     "barcodes.scan": schema([S("code", required=True, blank="accept")]),
 
     "stock.receive": schema([I("employee", required=True, constraint="1..6"), field("items", "list[ReceiveItem]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), I("items[].qty", required=True, constraint=">0")]),
@@ -211,7 +213,7 @@ SETTINGS_CONTRACT_ACTIONS = {
 }
 PRODUCT_CONTRACT_ACTIONS = {
     "products.create","products.list","products.update","products.delete","catalog.list",
-    "variants.create","variants.update","variants.set_models","variants.update_details","variants.update_editor","variants.delete","variants.batch_create","variants.batch_precheck","variants.field_usage","variants.model_usage","variants.activate","variants.issues",
+    "variants.create","variants.update","variants.set_models","variants.update_details","variants.update_editor","variants.delete","variants.batch_create","variants.batch_precheck","variants.field_usage","variants.model_usage","variants.activate","variants.issues","variants.price_list","variants.price_save",
     "barcodes.scan",
 }
 TARGET_BY_ACTION = {
@@ -524,6 +526,7 @@ class ActionContractTests(FacadeTestCase):
             "products.create":{"name":"新增商品","category_id":self.category_id,"variants":[{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"new-code","source":"store"}]}]}, "products.list":{}, "products.update":{"id":self.product_id,"fields":{}}, "products.delete":{"id":self.delete_product_id}, "catalog.list":{},
             "variants.create":{"product_id":self.product_id,"fields":{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"variant-new","source":"store"}]}}, "variants.update":{"id":self.variant_id,"fields":{}}, "variants.set_models":{"id":self.variant_id,"model_ids":[]}, "variants.update_details":{"id":self.variant_id,"fields":{},"model_ids":[]}, "variants.update_editor":{"id":self.variant_id,"fields":{},"model_ids":[],"deleted_barcodes":[],"factory_barcodes":[],"store_barcode_count":0}, "variants.delete":{"id":self.delete_variant_id}, "variants.batch_create":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"batch-new","source":"store"}]}]}, "variants.field_usage":{"category_id":self.category_id,"field_id":self.field_id}, "variants.model_usage":{"category_id":self.category_id}, "variants.activate":{"id":self.variant_id}, "variants.issues":{},
             "variants.batch_precheck":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"precheck-new","source":"store"}]}]},
+            "variants.price_list":{}, "variants.price_save":{"changes":[{"variant_id":self.variant_id,"price":120}]},
             "barcodes.scan":{"code":"contract-1"}, "stock.receive":{"employee":1,"items":[{"variant_id":self.variant_id,"qty":1}]}, "stock.detail":{"variant_id":self.variant_id}, "stock.receipts":{}, "stocktake.history":{},
             "stocktake.create":{"employee":1}, "stocktake.list":{}, "stocktake.detail":{"session_id":self.session_id}, "stocktake.scan":{"session_id":self.session_id,"variant_id":self.variant_id,"qty":1}, "stocktake.set_counted":{"session_id":self.session_id,"variant_id":self.variant_id,"counted_qty":1}, "stocktake.remove_item":{"session_id":self.session_id,"variant_id":self.variant_id}, "stocktake.close":{"session_id":self.session_id},
             "stocktake.withdraw":{"session_id":self.session_id}, "stocktake.return":{"session_id":self.session_id,"variant_ids":[self.variant_id]}, "stocktake.approve":{"session_id":self.session_id}, "stocktake.pending_count":{},
@@ -560,7 +563,7 @@ class ActionContractTests(FacadeTestCase):
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
                              self.facade.stocktake.ACTIONS, self.facade.returns.ACTIONS,
                              self.facade.printing.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 99)
+        self.assertEqual(len(ACTION_CONTRACTS), 101)
         self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS | AUTH_ACTIONS | DESKTOP_UPDATE_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})

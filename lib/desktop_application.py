@@ -13,10 +13,11 @@ from lib.stocktake_service import StocktakeFacade
 from lib.returns_service import ReturnsFacade
 from lib.printing_service import PrintingFacade
 from lib.application_errors import ValidationError
-from lib.child_window import (ChildWindowCoordinator, fit_position,
+from lib.child_window import (ChildWindowCoordinator, fit_position, fit_size,
                               screen_work_size)
 
 MAIN_WINDOW_SIZE = (1124, 768)
+MAIN_MIN_SIZE = (940, 600)
 
 
 class DesktopFacade:
@@ -110,14 +111,18 @@ class DesktopApplication:
 
         webview = self._webview()
         # 主視窗:靠左、垂直與子視窗同樣落在中央偏上(量不到工作區則交給系統預設)
-        position = fit_position(MAIN_WINDOW_SIZE, screen_work_size())
+        # 尺寸同子視窗夾進工作區(1280×750 小筆電上 768 高會被工作列切掉)
+        work_size = screen_work_size()
+        width, height = fit_size(MAIN_WINDOW_SIZE, MAIN_MIN_SIZE, work_size)
+        position = fit_position((width, height), work_size)
         extra = {"x": 0, "y": position[1]} if position is not None else {}
         window = webview.create_window(
             "POS",
             entry_point.resolve().as_uri(),
             js_api=self.bridge,
-            width=MAIN_WINDOW_SIZE[0],
-            height=MAIN_WINDOW_SIZE[1],
+            width=width,
+            height=height,
+            min_size=MAIN_MIN_SIZE,
             **extra,
         )
         self.bridge._set_window(window, getattr(webview, "SAVE_DIALOG", "save"))

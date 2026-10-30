@@ -21,6 +21,13 @@ CHILD_PAGES = {
         "size": (1220, 820),
         "min_size": (940, 560),
     },
+    "price_fill": {
+        "file": "price_fill.html",
+        "title": "補售價",
+        # 小解析度 1280×750 夾進工作區後約 1220×670 仍放得下
+        "size": (1220, 720),
+        "min_size": (940, 560),
+    },
     "field_editor": {
         "file": "field_editor.html",
         "title": "規格設定",

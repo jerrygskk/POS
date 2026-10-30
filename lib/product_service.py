@@ -7,7 +7,7 @@ from lib.normalize import normalize_display, normalize_key
 from lib.product_rules import (allow_keys as _allow, is_int as _is_int,
                                has_store_barcode_prefix, next_store_barcode,
                                parse_store_barcode, ensure_store_codes_for_shared)
-from lib import product_data
+from lib import price_fill, product_data
 
 
 def _update_by_id(conn, table, id_col, item_id, fields):
@@ -72,8 +72,12 @@ def _validate_draft(value):
 
 def _validate_action_payload(action, payload):
     id_actions={"products.update","products.delete","variants.update","variants.set_models","variants.update_details","variants.delete","variants.activate"}
-    if action=="variants.issues":
+    if action in ("variants.issues","variants.price_list"):
         _allow(payload,set())
+        return
+    if action=="variants.price_save":
+        _allow(payload,{"changes"})
+        price_fill.validate_changes(payload.get("changes"))
         return
     if action in ("variants.batch_create", "variants.batch_precheck"):
         _allow(payload,{"product_id","drafts"})
@@ -448,7 +452,7 @@ class ProductFacade(BaseFacade):
     ACTIONS = {"products.create", "products.list", "catalog.list", "products.update", "products.delete",
                "variants.create", "variants.update", "variants.set_models", "variants.update_details", "variants.update_editor", "variants.delete",
                "variants.batch_create", "variants.batch_precheck", "variants.field_usage", "variants.model_usage", "variants.activate", "variants.issues",
-               "barcodes.scan"}
+               "variants.price_list", "variants.price_save", "barcodes.scan"}
 
     ERROR_MESSAGE = "不支援的商品操作"
 
@@ -474,6 +478,8 @@ class ProductFacade(BaseFacade):
         if action == "variants.delete": return s.delete_variant(payload["id"])
         if action == "variants.activate": return s.activate_variant(payload["id"])
         if action == "variants.issues": return s.list_issues()
+        if action == "variants.price_list": return price_fill.list_price_rows(connection)
+        if action == "variants.price_save": return price_fill.save_prices(s, connection, payload["changes"])
         if action == "variants.batch_create":
             from lib.variant_batch_service import VariantBatchService
             return VariantBatchService(connection).batch_create(payload)

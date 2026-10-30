@@ -27,7 +27,7 @@
 }
 /* ⚠️ 每個子視窗的根元素都要列進來:漏一個,該視窗內容區就沒有高度上限,
    內容一長會往視窗外長 —— 捲軸不出現、底部按鈕列被切掉。 */
-html, body, #variant-editor, #variant-batch-window, #field-editor {
+html, body, #variant-editor, #variant-batch-window, #field-editor, #price-fill {
   width: 100%; height: 100%; overflow: hidden;
 }
 body { background: #ffffff; color: #1c1c1e; }
@@ -187,6 +187,38 @@ body { background: #ffffff; color: #1c1c1e; }
   box-shadow: 0 16px 45px rgba(0, 0, 0, 0.28); overflow: hidden; }
 .dialog-panel .dialog-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .dialog-panel .dialog-content h1 { font-size: 16pt; }
+
+/* ── 補售價視窗:篩選一排、表頭釘住、售價欄固定寬 ── */
+.pf-toolbar { flex: 0 0 auto; display: flex; align-items: center; gap: 12px;
+  padding: 12px 20px; border-bottom: 1px solid #e5e5ea; white-space: nowrap; }
+.pf-toolbar > label { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pf-toolbar select { width: 9em; }
+.pf-keyword { flex: 1 1 14em; }
+.pf-keyword input { min-width: 6em; }
+.pf-only-empty { margin-top: 0; flex: 0 0 auto; }
+.pf-spacer { flex: 0 1 12px; }
+/* 售價框與按鈕不跟著縮,窄視窗由關鍵字欄讓位 */
+.pf-batch, .pf-toolbar > button { flex: 0 0 auto; }
+.dialog-shell .pf-batch input { width: 6em; text-align: right; }
+.pf-table { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.pf-table .dialog-table { table-layout: fixed; }
+/* 全域 * 已設 14pt,直接套在格子上,表格的 12pt 要指定到格子與輸入框才生效 */
+.pf-table th, .pf-table td, .pf-table td * { font-size: 12pt; }
+/* 上下內距歸零讓列貼緊文字;列高由售價框決定,框本身也不留上下內距 */
+.pf-table .dialog-table td { padding: 0 10px; vertical-align: middle; }
+/* 前三欄(種類／廠牌／品名)只是辨識用,太長直接截斷不換行,完整文字看滑鼠提示 */
+.pf-table .dialog-table td.pf-clip { white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; word-break: normal; }
+.pf-table .dialog-table td { word-break: break-all; }
+.pf-table .dialog-table th { position: sticky; top: 0; background: #ffffff;
+  box-shadow: inset 0 -1px 0 #e5e5ea; z-index: 1; }
+.pf-price-col { width: 110px; }
+.pf-table tbody tr { cursor: default; user-select: none; }
+/* 色票只用公版:選取＝淡藍灰底;未儲存＝售價框主色粗字＋強調框 */
+.pf-table tbody tr.selected td { background: #e8eef5; }
+.dialog-shell .pf-table tr.changed .pf-price { color: #4977b1; font-weight: bold;
+  border-color: #8fa8c8; }
+.dialog-shell .pf-price { text-align: right; padding: 0 6px; }
 
 @media (max-width: 640px) {
   .dialog-content { padding: 14px; }
