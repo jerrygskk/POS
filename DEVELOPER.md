@@ -638,6 +638,15 @@ python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_s
   **檢查方式**:用資料庫副本開視窗,移到 (0, 0)、大小設為 1278×720,逐一打開受影響的畫面,確認
   外框沒超出、按鈕與輸入框沒被擠到比需要的寬度小、表格下方內容沒被推出畫面。以量測(DOM 尺寸／
   元件實際寬度對需要寬度)為證據,不要只看大螢幕。
+- **掃入明細表固定欄寬**:收銀、進貨用 `.cart-table`,盤點、退貨明細與標籤列印用 `.fixed-table`
+  (明細另加 `.detail-table` 設最小寬度),都是 `table-layout: fixed`,欄寬由 `col-w70`…`col-w200` 等
+  class 指定;標題不折行,內容在格內折行。文字輸入框寬 100% 以免超出格子。⚠️ 只設 `min-width`
+  仍是自動版面,掃入內容後欄寬照樣跳。視窗窄於表格最小寬度時由表格左右捲動。
+- **適用機型欄**:收銀、進貨、退貨明細顯示在商品與屬性之間,後端用
+  `product_data.display_models_by_variant`,種類 `model_mode` 不是 `required` 時回空清單、畫面顯示「—」,
+  `VariantModel` 資料不動。標籤搜尋清單也用同一支。
+- **頂部選單**:按鈕不折行不收縮,窄視窗以媒體查詢(1180、1070)縮內距維持一排。
+- **收銀「最近成交」**:預設收合(`recentOpen`),切換後焦點回掃描框。
 - ⚠️ **勿在 v-if/v-else 元素上掛動態 `:key`**:與 prod 版 Vue(`vue.global.prod.js`)的 `stringifyStatic` 靜態節點快取衝突,key 變動重建區塊後快取 vnode 的 DOM 參照被清空,之後所有畫面更新拋 TypeError、整個 app 卡死;dev 版 Vue 測不出來,務必以 prod 版驗證(v0.1.0 後設定頁曾因此崩潰)。內容全走資料綁定即可,不需 key 強制重建。
 
 ## 3. 測試

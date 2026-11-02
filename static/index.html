@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=251">
+<link rel="stylesheet" href="css/pos.css?v=262">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=251" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=262" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -41,16 +41,17 @@
   <table class="cart-table">
     <colgroup>
       <col class="cart-col-barcode">
-      <col><col>
+      <col><col><col>
       <col class="cart-col-price"><col class="cart-col-qty"><col class="cart-col-discount">
       <col class="cart-col-subtotal"><col class="cart-col-stock"><col class="cart-col-remove">
     </colgroup>
-    <thead><tr><th>條碼</th><th>商品</th><th>屬性</th><th>單價</th><th>數量</th>
-      <th>單品折扣</th><th>小計</th><th>目前庫存</th><th></th></tr></thead>
+    <thead><tr><th>條碼</th><th>商品</th><th>適用機型</th><th>屬性</th><th>單價</th><th>數量</th>
+      <th>折扣</th><th>小計</th><th>庫存</th><th></th></tr></thead>
     <tbody>
       <tr v-for="(it, i) in draft.cart" :key="it.variant_id">
         <td>{{ it.label_barcode || '—' }}</td>
         <td>{{ it.name }}</td>
+        <td>{{ modelsText(it) }}</td>
         <td>{{ attrText(it) }}</td>
         <td><input type="number" v-model.number="it.unit_price" min="0" class="w80" :disabled="draft.submitting"></td>
         <td><input type="number" v-model.number="it.qty" min="1" class="w60" :disabled="draft.submitting"
@@ -75,7 +76,9 @@
   </div>
   <div v-if="doneMsg" class="done-msg">{{ doneMsg }}</div>
   <template v-if="recent.length">
-  <div class="grp-title recent-sales-title">本日最近成交</div>
+  <div class="grp-title recent-sales-title">本日最近成交
+    <button class="btn-sm" @click="toggleRecent">{{ recentOpen ? '收合 ▲' : '展開 ▼' }}</button></div>
+  <transition name="collapse"><div v-if="recentOpen">
   <table>
     <thead><tr><th>編號</th><th>時間</th><th>員工</th><th>商品</th><th>應收</th></tr></thead>
     <tbody><tr v-for="s in recent" :key="s.sale_id">
@@ -83,6 +86,7 @@
       <td>{{ itemsText(s) }}</td><td>{{ s.total }}</td>
     </tr></tbody>
   </table>
+  </div></transition>
   </template>
 </div>
 </template>
@@ -100,9 +104,9 @@
   </div>
   <div v-if="q.notice" class="notice-bar">{{ q.notice }}</div>
   <div v-if="q.rows.length" class="label-queue">
-    <table>
-      <thead><tr><th>品名</th><th>規格</th><th>價格</th><th>條碼</th>
-        <th>張數</th><th>狀態</th><th></th></tr></thead>
+    <table class="fixed-table">
+      <thead><tr><th>品名</th><th>規格</th><th class="col-w70">價格</th><th class="col-w142">條碼</th>
+        <th class="col-w81">張數</th><th class="col-w80">狀態</th><th :class="q.rows.some(r => r.status === 'verify') ? 'col-w160' : 'col-w70'"></th></tr></thead>
       <tbody>
         <tr v-for="row in q.rows" :key="row.key" :class="{on: row.key === q.selectedKey}"
             @click="selectRow(row.key)">
@@ -147,24 +151,25 @@
   </div>
   <table class="cart-table receive-table">
     <colgroup>
-      <col><col>
+      <col><col><col>
       <col class="receive-col-barcode"><col class="cart-col-stock"><col class="receive-col-qty">
       <col class="receive-col-label"><col class="cart-col-remove">
     </colgroup>
-    <thead><tr><th>商品</th><th>規格</th><th>條碼</th><th>目前庫存</th>
+    <thead><tr><th>商品</th><th>適用機型</th><th>規格</th><th>條碼</th><th>庫存</th>
       <th>進貨數量</th><th>標籤</th><th></th></tr></thead>
     <tbody>
-      <tr v-if="!draft.rows.length"><td colspan="7" class="hint">請掃描條碼加入進貨清單。</td></tr>
+      <tr v-if="!draft.rows.length"><td colspan="8" class="hint">請掃描條碼加入進貨清單。</td></tr>
       <tr v-for="row in draft.rows" :key="row.variant_id"
           :class="{'receive-row-hit': draft.highlightKey === row.variant_id}">
         <td>{{ row.name }}</td>
+        <td>{{ modelsText(row) }}</td>
         <td>{{ attrText(row) }}</td>
         <td>{{ row.label_barcode }}</td>
         <td>{{ row.stock }}</td>
         <td><input type="number" :value="row.qty" min="1" class="w80"
                    :disabled="draft.locked" @change="setQty(row, $event)"></td>
         <td><button v-if="row.qty > row.labeled" class="btn-sm"
-                    :disabled="row.labelBusy || draft.locked" @click="addToLabels(row)">加入列印清單（{{ row.qty - row.labeled }} 張）</button>
+                    :disabled="row.labelBusy || draft.locked" @click="addToLabels(row)">加入列印（{{ row.qty - row.labeled }} 張）</button>
             <span v-else-if="row.labeled > 0" class="hint">已加入 {{ row.labeled }} 張</span></td>
         <td><button class="btn-x" title="移除" :disabled="draft.locked" @click="removeRow(row)">✕</button></td>
       </tr>
@@ -211,9 +216,9 @@
     </div>
     <div v-if="detail.status==='pending' && !isAdmin" class="notice-bar">等待管理者核准</div>
     <div v-if="recountCount" class="notice-bar">有 {{ recountCount }} 項需重新清點</div>
-    <table>
-      <thead><tr><th>商品</th><th>屬性</th><th>系統量</th><th>實盤量</th><th>差異</th><th>差異原因</th>
-        <th v-if="canReview"></th><th v-if="canEditCounted" class="cart-col-remove"></th></tr></thead>
+    <table class="fixed-table detail-table">
+      <thead><tr><th>商品</th><th>屬性</th><th class="col-w80">系統量</th><th class="col-w160">實盤量</th><th class="col-w70">差異</th><th class="col-w200">差異原因</th>
+        <th v-if="canReview" class="col-w110"></th><th v-if="canEditCounted" class="cart-col-remove"></th></tr></thead>
       <tbody><tr v-for="it in detail.items" :key="it.variant_id" :class="{neg: it.needs_recount, 'stocktake-row-returned': marked.includes(it.variant_id)}">
         <td>{{ it.name }}</td><td>{{ attrText(it) }}</td>
         <td>{{ it.system_qty }}</td>
@@ -262,11 +267,11 @@
       <button class="primary" v-if="canReview" @click="approve">核准</button>
     </div>
     <div v-if="detail.status==='pending' && !isAdmin" class="notice-bar">等待管理者核准</div>
-    <table>
-      <thead><tr><th>商品</th><th>屬性</th><th>數量</th><th>銷售單編號</th><th>退貨原因</th>
-        <th v-if="detail.status!=='open'">處理方式</th><th v-if="canEdit" class="cart-col-remove"></th></tr></thead>
+    <table class="fixed-table detail-table">
+      <thead><tr><th>商品</th><th>適用機型</th><th>屬性</th><th class="col-w102">數量</th><th class="col-w122">銷售單編號</th><th class="col-w200">退貨原因</th>
+        <th v-if="detail.status!=='open'" class="col-w130">處理方式</th><th v-if="canEdit" class="cart-col-remove"></th></tr></thead>
       <tbody><tr v-for="it in detail.items" :key="it.variant_id">
-        <td>{{ it.name }}</td><td>{{ attrText(it) }}</td>
+        <td>{{ it.name }}</td><td>{{ modelsText(it) }}</td><td>{{ attrText(it) }}</td>
         <td><input type="number" v-model.number="it.qty" min="1" class="w80"
                    :disabled="!canEdit" @change="setQty(it)"></td>
         <td><input v-if="canEdit" v-model="it.sale_id" class="w100" placeholder="選填"
@@ -830,27 +835,27 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=251"></script>
-<script src="js/api.js?v=251"></script>
-<script src="js/confirm.js?v=251"></script>
-<script src="js/auth.js?v=251"></script>
-<script src="js/pos_shared.js?v=251"></script>
-<script src="js/catalogfields.js?v=251"></script>
-<script src="js/checkout.js?v=251"></script>
-<script src="js/receive.js?v=251"></script>
-<script src="js/stocktake.js?v=251"></script>
-<script src="js/returns.js?v=251"></script>
-<script src="js/records.js?v=251"></script>
-<script src="js/catalog.js?v=251"></script>
-<script src="js/sortable.js?v=251"></script>
-<script src="js/combobox.js?v=251"></script>
-<script src="js/optpicker.js?v=251"></script>
-<script src="js/modelpicker.js?v=251"></script>
-<script src="js/employeepicker.js?v=251"></script>
-<script src="js/attrfields.js?v=251"></script>
-<script src="js/settings.js?v=251"></script>
-<script src="js/labels.js?v=251"></script>
-<script src="js/app_update.js?v=251"></script>
-<script src="js/app.js?v=251"></script>
+<script src="js/vue.global.prod.js?v=262"></script>
+<script src="js/api.js?v=262"></script>
+<script src="js/confirm.js?v=262"></script>
+<script src="js/auth.js?v=262"></script>
+<script src="js/pos_shared.js?v=262"></script>
+<script src="js/catalogfields.js?v=262"></script>
+<script src="js/checkout.js?v=262"></script>
+<script src="js/receive.js?v=262"></script>
+<script src="js/stocktake.js?v=262"></script>
+<script src="js/returns.js?v=262"></script>
+<script src="js/records.js?v=262"></script>
+<script src="js/catalog.js?v=262"></script>
+<script src="js/sortable.js?v=262"></script>
+<script src="js/combobox.js?v=262"></script>
+<script src="js/optpicker.js?v=262"></script>
+<script src="js/modelpicker.js?v=262"></script>
+<script src="js/employeepicker.js?v=262"></script>
+<script src="js/attrfields.js?v=262"></script>
+<script src="js/settings.js?v=262"></script>
+<script src="js/labels.js?v=262"></script>
+<script src="js/app_update.js?v=262"></script>
+<script src="js/app.js?v=262"></script>
 </body>
 </html>

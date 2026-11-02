@@ -283,8 +283,10 @@ class ProductService:
         ids = [r["variant_id"] for r in rows]
         attrs = product_data.attrs_by_variant(self.repo.connection, ids)
         display = product_data.display_attrs(self.repo.connection, ids)
+        models = product_data.display_models_by_variant(self.repo.connection, ids)
         return {"matches": [{"variant_id": row["variant_id"], "product_id": row["product_id"], "name": row["name"],
                 "attributes": attrs.get(row["variant_id"], {}), "attr_display": display.get(row["variant_id"], ""),
+                "models": models.get(row["variant_id"], []),
                 "price": row["price"], "stock": product_data.stock_of(self.repo.connection, row["variant_id"]),
                 "status": row["status"], "store_barcode": row["store_barcode"],
                 "label_barcode": row["store_barcode"] if row["store_barcode"] is not None else row["factory_barcode"]}
@@ -310,7 +312,7 @@ class ProductService:
             rows = [r for r in rows if query in (r["name"] or "").lower() or
                     any(query in str(v).lower() for v in attrs.get(r["variant_id"], {}).values())]
         rows = rows[:100]; vids = [r["variant_id"] for r in rows]
-        models = product_data.models_by_variant(self.repo.connection, vids)
+        models = product_data.display_models_by_variant(self.repo.connection, vids)
         display = product_data.display_attrs(self.repo.connection, vids)
         from lib.db import stock_map
         stocks = stock_map(self.repo.connection, vids)

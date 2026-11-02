@@ -150,3 +150,17 @@ VUE-11 是根元素沒有高度上限,VUE-18 是中間層不肯收縮。
 
 **驗證方式**：改完在真實 pywebview 量 `getComputedStyle(td).textAlign`,
 不要只看畫面猜。
+
+## VUE-22 表格設了 min-width,掃入商品後欄寬還是跳
+
+**症狀**：盤點、退貨明細空白時欄寬一種樣子,掃入第一筆後各欄寬度全變,標題跟著跳;
+標籤列印的「狀態」標題被擠到折行。
+
+**根因**：自動版面的表格,欄寬由內容決定,`min-width` 只限制下限,擋不住內容把欄寬重新分配。
+
+**解法**：改 `table-layout: fixed`,每欄用 `<col>` class 指定寬度,留一兩欄文字欄吃剩餘寬度;
+標題 `white-space: nowrap`,內容 `overflow-wrap: anywhere`。文字輸入框要設寬 100%＋
+`box-sizing: border-box`,否則會超出格子。
+
+**驗證方式**：在真實 pywebview 量掃入前後各欄 `getBoundingClientRect().width`,
+1278 寬與最小視窗都要比。

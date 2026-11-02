@@ -61,7 +61,7 @@ class SharedBarcodeTests(FacadeTestCase):
             conn.execute("INSERT INTO VariantIssue(variant_id,issue_type) VALUES(?,'missing_required')", (b,))
         matches = self.invoke("barcodes.scan", {"code": "SHARED"})["matches"]
         self.assertEqual([r["variant_id"] for r in matches], [a, b])
-        expected = {"variant_id", "product_id", "name", "price", "attributes", "attr_display", "stock", "status", "store_barcode", "label_barcode"}
+        expected = {"variant_id", "product_id", "name", "price", "attributes", "attr_display", "models", "stock", "status", "store_barcode", "label_barcode"}
         for row in matches:
             self.assertEqual(set(row), expected)
             self.assertEqual(row["label_barcode"], self.stores(row["variant_id"])[0])

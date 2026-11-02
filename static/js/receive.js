@@ -42,7 +42,7 @@ window.PosPages["page-receive"] = {
           row.stock = data.stock;
         } else {
           row = { variant_id: data.variant_id, name: data.name, attributes: data.attributes,
-            attr_display: data.attr_display, label_barcode: data.label_barcode, stock: data.stock,
+            attr_display: data.attr_display, models: data.models, label_barcode: data.label_barcode, stock: data.stock,
             qty: 1, labeled: 0, labelBusy: false };
         }
         this.draft.rows.unshift(row);

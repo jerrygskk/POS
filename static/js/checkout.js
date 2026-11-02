@@ -7,7 +7,7 @@ window.PosPages["page-checkout"] = {
   inject: ["showError"],
   data() {
     return { scanCode: "", searchQ: "", searchResults: [], draft: window.PosCheckoutDraft,
-             payments: [], payment: "現金", paid: null, doneMsg: "", recent: [],
+             payments: [], payment: "現金", paid: null, doneMsg: "", recent: [], recentOpen: false,
              employee: window.PosEmployee };
   },
   computed: {
@@ -64,10 +64,14 @@ window.PosPages["page-checkout"] = {
       const dup = this.draft.cart.find(i => i.variant_id === r.variant_id);
       if (dup) dup.qty += 1;
       else this.draft.cart.push({ variant_id: r.variant_id, name: r.name,
-        attributes: r.attributes, attr_display: r.attr_display,
+        attributes: r.attributes, attr_display: r.attr_display, models: r.models,
         label_barcode: r.label_barcode,
         unit_price: price, qty: 1, discount: 0, stock: r.stock });
       this.searchResults = [];
+    },
+    toggleRecent() {
+      this.recentOpen = !this.recentOpen;
+      this.$refs?.scan?.focus();  // 焦點留在掃描框,收合後條碼槍可以直接掃
     },
     removeItem(i) {
       if (this.draft.submitting) return;

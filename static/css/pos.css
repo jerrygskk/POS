@@ -39,7 +39,10 @@ nav { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding: 
 .nav-logo { width: 52px; height: 52px; object-fit: contain; flex: 0 0 52px; }
 nav button { padding: 12px 24px; font-size: 18px; border: 0; border-radius: 8px;
   background: transparent; color: #fff; cursor: pointer; min-width: 0;
-  display: inline-flex; align-items: center; }
+  display: inline-flex; align-items: center; white-space: nowrap; flex-shrink: 0; }
+/* 窄視窗收內距,出現直向捲軸或待審小標時選單仍維持一排、文字不折行 */
+@media (max-width: 1180px) { nav button { padding-left: 18px; padding-right: 18px; } }
+@media (max-width: 1070px) { nav { gap: 4px; } nav button { padding-left: 10px; padding-right: 10px; } }
 /* 頁籤上的紅色小標以 flex 置中;管理者標籤在文字前,間距改放右側 */
 nav button > .badge:first-child { margin: 0 6px 0 0; }
 nav button:hover { background: var(--primary-active); }
@@ -281,7 +284,7 @@ tr.inactive > td { opacity: 0.55; }
 .maint-detail { margin: 0 0 8px; }
 .grp-title { font-weight: bold; margin: 8px 0 2px; color: var(--text-2); }
 /* 收銀頁下方最近成交:與上方結帳區拉開距離 */
-.recent-sales-title { margin: 32px 0 8px; font-size: 16px; }
+.recent-sales-title { margin: 32px 0 8px; font-size: 16px; display: flex; align-items: center; gap: 10px; }
 .model-group { margin-bottom: 10px; }
 .hint { color: var(--text-2); font-size: 14px; }
 .opt-block { margin: 8px 0; }
@@ -661,14 +664,29 @@ button.primary.danger:hover { filter: brightness(0.92); }
 /* 收銀付款區要塞進員工按鈕,間距收窄以維持一排 */
 .checkout .pay-panel { gap: 12px; }
 /* 收銀購物車:數字欄固定窄寬(放得下標題與輸入框即可),其餘寬度全給商品與屬性 */
-.cart-col-price, .cart-col-discount { width: 110px; }
-.cart-col-qty, .cart-col-subtotal { width: 90px; }
-.cart-col-stock { width: 95px; }
+/* 收銀／進貨欄寬固定:掃入商品時標題列不得跟著內容跳動;文字欄平分剩餘寬度,最窄 140 */
+.cart-table { table-layout: fixed; min-width: 1037px; }
+.cart-table td { overflow-wrap: anywhere; }
+.checkout th { white-space: nowrap; }
+.cart-col-price, .cart-col-discount { width: 102px; }
+.cart-col-qty { width: 81px; }
+.cart-col-subtotal { width: 70px; }
+.cart-col-stock { width: 70px; }
 .cart-col-remove { width: 50px; }
+/* 盤點／退貨明細、標籤清單:欄寬固定,掃入商品時標題列不跳動;沒指定寬度的文字欄平分剩餘寬度 */
+.fixed-table { table-layout: fixed; }
+.fixed-table th { white-space: nowrap; }
+.fixed-table td { overflow-wrap: anywhere; }
+.fixed-table td input:not([type=number]):not(.w100) { width: 100%; min-width: 0; box-sizing: border-box; }
+.detail-table { min-width: 1020px; }
+.col-w70 { width: 70px; } .col-w80 { width: 80px; } .col-w81 { width: 81px; }
+.col-w100 { width: 100px; } .col-w102 { width: 102px; } .col-w110 { width: 110px; }
+.col-w122 { width: 122px; } .col-w130 { width: 130px; } .col-w142 { width: 142px; }
+.col-w160 { width: 160px; } .col-w200 { width: 200px; }
 /* 批次進貨固定欄寬，其餘沿用購物車公版。 */
-.cart-col-barcode, .receive-col-barcode { width: 150px; }
+.cart-col-barcode, .receive-col-barcode { width: 142px; }
 .receive-col-qty { width: 110px; }
-.receive-col-label { width: 200px; }
+.receive-col-label { width: 170px; }
 .receive-table tr.receive-row-hit > td { background: var(--accent-soft); }
 /* 盤點審核:標記退回的品項整列淡紅底,一眼看出哪些會被退回 */
 tr.stocktake-row-returned > td { background: rgba(220, 38, 38, 0.08); color: var(--danger); }

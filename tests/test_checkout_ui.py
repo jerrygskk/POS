@@ -369,9 +369,9 @@ class CartTemplateContractTests(unittest.TestCase):
         css = (STATIC / "css" / "pos.css").read_text(encoding="utf-8")
         checkout = html.split('<template id="tpl-checkout">', 1)[1].split("</template>", 1)[0]
         self.assertIn('<col class="cart-col-barcode">', checkout)
-        self.assertIn('<th>條碼</th><th>商品</th>', checkout)
+        self.assertIn('<th>條碼</th><th>商品</th><th>適用機型</th>', checkout)
         self.assertIn("<td>{{ it.label_barcode || '—' }}</td>\n        <td>{{ it.name }}</td>", checkout)
-        self.assertRegex(css, r"\.cart-col-barcode,\s*\.receive-col-barcode \{ width: 150px; \}")
+        self.assertRegex(css, r"\.cart-col-barcode,\s*\.receive-col-barcode \{ width: 142px; \}")
 
     def test_cart_numeric_columns_are_narrow_and_remove_button_is_small(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")

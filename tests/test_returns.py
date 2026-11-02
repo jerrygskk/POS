@@ -182,3 +182,21 @@ class TestStocktakeCancelAndNote(ReturnsBase):
         self.invoke("stocktake.approve", {"session_id": self.sid})
         self.assert_application_error("conflict", "stocktake.cancel", {"session_id": self.sid, "employee": 1})
         self.assertEqual(self.stock(self.v1), 3)
+
+
+class DisplayModelsTest(FacadeTestCase):
+    def test_scan_and_return_show_models_only_when_category_uses_them(self):
+        category_id = self.create_category("model category")
+        self.invoke("categories.update", {"id": category_id, "fields": {"model_mode": "required"}})
+        model_id = self.create_model(self.create_phone_brand("虛構品牌"), "虛構機型")
+        vid = self.invoke("products.create", {"name": "殼", "category_id": category_id, "variants": [
+            {"attributes": {}, "model_ids": [model_id],
+             "barcodes": [{"barcode": "M1", "source": "store"}]}]})["variant_ids"][0]
+        rid = self.invoke("returns.create", {"employee": 1})["return_id"]
+        self.invoke("returns.scan", {"return_id": rid, "variant_id": vid, "qty": 1})
+        def shown():
+            return (self.invoke("barcodes.scan", {"code": "M1"})["matches"][0]["models"],
+                    self.invoke("returns.detail", {"return_id": rid})["items"][0]["models"])
+        self.assertEqual(shown(), (["虛構機型"], ["虛構機型"]))
+        self.invoke("categories.update", {"id": category_id, "fields": {"model_mode": "hidden"}})
+        self.assertEqual(shown(), ([], []))

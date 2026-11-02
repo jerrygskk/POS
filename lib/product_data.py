@@ -44,6 +44,17 @@ def models_by_variant(conn, ids):
     return out
 
 
+def display_models_by_variant(conn, ids):
+    """畫面要顯示的適用機型:種類設為不使用機型時一律空白,VariantModel 資料不動。"""
+    models = models_by_variant(conn, ids)
+    if not models: return models
+    used = {r["variant_id"] for r in conn.execute(
+        "SELECT v.variant_id FROM Variant v JOIN Product p ON v.product_id=p.product_id "
+        "JOIN Category c ON p.category_id=c.category_id "
+        f"WHERE c.model_mode='required' AND v.variant_id IN ({in_clause(ids)})", ids)}
+    return {vid: names for vid, names in models.items() if vid in used}
+
+
 def _empty(v):
     if v is None or v == "": return True
     if isinstance(v, (list, tuple)): return not any(str(x).strip() for x in v)

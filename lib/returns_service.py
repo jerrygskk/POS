@@ -80,8 +80,9 @@ class ReturnsService:
         vids = [r["variant_id"] for r in rows]
         attrs = product_data.attrs_by_variant(self.repo.connection, vids)
         disp = product_data.display_attrs(self.repo.connection, vids)
+        models = product_data.display_models_by_variant(self.repo.connection, vids)
         items = [{"variant_id": r["variant_id"], "name": r["name"], "attributes": attrs.get(r["variant_id"], {}),
-                  "attr_display": disp.get(r["variant_id"], ""), "qty": r["qty"], "sale_id": r["sale_id"], "reason": r["reason"],
+                  "attr_display": disp.get(r["variant_id"], ""), "models": models.get(r["variant_id"], []), "qty": r["qty"], "sale_id": r["sale_id"], "reason": r["reason"],
                   "disposition": r["disposition"]} for r in rows]
         return {**dict(session), "items": items}
     def scan(self, rid, vid, qty):

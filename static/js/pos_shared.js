@@ -35,6 +35,7 @@ window.PosMixin = {
         this.showError(error.message);
       }
     },
+    modelsText(row) { return (row.models || []).join("、") || "—"; },
     attrText(row, fallback) {
       const s = window.fmtAttr(row);
       return (s === "" && fallback !== undefined) ? fallback : s;
