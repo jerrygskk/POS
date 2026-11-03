@@ -388,13 +388,34 @@ class CartTemplateContractTests(unittest.TestCase):
     def test_checkout_inputs_and_remove_button_are_disabled_while_submitting(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         checkout = html.split('<template id="tpl-checkout">', 1)[1].split("</template>", 1)[0]
-        for model in ("it.unit_price", "it.qty", "it.discount", "draft.orderDiscount", "draft.memberDiscount", "payment", "paid"):
+        for model in ("payment",):
             with self.subTest(model=model):
                 tag = re.search(r'<(?:input|select)\b[^>]*v-model(?:\.number)?="'
                                 + re.escape(model) + r'"[^>]*>', checkout)
                 self.assertIsNotNone(tag)
                 self.assertIn(':disabled="draft.submitting"', tag.group())
+        for model in ("it.unit_price", "it.qty", "it.discount"):
+            with self.subTest(model=model):
+                tag = re.search(r'<input\b[^>]*:value="' + re.escape(model) + r'"[^>]*>', checkout)
+                self.assertIsNotNone(tag)
+                self.assertIn('type="text"', tag.group())
+                self.assertIn(':disabled="draft.submitting"', tag.group())
+        paid = re.search(r'<input\b[^>]*:value="paid"[^>]*>', checkout)
+        self.assertIsNotNone(paid)
+        self.assertIn('type="text"', paid.group())
+        self.assertIn(':disabled="draft.submitting"', paid.group())
+        for key in ("orderDiscount", "memberDiscount"):
+            with self.subTest(key=key):
+                tag = re.search(r'<input\b[^>]*:value="draft\.' + key + r'"[^>]*>', checkout)
+                self.assertIsNotNone(tag)
+                self.assertIn('type="text"', tag.group())
+                self.assertIn("setDiscount('" + key + "', $event)", tag.group())
+                self.assertIn(':disabled="draft.submitting"', tag.group())
+        self.assertIn('@click="removeItem(i)" :disabled="draft.submitting"', checkout)
+        self.assertIn('@change="it.qty = Math.max(1, Math.floor(it.qty) || 1)"', checkout)
 
+
+class ConfirmAndResourceContractTests(unittest.TestCase):
     def test_input_dialog_renders_validates_and_handles_close_interactions(self):
         script = r'''
 const fs = require("fs"), vm = require("vm");

@@ -69,6 +69,29 @@ window.PosPages["page-checkout"] = {
         unit_price: price, qty: 1, discount: 0, stock: r.stock });
       this.searchResults = [];
     },
+    // 只留數字;清空視為 0,並把濾掉後的結果寫回輸入框
+    setDiscount(key, event) {
+      const digits = event.target.value.replace(/\D/g, "");
+      this.draft[key] = digits === "" ? 0 : Number(digits);
+      event.target.value = String(this.draft[key]);
+    },
+    // 實收留白有意義(視為剛好付清),清空時維持空白不補 0
+    setPaid(event) {
+      const digits = event.target.value.replace(/\D/g, "");
+      this.paid = digits === "" ? null : Number(digits);
+      event.target.value = digits === "" ? "" : String(this.paid);
+    },
+    setItemAmount(item, key, event) {
+      const digits = event.target.value.replace(/\D/g, "");
+      item[key] = digits === "" ? 0 : Number(digits);
+      event.target.value = String(item[key]);
+    },
+    // 數量打字途中可暫時留白,離開欄位時由 @change 補回至少 1
+    setItemQty(item, event) {
+      const digits = event.target.value.replace(/\D/g, "");
+      item.qty = digits === "" ? "" : Number(digits);
+      event.target.value = digits === "" ? "" : String(item.qty);
+    },
     toggleRecent() {
       this.recentOpen = !this.recentOpen;
       this.$refs?.scan?.focus();  // 焦點留在掃描框,收合後條碼槍可以直接掃
