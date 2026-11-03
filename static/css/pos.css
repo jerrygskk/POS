@@ -667,6 +667,8 @@ button.primary.danger:hover { filter: brightness(0.92); }
 /* 收銀／進貨欄寬固定:掃入商品時標題列不得跟著內容跳動;文字欄平分剩餘寬度,最窄 140 */
 .cart-table { table-layout: fixed; min-width: 1037px; }
 .cart-table td { overflow-wrap: anywhere; }
+.cart-summary td { background: var(--surface-alt); font-weight: 600; }
+.cart-summary td:first-child { text-align: right; }
 .checkout th { white-space: nowrap; }
 .cart-col-price, .cart-col-discount { width: 102px; }
 .cart-col-qty { width: 81px; }

@@ -11,9 +11,11 @@ window.PosPages["page-checkout"] = {
              employee: window.PosEmployee };
   },
   computed: {
+    cartQty() { return this.draft.cart.reduce((s, i) => s + (Number(i.qty) || 0), 0); },
+    cartDiscount() { return this.draft.cart.reduce((s, i) => s + i.discount, 0); },
+    cartSubtotal() { return this.draft.cart.reduce((s, i) => s + i.qty * i.unit_price - i.discount, 0); },
     total() {
-      const t = this.draft.cart.reduce((s, i) => s + i.qty * i.unit_price - i.discount, 0)
-        - this.draft.orderDiscount - this.draft.memberDiscount;
+      const t = this.cartSubtotal - this.draft.orderDiscount - this.draft.memberDiscount;
       return Math.max(0, t);
     },
     // 目前只記錄賣了什麼、不實際收款:實收留白視為剛好付清

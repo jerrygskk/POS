@@ -62,6 +62,9 @@
         <td><button class="btn-x" title="移除" @click="removeItem(i)" :disabled="draft.submitting">✕</button></td>
       </tr>
     </tbody>
+    <tfoot v-if="draft.cart.length" class="cart-summary">
+      <tr><td colspan="5">小計</td><td>{{ cartQty }}</td><td>{{ cartDiscount }}</td><td>{{ cartSubtotal }}</td><td colspan="2"></td></tr>
+    </tfoot>
   </table>
   <div class="pay-panel">
     <label>整單折抵 <input type="text" inputmode="numeric" class="w80" :value="draft.orderDiscount" @input="setDiscount('orderDiscount', $event)" :disabled="draft.submitting"></label>

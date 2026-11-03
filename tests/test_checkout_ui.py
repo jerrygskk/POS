@@ -385,6 +385,13 @@ class CartTemplateContractTests(unittest.TestCase):
         self.assertIn('<button class="btn-x" title="移除" @click="removeItem(i)" :disabled="draft.submitting">✕</button>', checkout)
         self.assertIn("background: var(--danger); color: #fff;", css.split(".btn-x {", 1)[1].split("}", 1)[0])
 
+    def test_cart_summary_row_only_shows_with_items(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        checkout = html.split('<template id="tpl-checkout">', 1)[1].split("</template>", 1)[0]
+        self.assertIn('<tfoot v-if="draft.cart.length" class="cart-summary">', checkout)
+        for value in ("cartQty", "cartDiscount", "cartSubtotal"):
+            self.assertIn("{{ " + value + " }}", checkout)
+
     def test_checkout_inputs_and_remove_button_are_disabled_while_submitting(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         checkout = html.split('<template id="tpl-checkout">', 1)[1].split("</template>", 1)[0]
