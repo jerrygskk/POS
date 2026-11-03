@@ -262,7 +262,7 @@ assert.equal(s.rowText(row),"虛構商品｜黑｜虛構甲、虛構乙｜$50｜
 assert.equal(s.rowText({name:"虛構商品",attributes:{},price:null,barcodes:[]}),"虛構商品");assert.equal(s.sameLabel(label(1),label(1)),true);
 for(const changes of[{name:"不同"},{specification:"不同"},{price:""},{models:[]},{models:["乙","甲"]}])assert.equal(s.sameLabel(label(1),{...label(1),...changes}),false);
 assert.deepEqual(["ready","changed","verify","invalid"].map(status=>s.statusText({status})),
-["","資料已更新，請確認預覽","請核對已印張數","條碼已失效，請移除後重新加入"]);
+["","資料已更新","請確認張數","無效條碼，請確認"]);
 ''')
 
 

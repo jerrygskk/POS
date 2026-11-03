@@ -69,8 +69,8 @@ window.PosPages["page-labels"] = {
         .filter(part => part !== "" && part != null).join("｜");
     },
     statusText(row) {
-      return {ready: "", changed: "資料已更新，請確認預覽", verify: "請核對已印張數",
-        invalid: "條碼已失效，請移除後重新加入"}[row.status];
+      return {ready: "", changed: "資料已更新", verify: "請確認張數",
+        invalid: "無效條碼，請確認"}[row.status];
     },
     async addRow(variant_id, barcode) {
       if (this.q.printing) return;
@@ -217,7 +217,7 @@ window.PosPages["page-labels"] = {
             } catch (_) { /* 無法重查時保留待核對,不自動重送。 */ }
             row.status = invalid ? "invalid" : "verify";
             this.q.notice = invalid ? "條碼已失效，列印已停止。"
-              : `列印失敗：${err.message}。請核對已印張數後按「確認張數」。`;
+              : `列印失敗：${err.message}。請確認張數後按「確認張數」。`;
             this.selectRow(row.key);
             return;
           }
