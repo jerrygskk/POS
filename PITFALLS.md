@@ -11,7 +11,7 @@
 - **VUE-5**: **快速連點清單／分頁後，畫面停在「前一個」選擇的資料** → 載入函式內多個 `await`，慢回應後到蓋掉新資料。多段 await 的載入函式要加載入序號戳記，寫入 state 前比對仍是最新請求才寫（參考 `settings.js` `loadCategoryDetail`）。
 - **VUE-6**: **自動走查腳本一抓元件實例就 `Cannot read properties of undefined`** → prod 版 Vue 不掛 `__vueParentComponent`，`__vue_app__`／`app._instance` 也只在 dev 版才設；靠這些入口存取 Vue 狀態的走查腳本在真實 runtime 一定失敗。走查一律改走使用者真的會碰的 DOM（`setValue` 原生 setter＋派 `input`／`change`、點按鈕與 chip），順帶把事件繫結一起驗到。
 - **VUE-7**: **走查截圖抓到的是別的視窗（瀏覽器、桌面）** → `ImageGrab` 依螢幕座標抓，pywebview 視窗沒在前景就抓到前景程式的畫面，維護者同時在用電腦時必然發生。版面判斷改用 DOM 量測（`clientWidth`/`scrollWidth`/`getBoundingClientRect`），截圖只當輔助、不作為證據。
-- **VUE-8**: **子視窗開著時主視窗仍被滾輪／PageDown 捲走** → `inert` 只擋點擊與焦點，不擋捲動。要另外攔 `wheel`／`touchmove`／捲動鍵與 `scroll` 並還原位置（`window.PosDesktopLock`，DEVELOPER §2 款式修改視窗）；解鎖事件要涵蓋取消、Esc 與按視窗 X 三條路徑，漏一條主視窗就永久鎖死。
+- **VUE-8**: **子視窗開著時主視窗仍被滾輪／PageDown 捲走** → `inert` 只擋點擊與焦點，不擋捲動。要另外攔 `wheel`／`touchmove`／捲動鍵與 `scroll` 並還原位置（`window.PosDesktopLock`，DEVELOPER §2 子視窗）；解鎖事件要涵蓋取消、Esc 與按視窗 X 三條路徑，漏一條主視窗就永久鎖死。
 - **VUE-10**: **子視窗表單的排序、狀態欄位讀進來是空的/預設值** → `categories.fields` 與 `fields.list?category_id=` 形狀不同:前者是建檔用的精簡形狀(只有 name/field_type/required/default/options),`sort` 與 `cf_active` 只有後者才有。設定類的表單要用 `fields.list`,別看到「都是規格欄清單」就混用。
 - **VUE-11**: **新開的子視窗底部按鈕列被切掉、內容超出視窗卻不出現捲軸** → `dialog-theme.css` 那條 `html, body, #variant-editor, … { height: 100% }` 是逐一列出各子視窗根元素的,漏列的視窗內容區就沒有高度上限,內容一長往視窗外長,`body` 又是 `overflow:hidden`,捲軸也出不來(規格設定視窗 `#field-editor` 踩過)。**新增子視窗時,根元素 id 要一併加進那條規則。**
 - **VUE-9**: **子視窗開起來但預選／初始資料全是空的** → 外殼先掛載子元件、才非同步去取脈絡，元件 `mounted` 讀 props 時還是 null。外殼要等脈絡回來再掛載（`v-if="ready"`），或改用 watch 補寫。⚠️ 症狀是「有時對有時錯」，看機器快慢。
@@ -24,7 +24,7 @@
 
 #### DATA：資料模型
 
-- **DATA-1**: **填在 A 種類的值，跑到 B 種類的欄位去了** → 「特性詞條」這種**每個種類各自一份、名字却一樣**的欄位，不可以欄名到全表找。舊版退路是「按名字找、取編號最小的一筆」，資料庫一旦有第二份同名欄，所有種類都會寫進第一份。一律改成只認本種類 `CategoryField` 綁定的那一份（DEVELOPER §2 固定列）。⚠️ 症狀不會報錯，只會在別的種類看到不該出現的詞條。
+- **DATA-1**: **填在 A 種類的值，跑到 B 種類的欄位去了** → 「特性詞條」這種**每個種類各自一份、名字却一樣**的欄位，不可以欄名到全表找。舊版退路是「按名字找、取編號最小的一筆」，資料庫一旦有第二份同名欄，所有種類都會寫進第一份。一律改成只認本種類 `CategoryField` 綁定的那一份（DEVELOPER §2 商品與規格設定）。⚠️ 症狀不會報錯，只會在別的種類看到不該出現的詞條。
 
 #### PS：PowerShell 5.1／環境
 
@@ -44,7 +44,7 @@
 
 #### PKG：打包（PyInstaller onefile）
 
-- **PKG-1**: **打包後找不到 `static/index.html`／前端資源** → onefile 執行時將打包資源解壓至 `sys._MEIPASS`，不能用程式檔位置推算 static；正式 Desktop runtime 由 `RuntimePaths.detect()` 在 frozen 環境指向 `sys._MEIPASS/static`，`DesktopApplication` 再載入本機 `index.html`。新增打包資源比照處理（DEVELOPER §4）。
+- **PKG-1**: **打包後找不到 `static/index.html`／前端資源** → onefile 執行時將打包資源解壓至 `sys._MEIPASS`，不能用程式檔位置推算 static；正式 Desktop runtime 由 `RuntimePaths.detect()` 在 frozen 環境指向 `sys._MEIPASS/static`，`DesktopApplication` 再載入本機 `index.html`。新增打包資源比照處理（DEVELOPER §1）。
 - **PKG-2**: **打包版雙擊完全沒反應、連 log 都沒有** → onefile 開機先把整包解壓到 C 槽 `%TEMP%`（可達上百 MB），發生在任何程式碼執行之前（bootloader 階段），自家錯誤處理攔不到也留不下紀錄；排查時先確認 C 槽可用空間。
 - **PKG-3**: **清除指令靜默失敗** → 清除步驟用 PowerShell 語法；Git Bash 不識別 CMD 的 `del`/`rmdir`，指令可能靜默失敗。完整打包命令只以 DEVELOPER §4 為準。
 - **PKG-4**: **fresh clone build 失敗（缺 `version_info.txt`）** → 該檔不入庫，先跑一次 `python tools/bump_version.py {現版號}` 產出（DEVELOPER §5）。

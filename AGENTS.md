@@ -14,7 +14,7 @@
 
 - **技術棧**：Python + SQLite ＋ Vue 3 無建置前端（prod 版）＋ pywebview Desktop-only 桌面程式；不提供 HTTP adapter；使用者為手機配件行店員
 - **目標環境**：Windows；PyInstaller `--onefile` 打包
-- **文件分工**：`README.md`＝使用者門面；`DEVELOPER.md`＝技術文件（架構／慣例／測試／打包／版號／版本記錄）；`PITFALLS.md`＝踩雷速查表（症狀→解法）；`AGENTS.md`＝協作規則（本檔）；`docs/handover.md`＝跨對話交接（不入庫）
+- **文件分工**：`README.md`＝使用者門面；`DEVELOPER.md`＝技術文件（架構／慣例／測試／打包／版號／近三版記錄）；`HISTORY.md`＝較舊版本記錄；`PITFALLS.md`＝踩雷速查表（症狀→解法）；`AGENTS.md`＝協作規則（本檔）；`docs/handover.md`＝跨對話交接（不入庫）
 
 ## 任務對照表（動手前先讀哪裡）
 
@@ -22,11 +22,11 @@
 
 | 要做的事 | 動手前先讀 |
 |----------|------------|
-| 改 schema／migration／種子 | DEVELOPER §2 慣例（現行 schema DDL 唯一來源 `db_schema.py`；v1–v13 凍結 migration DDL 在 `legacy_migrations.py`；未來 schema 變更仍須新增 migration）；PITFALLS SQL 組 |
-| 商品／規格欄／選項邏輯 | DEVELOPER §2 慣例（規格值正規化、選項生命週期、限定型號） |
-| 條碼／自取碼 | DEVELOPER §2 慣例（條碼混合、TL 保留字頭、交易語意） |
+| 改 schema／migration／種子 | DEVELOPER §2 資料模型；PITFALLS SQL 組 |
+| 商品／規格欄／選項邏輯 | DEVELOPER §2 資料模型、商品與規格設定 |
+| 條碼／自取碼 | DEVELOPER §2 條碼 |
 | 前端版面／樣式／JS | DEVELOPER §2 UI 風格規範；PITFALLS VUE 組 |
-| 設定頁 | DEVELOPER §2 設定頁結構；PITFALLS VUE-1（v-if 動態 `:key` 雷） |
+| 設定頁 | DEVELOPER §2 UI 風格規範；PITFALLS VUE-1（v-if 動態 `:key` 雷） |
 | 測試 | DEVELOPER §3；PITFALLS TEST 組 |
 | 打包 | DEVELOPER §4；PITFALLS PKG 組 |
 | 版號／發布 | DEVELOPER §5＋本檔 C 節 |
@@ -48,7 +48,7 @@
 ### 版本號
 
 - 定義於 `lib/version.py`，日常只進第三碼。進版一律跑 `python tools/bump_version.py {版號}`（同時改 `version.py`、產 `version_info.txt`）。
-- 「bump_version＋`git tag v{版號}`＋DEVELOPER §6 補一列」這組機械動作稱**「版號進版」**；「進版／發布版本／出一版」是下方整套流程。
+- 「bump_version＋`git tag v{版號}`＋DEVELOPER §6 補一列（被擠掉的舊列搬到 `HISTORY.md`）」這組機械動作稱**「版號進版」**；「進版／發布版本／出一版」是下方整套流程。
 
 ### Git
 
