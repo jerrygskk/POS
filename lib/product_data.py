@@ -95,7 +95,7 @@ def cleanup_unused_options(conn, option_ids):
 
 
 def set_variant_attributes(conn, vid, category_id, attributes):
-    """寫入子產品規格值。規格 §12.3:讀取修改前現值逐值比較——
+    """寫入子產品規格值。讀取修改前現值逐值比較——
     原已存在的停用選項可保留或移除,不得新增停用選項值(新建亦不得直接指定停用值)。
     停用/未綁定欄位的既有值原樣保留,不由本次覆寫刪除。"""
     # 修改前現值:逐欄 option_id 集合(供停用值差異驗證);另收集全部舊引用選項,
@@ -137,7 +137,7 @@ def set_variant_attributes(conn, vid, category_id, attributes):
                 row = conn.execute("SELECT option_id,active FROM AttributeOption WHERE field_id=? AND value=?", (fid, val)).fetchone()
             if row is None: raise ValidationError(f"規格欄「{name}」查無選項「{val}」")
             oid = row["option_id"]
-            # §12.3:停用選項僅允許沿用既有值,不得新增
+            # 停用選項僅允許沿用既有值,不得新增
             if not row["active"] and oid not in original:
                 raise ValidationError(f"規格欄「{name}」的選項「{val}」已停用，不可指定")
             conn.execute("INSERT INTO VariantAttribute(variant_id,field_id,option_id) VALUES(?,?,?)", (vid, fid, oid))

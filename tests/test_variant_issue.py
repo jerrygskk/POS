@@ -1,4 +1,4 @@
-"""階段 6:VariantIssue 容錯建立、重驗、啟用、待處理彙總與 effective_active。"""
+"""VariantIssue 容錯建立、重驗、啟用、待處理彙總與 effective_active。"""
 
 from base import ConnTestCase, FacadeTestCase
 from lib.db import get_conn

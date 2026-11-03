@@ -141,7 +141,7 @@ class SettingsService:
         "phone_brands": ("PhoneBrand", "phone_brand_id", "phone_brand_id", "查無此機型品牌"),
         "device_types": ("DeviceType", "device_type_id", "device_type_id", "查無此裝置類型"),
     }
-    NO_ACTIVE = {"brands"}  # 廠牌無 active(規格 §7.2:不參與營運狀態)
+    NO_ACTIVE = {"brands"}  # 廠牌無 active,不參與營運狀態
 
     def __init__(self, repository):
         self.repo = repository
@@ -193,7 +193,7 @@ class SettingsService:
             if self.repo.one(f"SELECT 1 FROM {ref_table} WHERE {ref_col}=? LIMIT 1", (item_id,)):
                 raise ConflictError(ref_message)
         if kind == "categories":
-            # 專用欄:只被本種類綁定的全域欄位(規格 §9.2)
+            # 專用欄:只被本種類綁定的全域欄位
             specific = [r["field_id"] for r in self.repo.execute(
                 "SELECT field_id FROM CategoryField WHERE category_id=? AND field_id IN "
                 "(SELECT field_id FROM CategoryField GROUP BY field_id HAVING COUNT(*)=1)",
@@ -201,7 +201,7 @@ class SettingsService:
             self.repo.execute("DELETE FROM CategoryField WHERE category_id=?", (item_id,))
             self.repo.execute("DELETE FROM BrandCategory WHERE category_id=?", (item_id,))
             for fid in specific:
-                # 有任何 VariantAttribute 引用即保留(規格 §9.2:專用且從未使用才清)
+                # 有任何 VariantAttribute 引用即保留,專用且從未使用才清
                 if self.repo.one("SELECT 1 FROM VariantAttribute WHERE field_id=? LIMIT 1", (fid,)):
                     continue
                 self.repo.execute(
@@ -344,7 +344,7 @@ class SettingsService:
                   if k in {"name", "sort", "active", "field_type", "default_option_id"}}
         if "field_type" in fields:
             if fields["field_type"] not in FIELD_TYPES: raise ValidationError("不支援的規格欄類型")
-            # 欄位已被使用鎖型態(規格 §10.2)
+            # 欄位已被使用鎖型態
             if self.repo.one("SELECT 1 FROM VariantAttribute WHERE field_id=? LIMIT 1", (item_id,)):
                 raise ValidationError("欄位已被使用，不可變更型態")
         # 過渡轉接:default_option_id / sort 落到 CategoryField(前端改版後移除)
@@ -389,7 +389,7 @@ class SettingsService:
     def update_option(self,item_id,fields):
         self.repo.require("AttributeOption","option_id",item_id,"查無此選項")
         fields={k:v for k,v in fields.items() if k in {"value","sort","active"} and v is not None}
-        # 停用選項若為任何種類模板預設值,同交易清空(規格 §12.2)
+        # 停用選項若為任何種類模板預設值,同交易清空
         if fields.get("active")==0:
             self.repo.execute("UPDATE CategoryField SET default_option_id=NULL WHERE default_option_id=?",(item_id,))
         try:

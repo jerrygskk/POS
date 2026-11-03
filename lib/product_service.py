@@ -235,7 +235,7 @@ class ProductService:
         row = self.repo.one("SELECT category_id,active FROM Product WHERE product_id=?", (product_id,))
         if row is None:
             raise NotFoundError("找不到商品")
-        # 子產品建立要求 Category 與 Product 皆 active(規格 §8.2)
+        # 子產品建立要求 Category 與 Product 皆 active
         if not row["active"]:
             raise ValidationError("產品已停用，不可新增子產品")
         self.repo.require_active_category(row["category_id"])

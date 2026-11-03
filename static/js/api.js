@@ -114,7 +114,7 @@ window.parseTagList = function (v) {
 
 // ---- 規格顯示與表單共用工具(multi/tags 皆為清單)----
 
-// 規格顯示字串:優先用後端組好的 attr_display(遵守 spec §2 順位);
+// 規格顯示字串:優先用後端組好的 attr_display;
 // 退而求其次以本地屬性 dict 兜底(陣列以「+」連、各欄以「｜」分隔)。
 window.fmtAttr = function (row) {
   if (row && typeof row.attr_display === "string" && row.attr_display)

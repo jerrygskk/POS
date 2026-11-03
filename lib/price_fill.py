@@ -1,6 +1,6 @@
 """補售價子視窗的資料來源:列出啟用中子產品、批次寫回售價。
 
-原為 docs/ 下的 tkinter 小工具,併入主程式後改走 ProductFacade(管理者限定),
+經 ProductFacade(管理者限定),
 寫入沿用 ProductService.update_variant,待處理筆的重驗與一般改價一致。
 """
 from lib.application_errors import ValidationError

@@ -17,7 +17,7 @@ NA = "not_applicable"
 def field(path, value_type, *, required=False, nullable=False, default="missing",
           constraint="none", bool_policy="n/a", normalization="none", target=None, blank=NA,
           wrong=None, null=None, list_element=NA):
-    """Materialise every §8.5 column and every applicable mutation expectation."""
+    """Materialise every contract column and every applicable mutation expectation."""
     if wrong is None:
         wrong = [] if not value_type.startswith("list[") else "not-a-list"
     if null is None:

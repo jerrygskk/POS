@@ -1,4 +1,4 @@
-"""子產品批次建立(階段 5)服務層交易一致性與重複判定測試。"""
+"""子產品批次建立服務層交易一致性與重複判定測試。"""
 
 from base import ConnTestCase
 from lib.db import get_conn

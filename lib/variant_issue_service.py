@@ -1,7 +1,7 @@
-"""子產品待處理異常(VariantIssue)服務層(階段 6)。
+"""子產品待處理異常(VariantIssue)服務層。
 
 處理既有子產品的重新驗證、啟用前完整驗證,以及待處理彙總查詢。
-支援的問題種類(規格 §11.2 / 商品設定核心規格 §8.2):
+支援的問題種類:
   missing_required   - 缺少必填模板欄位值(field_id 指出欄位)
   duplicate_signature- 與同產品的另一子產品規格簽章重複(related_variant_id 對照)
 
