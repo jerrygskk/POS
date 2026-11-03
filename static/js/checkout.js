@@ -1,7 +1,7 @@
 window.PosPages = window.PosPages || {};
 // 切頁會卸載收銀元件;購物車放元件外才撐得過切頁。只活在本次開啟程式期間,
 // 不落地——關閉程式後沒結帳的單本來就不該留著。
-window.PosCheckoutDraft = Vue.reactive({ cart: [], orderDiscount: 0, submitting: false, generation: 0 });
+window.PosCheckoutDraft = Vue.reactive({ cart: [], orderDiscount: 0, memberDiscount: 0, submitting: false, generation: 0 });
 window.PosPages["page-checkout"] = {
   template: "#tpl-checkout",
   inject: ["showError"],
@@ -13,7 +13,7 @@ window.PosPages["page-checkout"] = {
   computed: {
     total() {
       const t = this.draft.cart.reduce((s, i) => s + i.qty * i.unit_price - i.discount, 0)
-        - this.draft.orderDiscount;
+        - this.draft.orderDiscount - this.draft.memberDiscount;
       return Math.max(0, t);
     },
     // 目前只記錄賣了什麼、不實際收款:實收留白視為剛好付清
@@ -112,13 +112,13 @@ window.PosPages["page-checkout"] = {
       try {
         await this.guard(async () => {
           const r = await API.checkout({
-            payment: this.payment, order_discount: this.draft.orderDiscount,
+            payment: this.payment, order_discount: this.draft.orderDiscount, member_discount: this.draft.memberDiscount,
             paid: this.paidAmount, employee: this.employee.id,
             items: snapshot });
           this.doneMsg = this.paidBlank
             ? `結帳完成(交易編號 ${r.sale_id})`
             : `結帳完成，找零 ${r.change} 元(交易編號 ${r.sale_id})`;
-          this.draft.cart = []; this.draft.orderDiscount = 0; this.paid = null;
+          this.draft.cart = []; this.draft.orderDiscount = 0; this.draft.memberDiscount = 0; this.paid = null;
           setTimeout(() => this.doneMsg = "", 5000);
           this.recent = await API.recentSales();
         });

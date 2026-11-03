@@ -72,7 +72,7 @@ RETIRED_PYDANTIC_SOURCES = {
     "variants.update": {"id":"api.products.update_variant.vid", **{p:"api.products.VariantPatch" for p in ("fields","fields.attributes","fields.price","fields.active")}}, "variants.set_models": {"id":"api.products.set_variant_models.vid", "model_ids":"api.products.ModelIdList"}, "variants.delete": {"id":"api.products.delete_variant.vid"},
     "barcodes.scan": {"code":"api.products.scan.code"},
     "stock.receive": {"employee":"api.stock.ReceiveIn", "items":"none", "items[].variant_id":"none", "items[].qty":"none"}, "stock.detail": {"variant_id":"api.stock.detail.variant_id"}, "stocktake.create": {p:"api.stocktake.SessionIn" for p in ("employee","note")}, "stocktake.scan": {"session_id":"api.stocktake.scan.sid", **{p:"api.stocktake.ScanIn" for p in ("variant_id","qty")}}, "stocktake.set_counted": {"session_id":"api.stocktake.set_counted.sid", "variant_id":"api.stocktake.set_counted.variant_id", "counted_qty":"api.stocktake.SetIn"}, "stocktake.detail": {"session_id":"api.stocktake.detail.sid"}, "stocktake.close": {"session_id":"api.stocktake.close.sid"},
-    "sales.checkout": {**{p:"api.sales.SaleIn" for p in ("payment","order_discount","paid","items","employee")}, **{p:"api.sales.ItemIn" for p in ("items[].variant_id","items[].qty","items[].unit_price","items[].discount")}}, "sales.list": {p:f"api.sales.list_sales.{p}" for p in ("date_from","date_to","payment")}, "sales.summary": {p:f"api.sales.summary.{p}" for p in ("date_from","date_to","payment","date")}, "sales.export": {p:f"api.sales.export_csv.{p}" for p in ("date_from","date_to","payment")},
+    "sales.checkout": {**{p:"api.sales.SaleIn" for p in ("payment","order_discount","member_discount","paid","items","employee")}, **{p:"api.sales.ItemIn" for p in ("items[].variant_id","items[].qty","items[].unit_price","items[].discount")}}, "sales.list": {p:f"api.sales.list_sales.{p}" for p in ("date_from","date_to","payment")}, "sales.summary": {p:f"api.sales.summary.{p}" for p in ("date_from","date_to","payment","date")}, "sales.export": {p:f"api.sales.export_csv.{p}" for p in ("date_from","date_to","payment")},
 }
 
 
@@ -185,7 +185,7 @@ ACTION_CONTRACTS = {
     "returns.pending_count": schema([]),
     "payments.list": schema([]),
     "sales.recent": schema([]),
-    "sales.checkout": schema([S("payment", required=True, constraint="must be present in Setting.payments", blank="reject"), I("order_discount", default=0, constraint=">=0"), I("paid", default=0, constraint=">=0"), I("employee", required=True, constraint="1..6"), field("items", "list[ItemIn]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), I("items[].qty", required=True, constraint=">0"), I("items[].unit_price", required=True, constraint=">=0"), I("items[].discount", default=0, constraint="0..qty*unit_price")]),
+    "sales.checkout": schema([S("payment", required=True, constraint="must be present in Setting.payments", blank="reject"), I("order_discount", default=0, constraint=">=0"), I("member_discount", default=0, constraint=">=0"), I("paid", default=0, constraint=">=0"), I("employee", required=True, constraint="1..6"), field("items", "list[ItemIn]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), I("items[].qty", required=True, constraint=">0"), I("items[].unit_price", required=True, constraint=">=0"), I("items[].discount", default=0, constraint="0..qty*unit_price")]),
     "sales.list": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")]),
     "sales.summary": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept"), S("date", default="", constraint="empty|YYYY-MM-DD", blank="reject", normalization="copied to date_from/date_to when both absent")]),
     "sales.export_save": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")], notes=("Transport-only; forwards unchanged to sales.export.",)),
@@ -320,6 +320,7 @@ EXPECTED_DEFAULTS = {
         ("phone_brands.list","all"), ("device_types.list","all"), ("models.list","all"),
         ("fields.list","common"), ("options.list","all"),
         ("sales.checkout","order_discount"),
+        ("sales.checkout","member_discount"),
         ("sales.checkout","paid"),
         ("sales.checkout","items[].discount"),
         ("variants.update_editor","store_barcode_count"),
@@ -817,7 +818,7 @@ class ActionContractTests(FacadeTestCase):
                     for action,contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items()
                     for path,spec in contract["fields"].items()
                     if spec["default"] != "missing"}
-        self.assertEqual(len(declared), 100)
+        self.assertEqual(len(declared), 101)
         self.assertEqual(declared, EXPECTED_DEFAULTS)
         executed = {}
         for (action,path), expected in EXPECTED_DEFAULTS.items():
@@ -857,7 +858,7 @@ class ActionContractTests(FacadeTestCase):
         self.assertNotIn("skipped", executed.values())
         self.assertEqual(
             {strategy: list(executed.values()).count(strategy) for strategy in set(executed.values())},
-            {"materialized_by_validator":17, "exact_validator_omission":83},
+            {"materialized_by_validator":18, "exact_validator_omission":83},
         )
 
         field_id = self.invoke("fields.create", {"name":"預設型態"})["field_id"]

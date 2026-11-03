@@ -28,6 +28,19 @@ class TestSales(FacadeTestCase):
         self.assertEqual(r["change"], 0)
         self.assertEqual(self._stock(), 8)
 
+    def test_member_discount_reduces_total_and_is_recorded(self):
+        r = self._sale(order_discount=100, member_discount=50, paid=850)
+        self.assertEqual(r["total"], 850)   # 2*500-100-50
+        sale = self.invoke("sales.recent")[0]
+        self.assertEqual((sale["order_discount"], sale["member_discount"]), (100, 50))
+        self.assertIn("會員折扣", self.invoke("sales.export", {})["content"])
+
+    def test_member_discount_rejects_negative_and_over_total(self):
+        for amount in (-1, 1001):
+            with self.assertRaises(Exception):
+                self._sale(member_discount=amount, paid=0)
+        self.assertEqual(self._stock(), 10)
+
     def test_recent_returns_latest_five_sales_with_items(self):
         ids = [self._sale(items=[{"variant_id": self.vid, "qty": 1, "unit_price": 500}], paid=500)["sale_id"]
                for _ in range(6)]

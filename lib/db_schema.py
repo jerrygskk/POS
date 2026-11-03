@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS Sale(
   ts TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   payment TEXT NOT NULL,
   order_discount INTEGER NOT NULL DEFAULT 0,  -- 整單折抵(元)
+  member_discount INTEGER NOT NULL DEFAULT 0,  -- 會員折扣(元,客人以點數折換)
   total INTEGER NOT NULL,         -- 應收
   paid INTEGER NOT NULL,          -- 實收
   change INTEGER NOT NULL DEFAULT 0,
@@ -557,6 +558,13 @@ def _mig_returns(conn):
                  "ON StocktakeSession((status IN ('open','pending'))) WHERE status IN ('open','pending')")
 
 
+def _mig_member_discount(conn):
+    """銷售單加會員折扣;舊單為 0。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(Sale)")}
+    if "member_discount" not in cols:
+        conn.execute("ALTER TABLE Sale ADD COLUMN member_discount INTEGER NOT NULL DEFAULT 0")
+
+
 def _schema_ddl(table):
     """取現行 SCHEMA 裡該表括號內的定義(含結尾右括號),避免 migration 另抄一份。"""
     return SCHEMA.split(f"CREATE TABLE IF NOT EXISTS {table}(", 1)[1].split(";", 1)[0]
@@ -582,6 +590,7 @@ MIGRATIONS = [
     (BASE_VERSION + 17, _mig_stocktake_approval),
     (BASE_VERSION + 18, _mig_device_type),
     (BASE_VERSION + 19, _mig_returns),
+    (BASE_VERSION + 20, _mig_member_discount),
 ]
 
 # 最新版號 = 初版 + 遷移筆數;全新 DB 建 SCHEMA 即為此版

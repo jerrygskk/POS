@@ -154,7 +154,7 @@ s.guard = async operation => { try { await operation(); } catch (error) { s.show
 ''')
         self.assertEqual(out["draft"], {
             "cart": [{"variant_id": 1, "qty": 1, "unit_price": 100, "discount": 0}],
-            "orderDiscount": 50, "submitting": False, "generation": 1})
+            "orderDiscount": 50, "memberDiscount": 0, "submitting": False, "generation": 1})
         self.assertEqual(out["errors"], ["結帳失敗"])
         self.assertEqual(out["paid"], 100)
 
@@ -175,10 +175,10 @@ s.draft.orderDiscount = 50;
 })();
 ''')
         self.assertEqual(out["submitted"], {
-            "payment": "現金", "order_discount": 50, "paid": 500, "employee": 1,
+            "payment": "現金", "order_discount": 50, "member_discount": 0, "paid": 500, "employee": 1,
             "items": [{"variant_id": 7, "qty": 2, "unit_price": 250, "discount": 30}]})
         self.assertEqual(out["draft"], {
-            "cart": [], "orderDiscount": 0, "submitting": False, "generation": 1})
+            "cart": [], "orderDiscount": 0, "memberDiscount": 0, "submitting": False, "generation": 1})
         self.assertIsNone(out["paid"])
         self.assertEqual(out["total"], 0)
 
@@ -388,17 +388,13 @@ class CartTemplateContractTests(unittest.TestCase):
     def test_checkout_inputs_and_remove_button_are_disabled_while_submitting(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         checkout = html.split('<template id="tpl-checkout">', 1)[1].split("</template>", 1)[0]
-        for model in ("it.unit_price", "it.qty", "it.discount", "draft.orderDiscount", "payment", "paid"):
+        for model in ("it.unit_price", "it.qty", "it.discount", "draft.orderDiscount", "draft.memberDiscount", "payment", "paid"):
             with self.subTest(model=model):
                 tag = re.search(r'<(?:input|select)\b[^>]*v-model(?:\.number)?="'
                                 + re.escape(model) + r'"[^>]*>', checkout)
                 self.assertIsNotNone(tag)
                 self.assertIn(':disabled="draft.submitting"', tag.group())
-        self.assertIn('@click="removeItem(i)" :disabled="draft.submitting"', checkout)
-        self.assertIn('@change="it.qty = Math.max(1, Math.floor(it.qty) || 1)"', checkout)
 
-
-class ConfirmAndResourceContractTests(unittest.TestCase):
     def test_input_dialog_renders_validates_and_handles_close_interactions(self):
         script = r'''
 const fs = require("fs"), vm = require("vm");

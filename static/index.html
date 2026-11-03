@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=263">
+<link rel="stylesheet" href="css/pos.css?v=267">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=263" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=267" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -65,6 +65,7 @@
   </table>
   <div class="pay-panel">
     <label>整單折抵 <input type="number" v-model.number="draft.orderDiscount" min="0" class="w80" :disabled="draft.submitting"></label>
+    <label>會員折扣 <input type="number" v-model.number="draft.memberDiscount" min="0" class="w80" :disabled="draft.submitting"></label>
     <label>付款方式
       <select v-model="payment" :disabled="draft.submitting"><option v-for="p in payments" :key="p">{{ p }}</option></select>
     </label>
@@ -314,15 +315,15 @@
           <div v-for="(amt, p) in summary.by_payment" :key="p">{{ p }}:{{ amt }} 元</div>
         </div>
         <table>
-          <thead><tr><th>編號</th><th>時間</th><th>員工</th><th>付款</th><th>整單折抵</th><th>應收</th><th></th></tr></thead>
+          <thead><tr><th>編號</th><th>時間</th><th>員工</th><th>付款</th><th>整單折抵</th><th>會員折扣</th><th>應收</th><th></th></tr></thead>
           <tbody>
             <template v-for="s in sales" :key="s.sale_id">
               <tr>
                 <td>{{ s.sale_id }}</td><td>{{ s.ts }}</td><td>{{ s.employee }}</td><td>{{ s.payment }}</td>
-                <td>{{ s.order_discount }}</td><td>{{ s.total }}</td>
+                <td>{{ s.order_discount }}</td><td>{{ s.member_discount }}</td><td>{{ s.total }}</td>
                 <td><button @click="toggle(s.sale_id)">{{ expanded===s.sale_id ? '收合' : '明細' }}</button></td>
               </tr>
-              <tr v-if="expanded===s.sale_id"><td colspan="7">
+              <tr v-if="expanded===s.sale_id"><td colspan="8">
                 <div v-for="it in s.items">
                   {{ it.name }}|{{ attrText(it) }}|{{ it.qty }} 件 ×
                   {{ it.unit_price }} 元(折 {{ it.discount }})
@@ -835,27 +836,27 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=263"></script>
-<script src="js/api.js?v=263"></script>
-<script src="js/confirm.js?v=263"></script>
-<script src="js/auth.js?v=263"></script>
-<script src="js/pos_shared.js?v=263"></script>
-<script src="js/catalogfields.js?v=263"></script>
-<script src="js/checkout.js?v=263"></script>
-<script src="js/receive.js?v=263"></script>
-<script src="js/stocktake.js?v=263"></script>
-<script src="js/returns.js?v=263"></script>
-<script src="js/records.js?v=263"></script>
-<script src="js/catalog.js?v=263"></script>
-<script src="js/sortable.js?v=263"></script>
-<script src="js/combobox.js?v=263"></script>
-<script src="js/optpicker.js?v=263"></script>
-<script src="js/modelpicker.js?v=263"></script>
-<script src="js/employeepicker.js?v=263"></script>
-<script src="js/attrfields.js?v=263"></script>
-<script src="js/settings.js?v=263"></script>
-<script src="js/labels.js?v=263"></script>
-<script src="js/app_update.js?v=263"></script>
-<script src="js/app.js?v=263"></script>
+<script src="js/vue.global.prod.js?v=267"></script>
+<script src="js/api.js?v=267"></script>
+<script src="js/confirm.js?v=267"></script>
+<script src="js/auth.js?v=267"></script>
+<script src="js/pos_shared.js?v=267"></script>
+<script src="js/catalogfields.js?v=267"></script>
+<script src="js/checkout.js?v=267"></script>
+<script src="js/receive.js?v=267"></script>
+<script src="js/stocktake.js?v=267"></script>
+<script src="js/returns.js?v=267"></script>
+<script src="js/records.js?v=267"></script>
+<script src="js/catalog.js?v=267"></script>
+<script src="js/sortable.js?v=267"></script>
+<script src="js/combobox.js?v=267"></script>
+<script src="js/optpicker.js?v=267"></script>
+<script src="js/modelpicker.js?v=267"></script>
+<script src="js/employeepicker.js?v=267"></script>
+<script src="js/attrfields.js?v=267"></script>
+<script src="js/settings.js?v=267"></script>
+<script src="js/labels.js?v=267"></script>
+<script src="js/app_update.js?v=267"></script>
+<script src="js/app.js?v=267"></script>
 </body>
 </html>
