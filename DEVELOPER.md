@@ -82,7 +82,7 @@ main.py → RuntimePaths.detect() → init_db(pos.db, require_existing=True) →
 - **關鍵輸入驗證**:進貨數量與盤點掃描數量須大於 0,盤點實數不得小於 0;結帳單品折扣不可超過品項小計、總額不得為負,付款方式須存在設定清單。規格欄型別統一由 `lib/product_rules.py` 驗證。
 - **盤點送審／核准**：結案只送審、不動庫存；核准才依快照差額寫入調整。狀態與防重規則見下方「盤點兩段式」。
 - **退貨送審／核准**：與盤點同為兩段式，規則見下方「退貨單」。
-- **有效售價**:`Variant.price` 不為 NULL 時採用,否則退回 `Product.default_price`,兩者皆 NULL 則售價為 `null`。
+- **售價**:只看 `Variant.price`,NULL 表示未定價。
 - **同名欄去重提醒**:`AttributeField` 沒有 `category_id`,同名欄可能有多份(各種類一份);SQLite 的 `UNIQUE` 也不套正規化,故去重不能靠資料庫唯一鍵,一律先以「欄名＋型別＋種類」查再插。
 - **設定頁模板列與型號**:見下方「固定列：適用型號與特性詞條」「規格欄的移除」「新種類的預設模板」三節。
 - **商品資料庫的廠牌篩選**:廠牌下拉只列「目前種類真的有商品」的廠牌(`brands.list` 帶 `with_products`,以 `Product.brand_id` 判斷,不看 `BrandCategory` 掛勾)。掛了種類卻一件商品都沒有的廠牌選了只會查無資料。切換種類時重撈清單,原本選的廠牌若不在新清單內自動清成「全部廠牌」。設定頁的廠牌歸屬仍走原本的掛勾清單,不受影響。
@@ -650,7 +650,6 @@ python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_s
 - **會員折扣**:客人以點數折換的金額,店員手動輸入,與整單折抵分開存在 `Sale.member_discount`(v21,舊單為 0)。應收＝品項小計－整單折抵－會員折扣;系統不記錄會員與點數。
 - **收銀金額欄**:單價、數量、折扣、整單折抵、會員折扣、實收都是文字框(無上下箭頭),輸入時只留數字。金額清空視為 0;實收清空維持空白(視為剛好付清);數量打字途中可留白,離開欄位補回至少 1。
 - **收銀小計列**:待結帳表格的 `tfoot`,有品項才顯示,加總數量、單項折扣與小計;金額尚未扣整單折抵與會員折扣。
-- ⚠️ **勿在 v-if/v-else 元素上掛動態 `:key`**:與 prod 版 Vue(`vue.global.prod.js`)的 `stringifyStatic` 靜態節點快取衝突,key 變動重建區塊後快取 vnode 的 DOM 參照被清空,之後所有畫面更新拋 TypeError、整個 app 卡死;dev 版 Vue 測不出來,務必以 prod 版驗證(v0.1.0 後設定頁曾因此崩潰)。內容全走資料綁定即可,不需 key 強制重建。
 
 ## 3. 測試
 
@@ -658,7 +657,7 @@ python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_s
 python -m unittest discover -s tests
 ```
 
-目前入庫 979 個測試,涵蓋 schema/migration、Desktop action 契約、線上更新、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、退貨、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
+涵蓋 schema/migration、Desktop action 契約、線上更新、屬性/選單庫、規格值正規化(VariantAttribute)、選項限定型號(OptionModel)、商品/變體/條碼、進貨庫存、結帳/銷售紀錄、盤點、退貨、備份、標籤版面與列印協定等模組,檔名皆 `test_*.py`。商品資料庫頁的前端邏輯測試會由 Python 呼叫 Node.js 執行；環境缺少 Node.js 時該測試類別會明確標記為 skipped,其餘 Python 測試仍照常執行。
 ⚠️ `tests/test_import_excel.py` 與 `tools/import_excel.py` 一樣**不入庫**(直接 import 該工具,
 缺檔會 error 而非 skip);兩者仍在使用中的機器上會多跑 29 項,匯入驗收結束後一起刪除。
 
@@ -700,18 +699,12 @@ onefile 產出約 32.6 MB，其中 Pillow 為大宗）。`python-barcode` 內附
 `fonts/DejaVuSansMono.ttf` 未被收錄但不影響：本專案傳入的字級為 0，
 `ImageWriter._paint_text` 在載入字型前就先回傳。
 
-**`sys._MEIPASS` 雷**：PyInstaller onefile 模式執行時會把打包資源解壓至暫存目錄 `sys._MEIPASS`；
-若仍以程式檔位置推算 `static/`，打包後會找不到前端。`RuntimePaths.detect()` 在 frozen 環境將
-`static_dir` 指向 `sys._MEIPASS/static`，`DesktopApplication` 再以該路徑載入本機 `index.html`；
-`pos.db`、`backups/` 與 `error.log` 則維持在 exe 同層，不放入暫存解壓目錄。
-
 ## 5. 版號控制
 
 - 版號單一來源 `lib/version.py`(`__version__`),顯示版本一律 `from lib.version import __version__`,不寫死第二份。
 - 進版一律跑 `python tools/bump_version.py {新版號}`,不手改 `version.py`(否則 `version_info.txt` 脫鉤)。
 - `version_info.txt` 由工具自動產生(PyInstaller `--version-file` 用),勿手改;**不入庫**(已 gitignore),fresh clone 需先跑一次 `bump_version.py` 產出才能 build。
 - 版號三碼 主.次.修,日常進第三碼;接受 1~4 碼,`version_info.txt` 自動補 0。
-- tag 順序鐵則:文件/release note 先寫好 → 進版 commit → `git tag v{版號}` → push tag;tag 已 push 要移動:本地 `git tag -f` 後,遠端先刪(`git push origin :refs/tags/v{版號}`)再推。
 
 ## 6. 版本記錄
 
