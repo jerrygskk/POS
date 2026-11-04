@@ -1,13 +1,20 @@
 window.PosPages = window.PosPages || {};
+// 用本機日期;toISOString 是 UTC,台灣早上 8 點前會變成昨天
+function localDateText(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+// 收銀預設當天,其他類別預設含今天的最近 7 天
+function defaultRange(kind) {
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (kind === "sales" ? 0 : 6));
+  return { dateFrom: localDateText(from), dateTo: localDateText(now) };
+}
 window.PosPages["page-records"] = {
   template: "#tpl-records",
   inject: ["showError"],
   data() {
-    // 用本機日期;toISOString 是 UTC,台灣早上 8 點前會變成昨天
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     return { kinds: [["sales", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"], ["returns", "退貨"]], kind: "sales",
-             dateFrom: today, dateTo: today, payment: "", payments: [],
+             ...defaultRange("sales"), payment: "", payments: [],
              sales: [], summary: null, receipts: [], stocktakes: [], returns: [], expanded: new Set() };
   },
   computed: {
@@ -30,6 +37,7 @@ window.PosPages["page-records"] = {
     async selectKind(kind) {
       if (this.kind === kind) return;
       this.kind = kind;
+      Object.assign(this, defaultRange(kind));
       await this.reload();
     },
     isOpen(key) { return this.expanded.has(key); },

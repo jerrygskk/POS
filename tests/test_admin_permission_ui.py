@@ -205,6 +205,9 @@ for(const [kind,[field,data]] of Object.entries(rows)){
  s.collapseAll();assert.ok(!s.isOpen(a)&&!s.isOpen(b));
  s.expandAll();await s.reload();assert.equal(s.expanded.size,0,kind+" 查詢後應全部收合");
 }
+const days=d=>Math.round((new Date(s.dateTo)-new Date(d))/86400000);
+for(const kind of["receive","stocktake","returns"]){await s.selectKind(kind);assert.equal(days(s.dateFrom),6,kind);}
+await s.selectKind("sales");assert.equal(s.dateFrom,s.dateTo);
 view.app.unmount();
 ''')
 
