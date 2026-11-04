@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=268">
+<link rel="stylesheet" href="css/pos.css?v=269">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=268" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=269" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -312,11 +312,17 @@
         <button class="primary" @click="reload">查詢</button>
         <button v-if="kind==='sales' && isAdmin" @click="exportCsv">匯出 CSV</button>
       </div>
-      <template v-if="kind==='sales'">
-        <div v-if="summary" class="pay-panel">
+      <div v-if="(kind==='sales' && summary) || rowKeys.length" class="records-bar">
+        <div v-if="kind==='sales' && summary" class="pay-panel">
           <div>{{ dateFrom }} 小結:{{ summary.count }} 筆,共 {{ summary.total }} 元</div>
           <div v-for="(amt, p) in summary.by_payment" :key="p">{{ p }}:{{ amt }} 元</div>
         </div>
+        <div v-if="rowKeys.length" class="records-bar-actions">
+          <button @click="expandAll">展開全部</button>
+          <button @click="collapseAll">收合全部</button>
+        </div>
+      </div>
+      <template v-if="kind==='sales'">
         <table>
           <thead><tr><th>編號</th><th>時間</th><th>員工</th><th>付款</th><th>整單折抵</th><th>會員折扣</th><th>應收</th><th></th></tr></thead>
           <tbody>
@@ -324,9 +330,9 @@
               <tr>
                 <td>{{ s.sale_id }}</td><td>{{ s.ts }}</td><td>{{ s.employee }}</td><td>{{ s.payment }}</td>
                 <td>{{ s.order_discount }}</td><td>{{ s.member_discount }}</td><td>{{ s.total }}</td>
-                <td><button @click="toggle(s.sale_id)">{{ expanded===s.sale_id ? '收合' : '明細' }}</button></td>
+                <td><button @click="toggle(s.sale_id)">{{ isOpen(s.sale_id) ? '收合' : '明細' }}</button></td>
               </tr>
-              <tr v-if="expanded===s.sale_id"><td colspan="8">
+              <tr v-if="isOpen(s.sale_id)"><td colspan="8">
                 <div v-for="it in s.items">
                   {{ it.name }}|{{ attrText(it) }}|{{ it.qty }} 件 ×
                   {{ it.unit_price }} 元(折 {{ it.discount }})
@@ -343,9 +349,9 @@
             <tr>
               <td>{{ r.ts }}</td><td>{{ r.employee ?? '—' }}</td>
               <td>{{ r.items.length }}</td>
-              <td><button @click="toggle('r' + i)">{{ expanded==='r' + i ? '收合' : '明細' }}</button></td>
+              <td><button @click="toggle(i)">{{ isOpen(i) ? '收合' : '明細' }}</button></td>
             </tr>
-            <tr v-if="expanded==='r' + i"><td colspan="4">
+            <tr v-if="isOpen(i)"><td colspan="4">
               <div v-for="it in r.items">
                 {{ it.name }}|{{ attrText(it) }}|進貨 {{ it.qty }} 件(目前庫存 {{ it.stock }} 件)
               </div>
@@ -362,9 +368,9 @@
               <td>{{ t.status==='cancelled' ? '已作廢（員工 ' + t.cancelled_by + '）' : '已核准' }}</td>
               <td>{{ t.approved_at || t.cancelled_at }}</td>
               <td>{{ t.employee }}</td><td>{{ t.items.length }}</td>
-              <td><button @click="toggle('t' + t.return_id)">{{ expanded==='t' + t.return_id ? '收合' : '明細' }}</button></td>
+              <td><button @click="toggle(t.return_id)">{{ isOpen(t.return_id) ? '收合' : '明細' }}</button></td>
             </tr>
-            <tr v-if="expanded==='t' + t.return_id"><td colspan="7">
+            <tr v-if="isOpen(t.return_id)"><td colspan="7">
               <div v-for="it in t.items">
                 {{ it.name }}|{{ attrText(it) }}|{{ it.qty }} 件<template v-if="it.sale_id">（銷售單 {{ it.sale_id }}）</template>|{{ t.status==='cancelled' ? '—' : dispositionText(it.disposition) }}<template v-if="it.reason">（原因：{{ it.reason }}）</template>
               </div>
@@ -381,9 +387,9 @@
               <td>{{ t.status==='cancelled' ? '已作廢（員工 ' + t.cancelled_by + '）' : '已核准' }}</td>
               <td>{{ t.approved_at || t.cancelled_at }}</td>
               <td>{{ t.employee }}</td><td>{{ t.diff_count }}</td>
-              <td><button @click="toggle(t.session_id)">{{ expanded===t.session_id ? '收合' : '明細' }}</button></td>
+              <td><button @click="toggle(t.session_id)">{{ isOpen(t.session_id) ? '收合' : '明細' }}</button></td>
             </tr>
-            <tr v-if="expanded===t.session_id"><td colspan="7">
+            <tr v-if="isOpen(t.session_id)"><td colspan="7">
               <div v-for="it in t.items">
                 {{ it.name }}|{{ attrText(it) }}|系統 {{ it.system_qty }}、實盤 {{ it.counted_qty }}、差異
                 {{ it.diff > 0 ? '+' + it.diff : it.diff }}<template v-if="it.note">（原因：{{ it.note }}）</template>
@@ -839,27 +845,27 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=268"></script>
-<script src="js/api.js?v=268"></script>
-<script src="js/confirm.js?v=268"></script>
-<script src="js/auth.js?v=268"></script>
-<script src="js/pos_shared.js?v=268"></script>
-<script src="js/catalogfields.js?v=268"></script>
-<script src="js/checkout.js?v=268"></script>
-<script src="js/receive.js?v=268"></script>
-<script src="js/stocktake.js?v=268"></script>
-<script src="js/returns.js?v=268"></script>
-<script src="js/records.js?v=268"></script>
-<script src="js/catalog.js?v=268"></script>
-<script src="js/sortable.js?v=268"></script>
-<script src="js/combobox.js?v=268"></script>
-<script src="js/optpicker.js?v=268"></script>
-<script src="js/modelpicker.js?v=268"></script>
-<script src="js/employeepicker.js?v=268"></script>
-<script src="js/attrfields.js?v=268"></script>
-<script src="js/settings.js?v=268"></script>
-<script src="js/labels.js?v=268"></script>
-<script src="js/app_update.js?v=268"></script>
-<script src="js/app.js?v=268"></script>
+<script src="js/vue.global.prod.js?v=269"></script>
+<script src="js/api.js?v=269"></script>
+<script src="js/confirm.js?v=269"></script>
+<script src="js/auth.js?v=269"></script>
+<script src="js/pos_shared.js?v=269"></script>
+<script src="js/catalogfields.js?v=269"></script>
+<script src="js/checkout.js?v=269"></script>
+<script src="js/receive.js?v=269"></script>
+<script src="js/stocktake.js?v=269"></script>
+<script src="js/returns.js?v=269"></script>
+<script src="js/records.js?v=269"></script>
+<script src="js/catalog.js?v=269"></script>
+<script src="js/sortable.js?v=269"></script>
+<script src="js/combobox.js?v=269"></script>
+<script src="js/optpicker.js?v=269"></script>
+<script src="js/modelpicker.js?v=269"></script>
+<script src="js/employeepicker.js?v=269"></script>
+<script src="js/attrfields.js?v=269"></script>
+<script src="js/settings.js?v=269"></script>
+<script src="js/labels.js?v=269"></script>
+<script src="js/app_update.js?v=269"></script>
+<script src="js/app.js?v=269"></script>
 </body>
 </html>

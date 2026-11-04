@@ -693,3 +693,7 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .receive-table tr.receive-row-hit > td { background: var(--accent-soft); }
 /* 盤點審核:標記退回的品項整列淡紅底,一眼看出哪些會被退回 */
 tr.stocktake-row-returned > td { background: rgba(220, 38, 38, 0.08); color: var(--danger); }
+/* 紀錄查詢:小結靠左,展開／收合全部靠右 */
+.records-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.records-bar .pay-panel { flex: 1 1 auto; min-width: 0; margin: 0; flex-wrap: wrap; }
+.records-bar-actions { display: flex; gap: 8px; flex: 0 0 auto; margin-left: auto; }

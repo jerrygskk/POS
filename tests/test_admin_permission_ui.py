@@ -187,6 +187,27 @@ auth.isAdmin=true;await tick();assert.ok(button(receive.dom,"前往商品設定"
 receive.app.unmount();records.app.unmount();
 ''')
 
+    def test_records_expand_multiple_rows_and_all_in_every_kind(self):
+        self.run_js(r'''
+load("static/js/records.js");
+const view=mount(context.window.PosPages["page-records"],template("records"));
+const s=view.state;await tick();
+assert.ok(!button(view.dom,"展開全部"));
+const rows={sales:["sales",[{sale_id:1,items:[]},{sale_id:2,items:[]}]],receive:["receipts",[{items:[]},{items:[]}]],
+ returns:["returns",[{return_id:1,items:[]},{return_id:2,items:[]}]],stocktake:["stocktakes",[{session_id:1,items:[]},{session_id:2,items:[]}]]};
+for(const [kind,[field,data]] of Object.entries(rows)){
+ await s.selectKind(kind);await tick();s[field]=data;await tick();
+ assert.ok(button(view.dom,"展開全部"),kind);assert.ok(button(view.dom,"收合全部"),kind);
+ const [a,b]=s.rowKeys;
+ s.toggle(a);s.toggle(b);assert.ok(s.isOpen(a)&&s.isOpen(b),kind+" 應可同時展開");
+ s.toggle(a);assert.ok(!s.isOpen(a)&&s.isOpen(b),kind+" 只收合該筆");
+ s.expandAll();assert.ok(s.isOpen(a)&&s.isOpen(b));
+ s.collapseAll();assert.ok(!s.isOpen(a)&&!s.isOpen(b));
+ s.expandAll();await s.reload();assert.equal(s.expanded.size,0,kind+" 查詢後應全部收合");
+}
+view.app.unmount();
+''')
+
     def test_password_dialog_thrown_validation_restores_cancel_and_sync_success_resolves_once(self):
         self.run_js(r'''
 function element(tag){const n=node(tag);n.appendChild=child=>{child.parent=n;n.children.push(child);return child;};
