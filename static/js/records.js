@@ -48,6 +48,10 @@ window.PosPages["page-records"] = {
     },
     expandAll() { this.expanded = new Set(this.rowKeys); },
     collapseAll() { this.expanded = new Set(); },
+    // 主列時間只顯示到分;資料本身不變
+    minuteText(ts) { return String(ts || "").slice(0, 16); },
+    amountText(value) { return value ? value : "—"; },
+    specText(row) { return this.attrText(row).replaceAll("｜", "・"); },
     async reload() {
       // 查詢後資料可能換了;進貨舊紀錄只能用列序當鍵,保留展開會開到別筆
       this.collapseAll();

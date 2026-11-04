@@ -697,3 +697,22 @@ tr.stocktake-row-returned > td { background: rgba(220, 38, 38, 0.08); color: var
 .records-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
 .records-bar .pay-panel { flex: 1 1 auto; min-width: 0; margin: 0; flex-wrap: wrap; }
 .records-bar-actions { display: flex; gap: 8px; flex: 0 0 auto; margin-left: auto; }
+/* 紀錄查詢列表:只留橫線,數字靠右;品名＋規格中位數約 30 個半形字、最長 67,明細品名欄佔剩餘寬度並允許折行 */
+.col-w56 { width: 56px; } .col-w64 { width: 64px; } .col-w72 { width: 72px; } .col-w88 { width: 88px; }
+.col-w92 { width: 92px; } .col-w96 { width: 96px; } .col-w170 { width: 170px; } .col-w180 { width: 180px; }
+.records-table, .records-detail { table-layout: fixed; }
+.records-table th, .records-table td { border-width: 0 0 1px; overflow-wrap: anywhere; }
+.records-table > thead th { color: #636366; font-size: 14px; font-weight: 600; background: transparent; }
+.records-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.records-total { font-weight: 600; }
+.records-action { text-align: center; padding-top: 5px; padding-bottom: 5px; }
+.records-toggle { min-width: 64px; padding: 4px 8px; font-size: 14px; white-space: nowrap;
+  background: var(--bg); border-color: var(--pressed); }
+.records-toggle:hover { background: var(--hover); }
+.records-toggle.on { background: var(--accent-soft); border-color: var(--accent); color: var(--primary-active); }
+.records-table td.records-detail-cell { padding: 6px 10px 10px 24px; background: var(--bg); }
+.records-detail { background: transparent; font-size: 15px; }
+.records-table .records-detail th { color: #636366; font-size: 13px; font-weight: 400; background: transparent; padding: 4px 8px; }
+.records-table .records-detail td { background: transparent; padding: 5px 8px; }
+.records-table .records-detail tbody tr:last-child td { border-bottom: 0; }
+.records-spec { color: #636366; font-size: 14px; }
