@@ -20,8 +20,8 @@ class AdminPermissionUiTests(unittest.TestCase):
         self.run_js(r'''
 load("static/js/catalog.js");
 const p={product_id:1,category_id:1,name:"fictional product",active:1,variants:[
- {variant_id:1,active:1,models:[],stock:5,price:10,effective_price:10,attributes:{},barcodes:[{source:"store",barcode:"F1"}]},
- {variant_id:2,active:0,models:[],stock:0,price:null,effective_price:null,attributes:{},barcodes:[]}]};
+ {variant_id:1,active:1,models:[],stock:5,price:10,attributes:{},barcodes:[{source:"store",barcode:"F1"}]},
+ {variant_id:2,active:0,models:[],stock:0,price:null,attributes:{},barcodes:[]}]};
 const view=mount(context.window.PosPages["page-catalog"],template("catalog"),{products:[p]});
 for(const label of["新增","新增款式","修改規格","停用","啟用","刪除","管理","編輯"])
  assert.ok(!button(view.dom,label),`員工仍看得到 ${label}`);

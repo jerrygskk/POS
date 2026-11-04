@@ -49,9 +49,9 @@ class TestCatalog(FacadeTestCase):
         product = self.invoke("catalog.list")[0]
         self.assertEqual(product["product_id"], result["product_id"]); self.assertNotIn("default_price", product)
         self.assertEqual(len(product["variants"]), 2); first, second = product["variants"]
-        self.assertEqual((first["attributes"]["color"], first["price"], first["effective_price"], first["stock"]), ("blue", 590, 590, 5))
+        self.assertEqual((first["attributes"]["color"], first["price"], first["stock"]), ("blue", 590, 5))
         self.assertTrue(first["active"]); self.assertEqual(first["barcodes"][0]["barcode"], "FX100000001")
-        self.assertEqual((second["price"], second["effective_price"]), (690, 690))
+        self.assertEqual(second["price"], 690)
 
     def test_inactive_product_hidden(self):
         result = self._create(); self.invoke("products.update", {"id": result["product_id"], "fields": {"active": 0}})

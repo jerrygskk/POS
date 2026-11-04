@@ -248,7 +248,11 @@ window.PosPages["page-catalog"] = {
     // 條碼(瀏覽只顯示一條:優先原廠碼,其次自取碼;管理進編輯)
     mainBarcode(v) {
       if (!v.barcodes || !v.barcodes.length) return null;
-      return v.barcodes.find(b => b.source === "factory") || v.barcodes[0];
+      return v.barcodes.find(b => b.source === "store") || v.barcodes[0];
+    },
+    otherBarcodes(v) {
+      const main = this.mainBarcode(v);
+      return main ? v.barcodes.filter(b => b !== main) : [];
     },
   },
 };

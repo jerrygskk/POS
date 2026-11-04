@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=271">
+<link rel="stylesheet" href="css/pos.css?v=278">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=271" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=278" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -429,7 +429,7 @@
 </template>
 <template id="tpl-catalog">
 <div class="page">
-  <div class="catalog-card">
+  <div class="catalog-card" :class="{'catalog-staff': !isAdmin}">
   <div class="scan-row catalog-filter-row">
     <select v-model="fCategory" @change="onCategoryChange">
       <option :value="null">全部種類</option>
@@ -458,21 +458,20 @@
       <col class="catalog-col-stock">
       <col class="catalog-col-barcode">
       <col class="catalog-col-price">
-      <col class="catalog-col-effective-price">
       <col class="catalog-col-status">
-      <col class="catalog-col-actions">
+      <col v-if="isAdmin" class="catalog-col-actions">
     </colgroup>
     <thead><tr><th>型號</th><th>規格</th><th>庫存</th><th>條碼</th>
-      <th>自身售價</th><th>有效售價</th><th>狀態</th><th>操作</th></tr></thead>
+      <th>售價</th><th>狀態</th><th v-if="isAdmin">操作</th></tr></thead>
     <tbody>
       <template v-for="p in displayProducts" :key="p.product_id">
         <tr class="catalog-product-row" :class="{inactive: !p.active}">
-          <td colspan="6" class="catalog-product-info">
+          <td colspan="5" class="catalog-product-info">
             <strong>{{ p.name }}</strong>
             <span v-if="!p.active" class="catalog-inactive-badge">已停用</span>
             <button v-if="isAdmin && p.active" class="btn-sm" @click="openAddVariant(p)">新增款式</button>
           </td>
-          <td colspan="2" class="catalog-product-actions">
+          <td :colspan="isAdmin ? 2 : 1" class="catalog-product-actions">
             <button v-if="isAdmin" class="btn-sm" @click="editInSettings(p)">修改規格</button>
             <button v-if="isAdmin" class="btn-sm" @click="toggleProductActive(p)">{{ p.active ? '停用' : '啟用' }}</button>
             <button v-if="isAdmin" class="btn-sm" @click="deleteProduct(p)">刪除</button>
@@ -495,17 +494,18 @@
           <td :class="{neg: v.stock < 0}">{{ v.stock }}</td>
           <td>
             <span v-if="mainBarcode(v)" class="bc-line">
-              <span class="bc-number" :title="mainBarcode(v).barcode">{{ mainBarcode(v).barcode }}</span><span class="bc-tag">{{ mainBarcode(v).source === 'store' ? '(自)' : '' }}</span><span
-                v-if="v.barcodes.length > 1" class="bc-more">+{{ v.barcodes.length - 1 }}</span>
+              <span class="bc-number" :title="mainBarcode(v).barcode">{{ mainBarcode(v).barcode }}</span><span class="bc-tag">{{ mainBarcode(v).source === 'store' ? '(自)' : '' }}</span>
               <button v-if="v.active && !(v.issues && v.issues.length)"
                       class="btn-sm" @click="printLabel(p, v)">印標籤</button>
             </span>
             <button v-else-if="isAdmin" class="btn-sm" @click="openVariantEditor(p, v)">管理</button>
+            <div v-for="b in otherBarcodes(v)" :key="b.barcode" class="bc-line">
+              <span class="bc-number" :title="b.barcode">{{ b.barcode }}</span><span class="bc-tag">{{ b.source === 'store' ? '(自)' : '' }}</span>
+            </div>
           </td>
-          <td>{{ v.price === null ? '—' : v.price }}</td>
-          <td>{{ v.effective_price === null ? '未定價' : v.effective_price }}</td>
+          <td>{{ v.price === null ? '未定價' : v.price }}</td>
           <td>{{ v.issues && v.issues.length ? '待處理' : (v.active ? '啟用' : '已停用') }}</td>
-          <td>
+          <td v-if="isAdmin">
             <template v-if="isAdmin && v.issues && v.issues.length">
               <button class="btn-sm" @click="openVariantEditor(p, v)">編輯</button>
               <button class="btn-sm" @click="deleteVariant(p, v)">刪除</button>
@@ -866,27 +866,27 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=271"></script>
-<script src="js/api.js?v=271"></script>
-<script src="js/confirm.js?v=271"></script>
-<script src="js/auth.js?v=271"></script>
-<script src="js/pos_shared.js?v=271"></script>
-<script src="js/catalogfields.js?v=271"></script>
-<script src="js/checkout.js?v=271"></script>
-<script src="js/receive.js?v=271"></script>
-<script src="js/stocktake.js?v=271"></script>
-<script src="js/returns.js?v=271"></script>
-<script src="js/records.js?v=271"></script>
-<script src="js/catalog.js?v=271"></script>
-<script src="js/sortable.js?v=271"></script>
-<script src="js/combobox.js?v=271"></script>
-<script src="js/optpicker.js?v=271"></script>
-<script src="js/modelpicker.js?v=271"></script>
-<script src="js/employeepicker.js?v=271"></script>
-<script src="js/attrfields.js?v=271"></script>
-<script src="js/settings.js?v=271"></script>
-<script src="js/labels.js?v=271"></script>
-<script src="js/app_update.js?v=271"></script>
-<script src="js/app.js?v=271"></script>
+<script src="js/vue.global.prod.js?v=278"></script>
+<script src="js/api.js?v=278"></script>
+<script src="js/confirm.js?v=278"></script>
+<script src="js/auth.js?v=278"></script>
+<script src="js/pos_shared.js?v=278"></script>
+<script src="js/catalogfields.js?v=278"></script>
+<script src="js/checkout.js?v=278"></script>
+<script src="js/receive.js?v=278"></script>
+<script src="js/stocktake.js?v=278"></script>
+<script src="js/returns.js?v=278"></script>
+<script src="js/records.js?v=278"></script>
+<script src="js/catalog.js?v=278"></script>
+<script src="js/sortable.js?v=278"></script>
+<script src="js/combobox.js?v=278"></script>
+<script src="js/optpicker.js?v=278"></script>
+<script src="js/modelpicker.js?v=278"></script>
+<script src="js/employeepicker.js?v=278"></script>
+<script src="js/attrfields.js?v=278"></script>
+<script src="js/settings.js?v=278"></script>
+<script src="js/labels.js?v=278"></script>
+<script src="js/app_update.js?v=278"></script>
+<script src="js/app.js?v=278"></script>
 </body>
 </html>

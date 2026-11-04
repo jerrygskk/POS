@@ -390,7 +390,7 @@ def catalog(conn, include_inactive=False, category_id=None, brand_id=None, model
     for p in products:
         vs=[]
         for r in sorted(by.get(p["product_id"],[]),key=lambda x:(sorts[x["variant_id"]],x["variant_id"])):
-            vid=r["variant_id"];vs.append({"variant_id":vid,"attributes":attrs.get(vid,{}),"attr_display":disp.get(vid,""),"price":r["price"],"effective_price":r["price"],"stock":stocks.get(vid,0),"active":bool(r["active"]),"models":models.get(vid,[]),"barcodes":bars.get(vid,[]),"issues":issues.get(vid,[])})
+            vid=r["variant_id"];vs.append({"variant_id":vid,"attributes":attrs.get(vid,{}),"attr_display":disp.get(vid,""),"price":r["price"],"stock":stocks.get(vid,0),"active":bool(r["active"]),"models":models.get(vid,[]),"barcodes":bars.get(vid,[]),"issues":issues.get(vid,[])})
         if (model_id is not None or pending) and not vs:continue
         out.append({"product_id":p["product_id"],"name":p["name"],"category_id":p["category_id"],"category_name":p["category_name"],"brand_id":p["brand_id"],"brand_name":p["brand_name"],"note":p["note"],"active":bool(p["active"]),"variants":vs})
     return out

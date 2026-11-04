@@ -521,20 +521,19 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertIn('class="btn-sm"', line)
         self.assertIn('v-if="v.active && !(v.issues && v.issues.length)"', line)
         self.assertNotIn('hasStoreBarcode', self.catalog)
-        self.assertLess(line.index('class="bc-more"'), line.index('printLabel(p, v)'))
         actions = self.catalog.split("<td>{{ v.issues", 1)[1].split('</tr>', 1)[0]
         self.assertNotIn("printLabel", actions)
 
     def test_barcode_number_can_truncate_with_full_title_and_fixed_controls(self):
         self.assertIn('<span class="bc-number" :title="mainBarcode(v).barcode">{{ mainBarcode(v).barcode }}</span>', self.catalog)
         self.assertIn('.bc-number { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }', self.css)
-        self.assertIn('.bc-line .bc-tag, .bc-line .bc-more, .bc-line button { flex-shrink: 0; }', self.css)
+        self.assertIn('.bc-line .bc-tag, .bc-line button { flex-shrink: 0; }', self.css)
 
     def test_product_header_and_variant_columns_are_separate(self):
         self.assertIn('<div class="scan-row catalog-filter-row">', self.catalog)
         self.assertIn('<div class="catalog-table-scroll">', self.catalog)
-        self.assertIn('<td colspan="6" class="catalog-product-info">', self.catalog)
-        self.assertIn('<td colspan="2" class="catalog-product-actions">', self.catalog)
+        self.assertIn('<td colspan="5" class="catalog-product-info">', self.catalog)
+        self.assertIn('<td :colspan="isAdmin ? 2 : 1" class="catalog-product-actions">', self.catalog)
         self.assertIn('<col class="catalog-col-model">', self.catalog)
         self.assertIn('<col class="catalog-col-spec">', self.catalog)
         self.assertIn('class="catalog-variant-row"', self.catalog)
@@ -544,7 +543,7 @@ class CatalogTemplateContractTests(unittest.TestCase):
         )
         expected = (
             "<th>型號</th><th>規格</th><th>庫存</th><th>條碼</th>\n"
-            "      <th>自身售價</th><th>有效售價</th><th>狀態</th><th>操作</th>"
+            "      <th>售價</th><th>狀態</th><th v-if=\"isAdmin\">操作</th>"
         )
         self.assertIn(expected, self.catalog)
         self.assertIn(".catalog-table-scroll { overflow-x: auto;", self.css)
@@ -554,7 +553,7 @@ class CatalogTemplateContractTests(unittest.TestCase):
             "  padding-bottom: 2px; flex-wrap: nowrap; }",
             self.css,
         )
-        self.assertIn(".catalog-table { min-width: 1230px;", self.css)
+        self.assertIn(".catalog-table { min-width: 1125px;", self.css)
         self.assertIn(".catalog-table .catalog-variant-row > td { vertical-align: top; }", self.css)
         self.assertIn(".catalog-table .catalog-product-row > td { vertical-align: middle;", self.css)
         self.assertIn(".catalog-col-model { width: 130px; }", self.css)
@@ -586,7 +585,7 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertNotIn("至設定修改", self.catalog)
 
         info = self.catalog.split(
-            '<td colspan="6" class="catalog-product-info">', 1)[1].split(
+            '<td colspan="5" class="catalog-product-info">', 1)[1].split(
                 "</td>", 1)[0]
         self.assertIn("{{ p.name }}", info)
         self.assertIn('v-if="!p.active"', info)
@@ -595,19 +594,18 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertNotIn("廠牌", info)
         self.assertNotIn("p.active ?", info)
 
-    # 八欄欄寬與白卡寬度互相依賴:欄寬總和 1230 + 左右內距 16x2 = 白卡上限 1262。
+    # 七欄欄寬與白卡寬度互相依賴:欄寬總和 1125 + 外框 1 + 左右內距 16x2 = 白卡上限 1158。
     # 只改其中一邊會讓表格被撐大或在卡片右緣擠出無作用的橫向捲軸,故以測試綁死。
     CATALOG_COL_WIDTHS = {
         "catalog-col-model": 130,
         "catalog-col-spec": 410,
         "catalog-col-stock": 55,
-        "catalog-col-barcode": 225,
+        "catalog-col-barcode": 210,
         "catalog-col-price": 85,
-        "catalog-col-effective-price": 85,
-        "catalog-col-status": 55,
-        "catalog-col-actions": 185,
+        "catalog-col-status": 70,
+        "catalog-col-actions": 165,
     }
-    CATALOG_CONTENT_WIDTH = 1230
+    CATALOG_CONTENT_WIDTH = 1125
     CATALOG_CARD_PADDING = 16
     # border-collapse:collapse 會把表格最外圈框線的一半畫在欄寬之外,
     # 所以表格實際寬度是欄寬總和 +1。白卡少留這 1px 就會溢出,
@@ -637,15 +635,17 @@ class CatalogTemplateContractTests(unittest.TestCase):
             self._css_px("catalog-table", "min-width"),
             self.CATALOG_CONTENT_WIDTH)
 
-    # 店內最長規格「10000mAh | Qi2 | 磁吸 | 支架 | 鈦原色 | Qi2超薄磁吸支架」
-    # 以 Microsoft JhengHei 15px 量測為 383px,加儲存格內距與框線共 405px。
-    # 規格欄小於這個值,那 43 筆長規格就會折行、該列變高。
-    def test_catalog_spec_column_fits_longest_real_spec(self):
+    # 13 碼條碼約 117px,加印標籤鈕 61、間距與內距框線共約 205px;更長的以省略號顯示。
+    # 最長規格量測 383px,加內距與框線共 405px,規格欄不得小於此值。
+    # 狀態欄要放得下「已停用」「待處理」三個字。
+    def test_catalog_barcode_and_status_columns_fit_real_content(self):
+        self.assertGreaterEqual(self._css_px("catalog-col-barcode", "width"), 205)
         self.assertGreaterEqual(self._css_px("catalog-col-spec", "width"), 405)
+        self.assertGreaterEqual(self._css_px("catalog-col-status", "width"), 69)
 
     def test_catalog_card_wraps_whole_page(self):
-        self.assertIn('<div class="catalog-card">', self.catalog)
-        card = self.catalog.split('<div class="catalog-card">', 1)[1]
+        self.assertIn('<div class="catalog-card" ', self.catalog)
+        card = self.catalog.split('<div class="catalog-card" ', 1)[1]
         self.assertIn('class="scan-row catalog-filter-row"', card)
         self.assertIn('<div class="catalog-table-scroll">', card)
         self.assertIn("catalog-empty-result", card)
