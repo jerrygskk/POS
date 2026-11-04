@@ -680,6 +680,7 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .fixed-table th { white-space: nowrap; }
 .fixed-table td { overflow-wrap: anywhere; }
 .fixed-table td input:not([type=number]):not(.w100) { width: 100%; min-width: 0; box-sizing: border-box; }
+.fixed-table td select { width: 100%; min-width: 0; }
 .detail-table { min-width: 1020px; }
 .col-w70 { width: 70px; } .col-w80 { width: 80px; } .col-w81 { width: 81px; }
 .col-w100 { width: 100px; } .col-w102 { width: 102px; } .col-w110 { width: 110px; }

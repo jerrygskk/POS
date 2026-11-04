@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=267">
+<link rel="stylesheet" href="css/pos.css?v=268">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=267" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=268" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -273,7 +273,7 @@
     <div v-if="detail.status==='pending' && !isAdmin" class="notice-bar">等待管理者核准</div>
     <table class="fixed-table detail-table">
       <thead><tr><th>商品</th><th>適用機型</th><th>屬性</th><th class="col-w102">數量</th><th class="col-w122">銷售單編號</th><th class="col-w200">退貨原因</th>
-        <th v-if="detail.status!=='open'" class="col-w130">處理方式</th><th v-if="canEdit" class="cart-col-remove"></th></tr></thead>
+        <th v-if="detail.status!=='open'" class="col-w160">處理方式</th><th v-if="canEdit" class="cart-col-remove"></th></tr></thead>
       <tbody><tr v-for="it in detail.items" :key="it.variant_id">
         <td>{{ it.name }}</td><td>{{ modelsText(it) }}</td><td>{{ attrText(it) }}</td>
         <td><input type="number" v-model.number="it.qty" min="1" class="w80"
@@ -839,27 +839,27 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=267"></script>
-<script src="js/api.js?v=267"></script>
-<script src="js/confirm.js?v=267"></script>
-<script src="js/auth.js?v=267"></script>
-<script src="js/pos_shared.js?v=267"></script>
-<script src="js/catalogfields.js?v=267"></script>
-<script src="js/checkout.js?v=267"></script>
-<script src="js/receive.js?v=267"></script>
-<script src="js/stocktake.js?v=267"></script>
-<script src="js/returns.js?v=267"></script>
-<script src="js/records.js?v=267"></script>
-<script src="js/catalog.js?v=267"></script>
-<script src="js/sortable.js?v=267"></script>
-<script src="js/combobox.js?v=267"></script>
-<script src="js/optpicker.js?v=267"></script>
-<script src="js/modelpicker.js?v=267"></script>
-<script src="js/employeepicker.js?v=267"></script>
-<script src="js/attrfields.js?v=267"></script>
-<script src="js/settings.js?v=267"></script>
-<script src="js/labels.js?v=267"></script>
-<script src="js/app_update.js?v=267"></script>
-<script src="js/app.js?v=267"></script>
+<script src="js/vue.global.prod.js?v=268"></script>
+<script src="js/api.js?v=268"></script>
+<script src="js/confirm.js?v=268"></script>
+<script src="js/auth.js?v=268"></script>
+<script src="js/pos_shared.js?v=268"></script>
+<script src="js/catalogfields.js?v=268"></script>
+<script src="js/checkout.js?v=268"></script>
+<script src="js/receive.js?v=268"></script>
+<script src="js/stocktake.js?v=268"></script>
+<script src="js/returns.js?v=268"></script>
+<script src="js/records.js?v=268"></script>
+<script src="js/catalog.js?v=268"></script>
+<script src="js/sortable.js?v=268"></script>
+<script src="js/combobox.js?v=268"></script>
+<script src="js/optpicker.js?v=268"></script>
+<script src="js/modelpicker.js?v=268"></script>
+<script src="js/employeepicker.js?v=268"></script>
+<script src="js/attrfields.js?v=268"></script>
+<script src="js/settings.js?v=268"></script>
+<script src="js/labels.js?v=268"></script>
+<script src="js/app_update.js?v=268"></script>
+<script src="js/app.js?v=268"></script>
 </body>
 </html>
