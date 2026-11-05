@@ -9,8 +9,30 @@ from unittest.mock import Mock, patch
 import main
 from lib import child_window
 from lib.desktop_application import DesktopApplication
-from lib.desktop_bridge import DesktopBridge
+from lib.desktop_bridge import DesktopBridge, window_title
 from lib.runtime_paths import RuntimePaths
+from lib.version import __version__
+
+
+class WindowTitleTests(unittest.TestCase):
+    def _bridge(self, states):
+        class Facade:
+            session = type("S", (), {"touch": lambda self: None})()
+            def invoke(self, action, payload=None):
+                return {"is_admin": states.pop(0)}
+        titles = []
+        window = type("W", (), {"set_title": lambda self, t: titles.append(t)})()
+        return DesktopBridge(facade=Facade(), window=window), titles
+
+    def test_title_shows_role_and_version(self):
+        self.assertEqual(window_title(False), f"POS  [一般使用者]  - v{__version__}")
+        self.assertEqual(window_title(True), f"POS  [管理者模式]  - v{__version__}")
+
+    def test_title_follows_auth_state_including_idle_logout(self):
+        bridge, titles = self._bridge([False, True, True, False])
+        for action in ("auth.status", "auth.login", "auth.touch", "auth.status"):
+            bridge.invoke(action)
+        self.assertEqual(titles, [window_title(True), window_title(False)])
 
 
 class FakeWebview:
@@ -104,7 +126,7 @@ class DesktopApplicationTest(unittest.TestCase):
         self.assertIs(window, webview.window)
         self.assertEqual(len(webview.create_window_calls), 1)
         args, kwargs = webview.create_window_calls[0]
-        self.assertEqual(args[0], "POS")
+        self.assertEqual(args[0], window_title(False))
         self.assertEqual(args[1], self.paths.static_dir.joinpath("index.html").as_uri())
         self.assertIs(kwargs["js_api"], bridge)
         self.assertEqual((kwargs["width"], kwargs["height"]), (1124, 768))

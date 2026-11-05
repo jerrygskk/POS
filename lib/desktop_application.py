@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from lib import selfupdate
 from lib.app_update import AppUpdater
 from lib.auth import ADMIN_ACTIONS, AdminSession
-from lib.desktop_bridge import DesktopBridge
+from lib.desktop_bridge import DesktopBridge, window_title
 from lib.settings_service import SettingsFacade
 from lib.product_service import ProductFacade
 from lib.stock_service import StockFacade
@@ -117,7 +117,7 @@ class DesktopApplication:
         position = fit_position((width, height), work_size)
         extra = {"x": 0, "y": position[1]} if position is not None else {}
         window = webview.create_window(
-            "POS",
+            window_title(False),
             entry_point.resolve().as_uri(),
             js_api=self.bridge,
             width=width,

@@ -3,8 +3,14 @@ import math
 
 from lib.application_errors import ApplicationError, InternalError, ValidationError
 from lib.auth import ADMIN_ACTIONS, PASSIVE_ACTIONS, UPDATE_ACTIONS
+from lib.version import __version__
 
 MAX_DETAILS_DEPTH = 32
+
+
+def window_title(is_admin):
+    role = "管理者模式" if is_admin else "一般使用者"
+    return f"POS  [{role}]  - v{__version__}"
 
 
 class DesktopBridge:
@@ -19,6 +25,7 @@ class DesktopBridge:
         self._file_writer = file_writer or self._write_text
         self._child_window = child_window
         self._updater = updater
+        self._title_is_admin = False
 
     @staticmethod
     def _write_text(path, content):
@@ -84,7 +91,17 @@ class DesktopBridge:
         result = self._facade.invoke(action, {} if payload is None else payload)
         if action == "auth.logout" and self._child_window is not None:
             self._child_window.close(saved=False)
+        if action.startswith("auth."):
+            self._sync_title(result)
         return result
+
+    # 閒置逾時由後端判定,前端下一次查 auth.status 時標題才跟著變,與選單的管理者標籤同步
+    def _sync_title(self, result):
+        is_admin = bool(result.get("is_admin"))
+        if self._window is None or is_admin == self._title_is_admin:
+            return
+        self._title_is_admin = is_admin
+        self._window.set_title(window_title(is_admin))
 
     def _require_child_window(self):
         if self._child_window is None:
