@@ -228,3 +228,13 @@ class TestSalesMember(TestSales):
         content = self.invoke("sales.export")["content"]
         self.assertIn("員工,會員,付款方式", content)
         self.assertIn("王小明", content)
+
+    def test_export_neutralises_formula_text(self):
+        # Excel 會把 = + - @ 開頭的格子當公式執行;文字格前面補單引號,數字格不動
+        for name in ("=1+1", "-小美-", "+886", "@SUM(A1)"):
+            mid = self.invoke("members.create", {"name": name, "phones": ["0999000999"]})["member_id"]
+            self._sale(member_id=mid)
+        content = self.invoke("sales.export")["content"]
+        for name in ("=1+1", "-小美-", "+886", "@SUM(A1)"):
+            self.assertIn(",'" + name + ",", content)
+        self.assertNotIn(",'1,", content)

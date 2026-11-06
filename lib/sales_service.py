@@ -75,6 +75,12 @@ def _checkout_payload(payload):
             "paid": payload.get("paid", 0), "items": clean, "employee": payload["employee"], "member_id": member_id}
 
 
+def _csv_text(value):
+    """文字格開頭是 = + - @ 或 tab／換行時補單引號:Excel 開檔才不會當成公式執行。"""
+    text = str(value)
+    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
 class SalesRepository(BaseRepository):
     def payments(self):
         row = self.connection.execute("SELECT value FROM Setting WHERE key='payments'").fetchone()
@@ -213,8 +219,8 @@ class SalesService:
         writer = csv.writer(buf)
         writer.writerow(["銷售編號", "時間", "員工", "會員", "付款方式", "商品", "規格", "數量", "單價", "單項折扣", "訂單折扣", "會員折扣", "總額"])
         for row in rows:
-            writer.writerow([row["sale_id"], row["ts"], row["employee"], row["member_name"] or "", row["payment"], row["name"],
-                display.get(row["variant_id"], ""), row["qty"], row["unit_price"], row["discount"],
+            writer.writerow([row["sale_id"], row["ts"], row["employee"], _csv_text(row["member_name"] or ""),
+                _csv_text(row["payment"]), _csv_text(row["name"]), _csv_text(display.get(row["variant_id"], "")), row["qty"], row["unit_price"], row["discount"],
                 row["order_discount"], row["member_discount"], row["total"]])
         return {"filename": "sales.csv", "content": "\ufeff" + buf.getvalue()}
 
