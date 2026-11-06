@@ -58,7 +58,7 @@ const first = mkState();
     attributes:{顏色:"黑"}, attr_display:"黑"});
   first.draft.cart[0].qty = 2;
   first.draft.cart[0].unit_price = 250;
-  first.draft.cart[0].discount = 30;
+  first.draft.cart[0].rate = 90;
   first.draft.orderDiscount = 50;
   first.paid = 1000;
   const second = mkState();
@@ -71,10 +71,10 @@ const first = mkState();
 ''')
         self.assertEqual(out["cart"], [{
             "variant_id": 7, "name": "保護殼", "attributes": {"顏色": "黑"},
-            "attr_display": "黑", "unit_price": 250, "qty": 2, "discount": 30}])
+            "attr_display": "黑", "unit_price": 250, "qty": 2, "rate": 90}])
         self.assertEqual(out["orderDiscount"], 50)
         self.assertIsNone(out["paid"])
-        self.assertEqual(out["total"], 420)
+        self.assertEqual(out["total"], 400)
 
     def test_unpriced_item_uses_shared_input_and_cancel_does_not_add(self):
         out = self._run(r'''
@@ -158,12 +158,36 @@ s.guard = async operation => { try { await operation(); } catch (error) { s.show
         self.assertEqual(out["errors"], ["結帳失敗"])
         self.assertEqual(out["paid"], 100)
 
+    def test_line_rate_toggles_and_recomputes_with_qty_and_price(self):
+        out = self._run(r'''
+const s = mkState();
+const it = {variant_id:1, qty:1, unit_price:2980, rate:null};
+s.draft.cart = [it];
+out.rates = s.rates;
+out.none = s.lineDiscount(it);
+s.toggleRate(it, 95); out.r95 = s.lineDiscount(it);
+s.toggleRate(it, 85); out.r85 = [it.rate, s.lineDiscount(it)];
+it.qty = 3; out.qty3 = s.lineDiscount(it);
+it.unit_price = 333; it.qty = 1; out.price = s.lineDiscount(it);
+it.qty = ""; out.blankQty = s.lineDiscount(it);
+it.qty = 1; s.toggleRate(it, 85); out.off = [it.rate, s.lineDiscount(it), s.cartSubtotal];
+done();
+''')
+        self.assertEqual(out["rates"], [95, 90, 85])
+        self.assertEqual(out["none"], 0)
+        self.assertEqual(out["r95"], 149)
+        self.assertEqual(out["r85"], [85, 447])
+        self.assertEqual(out["qty3"], 1341)
+        self.assertEqual(out["price"], 50)
+        self.assertEqual(out["blankQty"], 0)
+        self.assertEqual(out["off"], [None, 0, 333])
+
     def test_successful_checkout_clears_global_draft(self):
         out = self._run(r'''
 let submitted;
 API.checkout = async value => { submitted = value; return {change:80, sale_id:10}; };
 const s = mkState({paid:500});
-s.draft.cart = [{variant_id:7, qty:2, unit_price:250, discount:30}];
+s.draft.cart = [{variant_id:7, qty:2, unit_price:250, rate:90}];
 s.draft.orderDiscount = 50;
 (async () => {
   await s.checkout();
@@ -176,7 +200,7 @@ s.draft.orderDiscount = 50;
 ''')
         self.assertEqual(out["submitted"], {
             "payment": "現金", "order_discount": 50, "member_discount": 0, "paid": 500, "employee": 1, "member_id": None,
-            "items": [{"variant_id": 7, "qty": 2, "unit_price": 250, "discount": 30}]})
+            "items": [{"variant_id": 7, "qty": 2, "unit_price": 250, "discount": 50}]})
         self.assertEqual(out["draft"], {
             "cart": [], "orderDiscount": 0, "memberDiscount": 0, "member": None, "submitting": False, "generation": 1})
         self.assertIsNone(out["paid"])
@@ -187,7 +211,7 @@ s.draft.orderDiscount = 50;
 let submitted;
 API.checkout = async value => { submitted = value; return {change:0, sale_id:11}; };
 const s = mkState();
-s.draft.cart = [{variant_id:7, qty:2, unit_price:250, discount:30}];
+s.draft.cart = [{variant_id:7, qty:2, unit_price:250, rate:90}];
 s.draft.orderDiscount = 50;
 (async () => {
   out.before = {paidAmount:s.paidAmount, blank:s.paidBlank};
@@ -196,8 +220,8 @@ s.draft.orderDiscount = 50;
   done();
 })();
 ''')
-        self.assertEqual(out["before"], {"paidAmount": 420, "blank": True})
-        self.assertEqual(out["paid"], 420)
+        self.assertEqual(out["before"], {"paidAmount": 400, "blank": True})
+        self.assertEqual(out["paid"], 400)
         self.assertEqual(out["msg"], "結帳完成(交易編號 11)")
         self.assertIsNone(out["after"])
 
@@ -506,7 +530,7 @@ class CartTemplateContractTests(unittest.TestCase):
                                 + re.escape(model) + r'"[^>]*>', checkout)
                 self.assertIsNotNone(tag)
                 self.assertIn(':disabled="draft.submitting"', tag.group())
-        for model in ("it.unit_price", "it.qty", "it.discount"):
+        for model in ("it.unit_price", "it.qty"):
             with self.subTest(model=model):
                 tag = re.search(r'<input\b[^>]*:value="' + re.escape(model) + r'"[^>]*>', checkout)
                 self.assertIsNotNone(tag)
@@ -524,6 +548,7 @@ class CartTemplateContractTests(unittest.TestCase):
                 self.assertIn("setDiscount('" + key + "', $event)", tag.group())
                 self.assertIn(':disabled="draft.submitting"', tag.group())
         self.assertIn('@click="removeItem(i)" :disabled="draft.submitting"', checkout)
+        self.assertIn('@click="toggleRate(it, r)" :disabled="draft.submitting"', checkout)
         self.assertIn('@change="it.qty = Math.max(1, Math.floor(it.qty) || 1)"', checkout)
 
 

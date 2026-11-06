@@ -8,12 +8,12 @@ window.PosPages["page-checkout"] = {
   data() {
     return { scanCode: "", searchQ: "", searchResults: [], draft: window.PosCheckoutDraft,
              payments: [], payment: "現金", paid: null, memberQuery: "", memberEdit: null, doneMsg: "", recent: [], recentOpen: false,
-             employee: window.PosEmployee };
+             employee: window.PosEmployee, rates: [95, 90, 85] };
   },
   computed: {
     cartQty() { return this.draft.cart.reduce((s, i) => s + (Number(i.qty) || 0), 0); },
-    cartDiscount() { return this.draft.cart.reduce((s, i) => s + i.discount, 0); },
-    cartSubtotal() { return this.draft.cart.reduce((s, i) => s + i.qty * i.unit_price - i.discount, 0); },
+    cartDiscount() { return this.draft.cart.reduce((s, i) => s + this.lineDiscount(i), 0); },
+    cartSubtotal() { return this.draft.cart.reduce((s, i) => s + i.qty * i.unit_price - this.lineDiscount(i), 0); },
     total() {
       const t = this.cartSubtotal - this.draft.orderDiscount - this.draft.memberDiscount;
       return Math.max(0, t);
@@ -70,7 +70,7 @@ window.PosPages["page-checkout"] = {
       else this.draft.cart.push({ variant_id: r.variant_id, name: r.name,
         attributes: r.attributes, attr_display: r.attr_display, models: r.models,
         label_barcode: r.label_barcode,
-        unit_price: price, qty: 1, discount: 0, stock: r.stock });
+        unit_price: price, qty: 1, rate: null, stock: r.stock });
       this.searchResults = [];
     },
     // 只留數字;清空視為 0,並把濾掉後的結果寫回輸入框
@@ -90,6 +90,13 @@ window.PosPages["page-checkout"] = {
       item[key] = digits === "" ? 0 : Number(digits);
       event.target.value = String(item[key]);
     },
+    // 單品折扣只有固定折數:存選了幾折,金額隨數量/單價即時重算;折後價四捨五入到整數元
+    lineDiscount(item) {
+      if (!item.rate) return 0;
+      const gross = (Number(item.qty) || 0) * item.unit_price;
+      return gross - Math.round(gross * item.rate / 100);
+    },
+    toggleRate(item, rate) { item.rate = item.rate === rate ? null : rate; },
     // 數量打字途中可暫時留白,離開欄位時由 @change 補回至少 1
     setItemQty(item, event) {
       const digits = event.target.value.replace(/\D/g, "");
@@ -167,7 +174,7 @@ window.PosPages["page-checkout"] = {
       this.draft.submitting = true;
       this.draft.generation += 1;
       const snapshot = this.draft.cart.map(i => ({ variant_id: i.variant_id, qty: i.qty,
-        unit_price: i.unit_price, discount: i.discount }));
+        unit_price: i.unit_price, discount: this.lineDiscount(i) }));
       try {
         await this.guard(async () => {
           const r = await API.checkout({

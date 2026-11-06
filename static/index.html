@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=289">
+<link rel="stylesheet" href="css/pos.css?v=291">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=289" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=291" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -56,8 +56,9 @@
         <td><input type="text" inputmode="numeric" class="w80" :value="it.unit_price" @input="setItemAmount(it, 'unit_price', $event)" :disabled="draft.submitting"></td>
         <td><input type="text" inputmode="numeric" class="w60" :value="it.qty" @input="setItemQty(it, $event)" :disabled="draft.submitting"
                    @change="it.qty = Math.max(1, Math.floor(it.qty) || 1)"></td>
-        <td><input type="text" inputmode="numeric" class="w80" :value="it.discount" @input="setItemAmount(it, 'discount', $event)" :disabled="draft.submitting"></td>
-        <td>{{ it.qty * it.unit_price - it.discount }}</td>
+        <td><div class="rate-btns"><button v-for="r in rates" :key="r" type="button" class="chip" :class="{on: it.rate === r}"
+              @click="toggleRate(it, r)" :disabled="draft.submitting">{{ r % 10 ? r : r / 10 }}</button></div></td>
+        <td>{{ it.qty * it.unit_price - lineDiscount(it) }}</td>
         <td :class="{neg: it.qty > it.stock}">{{ it.stock }}</td>
         <td><button class="btn-x" title="移除" @click="removeItem(i)" :disabled="draft.submitting">✕</button></td>
       </tr>
@@ -896,28 +897,28 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=289"></script>
-<script src="js/api.js?v=289"></script>
-<script src="js/confirm.js?v=289"></script>
-<script src="js/auth.js?v=289"></script>
-<script src="js/pos_shared.js?v=289"></script>
-<script src="js/catalogfields.js?v=289"></script>
-<script src="js/checkout.js?v=289"></script>
-<script src="js/receive.js?v=289"></script>
-<script src="js/stocktake.js?v=289"></script>
-<script src="js/returns.js?v=289"></script>
-<script src="js/records.js?v=289"></script>
-<script src="js/catalog.js?v=289"></script>
-<script src="js/sortable.js?v=289"></script>
-<script src="js/combobox.js?v=289"></script>
-<script src="js/optpicker.js?v=289"></script>
-<script src="js/modelpicker.js?v=289"></script>
-<script src="js/employeepicker.js?v=289"></script>
-<script src="js/membereditor.js?v=289"></script>
-<script src="js/attrfields.js?v=289"></script>
-<script src="js/settings.js?v=289"></script>
-<script src="js/labels.js?v=289"></script>
-<script src="js/app_update.js?v=289"></script>
-<script src="js/app.js?v=289"></script>
+<script src="js/vue.global.prod.js?v=291"></script>
+<script src="js/api.js?v=291"></script>
+<script src="js/confirm.js?v=291"></script>
+<script src="js/auth.js?v=291"></script>
+<script src="js/pos_shared.js?v=291"></script>
+<script src="js/catalogfields.js?v=291"></script>
+<script src="js/checkout.js?v=291"></script>
+<script src="js/receive.js?v=291"></script>
+<script src="js/stocktake.js?v=291"></script>
+<script src="js/returns.js?v=291"></script>
+<script src="js/records.js?v=291"></script>
+<script src="js/catalog.js?v=291"></script>
+<script src="js/sortable.js?v=291"></script>
+<script src="js/combobox.js?v=291"></script>
+<script src="js/optpicker.js?v=291"></script>
+<script src="js/modelpicker.js?v=291"></script>
+<script src="js/employeepicker.js?v=291"></script>
+<script src="js/membereditor.js?v=291"></script>
+<script src="js/attrfields.js?v=291"></script>
+<script src="js/settings.js?v=291"></script>
+<script src="js/labels.js?v=291"></script>
+<script src="js/app_update.js?v=291"></script>
+<script src="js/app.js?v=291"></script>
 </body>
 </html>

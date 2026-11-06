@@ -676,10 +676,14 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .cart-summary td { background: var(--surface-alt); font-weight: 600; }
 .cart-summary td:first-child { text-align: right; }
 .checkout th { white-space: nowrap; }
-.cart-col-price, .cart-col-discount { width: 102px; }
-.cart-col-qty { width: 81px; }
+.cart-col-price { width: 102px; }
+.cart-col-discount { width: 150px; }
+.cart-col-qty { width: 66px; }
+.cart-table td input.w60 { width: 100%; min-width: 0; box-sizing: border-box; padding: 8px 6px; }
+.rate-btns { display: flex; gap: 4px; }
+.rate-btns .chip { flex: 1; justify-content: center; padding: 4px 0; min-width: 0; }
 .cart-col-subtotal { width: 70px; }
-.cart-col-stock { width: 70px; }
+.cart-col-stock { width: 56px; }
 .cart-col-remove { width: 50px; }
 /* 盤點／退貨明細、標籤清單:欄寬固定,掃入商品時標題列不跳動;沒指定寬度的文字欄平分剩餘寬度 */
 .fixed-table { table-layout: fixed; }
