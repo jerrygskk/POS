@@ -181,3 +181,50 @@ class TestSales(FacadeTestCase):
                 self.assertEqual(raised.exception.code, "validation_error")
                 self.assertIn("庫存不足", raised.exception.message)
         self.assertEqual(self._stock(), 2)
+
+
+class TestSalesMember(TestSales):
+    def setUp(self):
+        super().setUp()
+        self.mid = self.invoke("members.create", {"name": "王小明", "phones": ["0912000111"]})["member_id"]
+
+    def test_checkout_records_member(self):
+        sale_id = self._sale(member_id=self.mid)["sale_id"]
+        sale = next(s for s in self.invoke("sales.list") if s["sale_id"] == sale_id)
+        self.assertEqual((sale["member_id"], sale["member_name"]), (self.mid, "王小明"))
+        recent = self.invoke("sales.recent")[0]
+        self.assertEqual(recent["member_name"], "王小明")
+
+    def test_checkout_without_member_is_null(self):
+        self._sale()
+        self._sale(member_id=None)
+        self.assertEqual([s["member_name"] for s in self.invoke("sales.list")], [None, None])
+
+    def test_checkout_rejects_deleted_member(self):
+        self.invoke("members.delete", {"member_id": self.mid})
+        with self.assertRaises(ApplicationError) as raised:
+            self._sale(member_id=self.mid)
+        self.assertEqual(raised.exception.message, "會員不存在或已刪除，請重新查詢")
+        self.assertEqual(self._stock(), 10)
+
+    def test_list_shows_member_name_after_delete(self):
+        self._sale(member_id=self.mid)
+        self.invoke("members.delete", {"member_id": self.mid})
+        self.assertEqual(self.invoke("sales.list")[0]["member_name"], "王小明")
+
+    def test_filter_by_member_phone_last3(self):
+        other = self.invoke("members.create", {"name": "李小華", "phones": ["0933000222"]})["member_id"]
+        self._sale(member_id=self.mid)
+        self._sale(member_id=other)
+        self._sale()
+        self.assertEqual([s["member_name"] for s in self.invoke("sales.list", {"member_phone": "111"})], ["王小明"])
+        self.assertEqual(self.invoke("sales.summary", {"member_phone": "0933-000-222"})["count"], 1)
+        self.assertEqual(len(self.invoke("sales.list", {"member_phone": ""})), 3)
+        with self.assertRaises(ApplicationError):
+            self.invoke("sales.list", {"member_phone": "12"})
+
+    def test_export_has_member_column(self):
+        self._sale(member_id=self.mid)
+        content = self.invoke("sales.export")["content"]
+        self.assertIn("員工,會員,付款方式", content)
+        self.assertIn("王小明", content)

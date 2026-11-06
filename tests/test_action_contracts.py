@@ -185,10 +185,16 @@ ACTION_CONTRACTS = {
     "returns.pending_count": schema([]),
     "payments.list": schema([]),
     "sales.recent": schema([]),
-    "sales.checkout": schema([S("payment", required=True, constraint="must be present in Setting.payments", blank="reject"), I("order_discount", default=0, constraint=">=0"), I("member_discount", default=0, constraint=">=0"), I("paid", default=0, constraint=">=0"), I("employee", required=True, constraint="1..6"), field("items", "list[ItemIn]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), I("items[].qty", required=True, constraint=">0"), I("items[].unit_price", required=True, constraint=">=0"), I("items[].discount", default=0, constraint="0..qty*unit_price")]),
-    "sales.list": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")]),
-    "sales.summary": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept"), S("date", default="", constraint="empty|YYYY-MM-DD", blank="reject", normalization="copied to date_from/date_to when both absent")]),
-    "sales.export_save": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")], notes=("Transport-only; forwards unchanged to sales.export.",)),
+    "sales.checkout": schema([S("payment", required=True, constraint="must be present in Setting.payments", blank="reject"), I("order_discount", default=0, constraint=">=0"), I("member_discount", default=0, constraint=">=0"), I("paid", default=0, constraint=">=0"), I("employee", required=True, constraint="1..6"), I("member_id", nullable=True), field("items", "list[ItemIn]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), I("items[].qty", required=True, constraint=">0"), I("items[].unit_price", required=True, constraint=">=0"), I("items[].discount", default=0, constraint="0..qty*unit_price")]),
+    "sales.list": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept"), S("member_phone", default="", constraint="empty|3 or 10 digits", blank="accept")]),
+    "sales.summary": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept"), S("member_phone", default="", constraint="empty|3 or 10 digits", blank="accept"), S("date", default="", constraint="empty|YYYY-MM-DD", blank="reject", normalization="copied to date_from/date_to when both absent")]),
+    "sales.export_save": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept"), S("member_phone", default="", constraint="empty|3 or 10 digits", blank="accept")], notes=("Transport-only; forwards unchanged to sales.export.",)),
+    "members.lookup": schema([S("query", required=True, blank="reject")]),
+    "members.list": schema([S("query", required=True, blank="accept")]),
+    "members.create": schema([S("name", required=True, blank="reject"), field("phones", "list[str]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":1})]),
+    "members.update": schema([I("member_id", required=True), S("name", required=True, blank="reject"), field("phones", "list[str]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":1})]),
+    "members.phone_owners": schema([field("phones", "list[str]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":1}), I("exclude_member_id", required=True, nullable=True)]),
+    "members.delete": schema([I("member_id", required=True)], notes=("Admin only; soft delete (active=0).",)),
     "printing.barcode": schema([I("variant_id", required=True), S("barcode", required=True, blank="reject"), I("copies", default=1, constraint=">=1")]),
     "printing.preview": schema([I("variant_id", required=True), S("barcode", required=True, blank="reject")]),
     "printing.check": schema([field("items", "list[LabelItem]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), S("items[].barcode", required=True, blank="reject")]),
@@ -200,7 +206,7 @@ ACTION_CONTRACTS["variants.batch_precheck"]["notes"] = (
     "Desktop-only read-only precheck; payload matches variants.batch_create.",)
 
 INTERNAL_ACTION_CONTRACTS = {
-    "sales.export": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept")], notes=("Internal target of sales.export_save.",))
+    "sales.export": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("payment", default="", blank="accept"), S("member_phone", default="", constraint="empty|3 or 10 digits", blank="accept")], notes=("Internal target of sales.export_save.",))
 }
 
 SETTINGS_CONTRACT_ACTIONS = {
@@ -246,6 +252,8 @@ TARGET_BY_ACTION = {
     "sales.list":"lib.sales_service.SalesFacade._prepare_payload -> _filters",
     "sales.summary":"lib.sales_service.SalesFacade._prepare_payload -> _filters",
     "sales.export_save":"lib.desktop_bridge.DesktopBridge._export_sales -> lib.sales_service.SalesFacade._prepare_payload",
+    **{action:"lib.member_service.MemberFacade._prepare_payload -> _validate" for action in (
+        "members.lookup","members.list","members.create","members.update","members.phone_owners","members.delete")},
     "printing.barcode":"lib.printing_service.PrintingFacade._prepare_payload -> _validate",
     "printing.preview":"lib.printing_service.PrintingFacade._prepare_payload -> _validate",
     "printing.check":"lib.printing_service.PrintingFacade._prepare_payload -> _validate",
@@ -390,6 +398,8 @@ EXPECTED_DEFAULTS = {
         ("sales.export_save","date_to"), ("sales.export_save","payment"),
         ("sales.export","date_from"), ("sales.export","date_to"),
         ("sales.export","payment"),
+        ("sales.list","member_phone"), ("sales.summary","member_phone"),
+        ("sales.export_save","member_phone"), ("sales.export","member_phone"),
         ("stock.receipts","date_from"), ("stock.receipts","date_to"),
         ("stocktake.history","date_from"), ("stocktake.history","date_to"),
         ("returns.history","date_from"), ("returns.history","date_to"),
@@ -445,6 +455,7 @@ def _sample(spec):
     if rule == "select|text|multi|tags": return "select"
     if rule == "must be present in Setting.payments": return "現金"
     if rule == "must be None on create": return None
+    if rule == "empty|3 or 10 digits": return "111"
     kind = spec["type"]
     if kind == "str": return "sample"
     if kind == "bool|int": return True
@@ -515,6 +526,8 @@ class ActionContractTests(FacadeTestCase):
         self.delete_option_id = next(row["option_id"] for row in self.invoke("options.list", {"field_id":self.field_id}) if row["value"] == "待刪")
         self.delete_product_id = self.invoke("products.create", {"name":"待刪商品","category_id":self.category_id,"variants":[]})["product_id"]
         self.delete_variant_id = self.invoke("variants.create", {"product_id":self.product_id,"fields":{}})["variant_id"]
+        self.member_id = self.invoke("members.create", {"name":"契約會員","phones":["0912000111"]})["member_id"]
+        self.delete_member_id = self.invoke("members.create", {"name":"待刪會員","phones":["0912000222"]})["member_id"]
 
     def valid_payload(self, action):
         values = {
@@ -542,6 +555,11 @@ class ActionContractTests(FacadeTestCase):
             "payments.list":{}, "sales.recent":{}, "sales.checkout":{"payment":"現金","paid":100,"employee":1,"items":[{"variant_id":self.variant_id,"qty":1,"unit_price":100}]}, "sales.list":{}, "sales.summary":{}, "sales.export_save":{}, "printing.barcode":{"variant_id":self.variant_id,"barcode":"contract-1","copies":1},
             "printing.preview":{"variant_id":self.variant_id,"barcode":"contract-1"},
             "printing.check":{"items":[{"variant_id":self.variant_id,"barcode":"contract-1"}]},
+            "members.lookup":{"query":"111"}, "members.list":{"query":""},
+            "members.create":{"name":"契約會員","phones":["0912000111"]},
+            "members.update":{"member_id":self.member_id,"name":"契約會員","phones":["0912000111"]},
+            "members.phone_owners":{"phones":["0912000111"],"exclude_member_id":None},
+            "members.delete":{"member_id":self.delete_member_id},
         }
         return values[action]
 
@@ -551,7 +569,7 @@ class ActionContractTests(FacadeTestCase):
         if action in self.facade.printing.ACTIONS:
             return self.facade.printing._prepare_payload(action, payload)
         for facade in (self.facade.settings, self.facade.products, self.facade.stock,
-                       self.facade.sales, self.facade.stocktake, self.facade.returns):
+                       self.facade.sales, self.facade.stocktake, self.facade.returns, self.facade.members):
             if action in facade.ACTIONS:
                 return facade._prepare_payload(action, payload)
         self.fail(f"unmapped action {action}")
@@ -563,8 +581,8 @@ class ActionContractTests(FacadeTestCase):
         direct = set().union(self.facade.settings.ACTIONS, self.facade.products.ACTIONS,
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
                              self.facade.stocktake.ACTIONS, self.facade.returns.ACTIONS,
-                             self.facade.printing.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 101)
+                             self.facade.printing.ACTIONS, self.facade.members.ACTIONS)
+        self.assertEqual(len(ACTION_CONTRACTS), 107)
         self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS | AUTH_ACTIONS | DESKTOP_UPDATE_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
@@ -760,7 +778,7 @@ class ActionContractTests(FacadeTestCase):
         self.assertEqual(declared, NORMALIZATION_PROBE_PATHS)
         self.assertEqual(
             self.facade.sales._prepare_payload("sales.list", {}),
-            {"date_from":"", "date_to":"", "payment":""},
+            {"date_from":"", "date_to":"", "payment":"", "member_phone":""},
         )
         checkout = self.facade.sales._prepare_payload("sales.checkout", {"employee": 1,
             "payment":"現金", "paid":100,
@@ -769,7 +787,7 @@ class ActionContractTests(FacadeTestCase):
         self.assertEqual(checkout["order_discount"], 0)
         self.assertEqual(checkout["items"][0]["discount"], 0)
         summary = self.facade.sales._prepare_payload("sales.summary", {"date":"2026-08-10"})
-        self.assertEqual(summary, {"date_from":"2026-08-10", "date_to":"2026-08-10", "payment":""})
+        self.assertEqual(summary, {"date_from":"2026-08-10", "date_to":"2026-08-10", "payment":"", "member_phone":""})
 
         with self.assertRaises(ConflictError):
             self.invoke("products.create", {
@@ -818,7 +836,7 @@ class ActionContractTests(FacadeTestCase):
                     for action,contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items()
                     for path,spec in contract["fields"].items()
                     if spec["default"] != "missing"}
-        self.assertEqual(len(declared), 101)
+        self.assertEqual(len(declared), 105)
         self.assertEqual(declared, EXPECTED_DEFAULTS)
         executed = {}
         for (action,path), expected in EXPECTED_DEFAULTS.items():
@@ -836,7 +854,7 @@ class ActionContractTests(FacadeTestCase):
                     if (action, path) == ("sales.summary", "date"):
                         self.assertEqual(
                             prepared,
-                            {"date_from":"", "date_to":"", "payment":""},
+                            {"date_from":"", "date_to":"", "payment":"", "member_phone":""},
                         )
                     else:
                         self.assertEqual(prepared, candidate)
@@ -846,7 +864,7 @@ class ActionContractTests(FacadeTestCase):
                     if (action, path) == ("sales.summary", "date"):
                         self.assertEqual(
                             explicit_prepared,
-                            {"date_from":"", "date_to":"", "payment":""},
+                            {"date_from":"", "date_to":"", "payment":"", "member_phone":""},
                         )
                     else:
                         self.assertEqual(_get_path(explicit_prepared, path), expected)
@@ -858,7 +876,7 @@ class ActionContractTests(FacadeTestCase):
         self.assertNotIn("skipped", executed.values())
         self.assertEqual(
             {strategy: list(executed.values()).count(strategy) for strategy in set(executed.values())},
-            {"materialized_by_validator":18, "exact_validator_omission":83},
+            {"materialized_by_validator":22, "exact_validator_omission":83},
         )
 
         field_id = self.invoke("fields.create", {"name":"預設型態"})["field_id"]

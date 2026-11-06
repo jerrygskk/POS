@@ -8,6 +8,7 @@ from lib import product_data
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ValidationError
 from lib.db import stock_map
+from lib.member_service import phone_pattern
 from lib.product_rules import is_int as _is_int, require_employee
 
 
@@ -17,9 +18,9 @@ def _strict_mapping(payload, allowed):
 
 
 def _filters(payload, legacy_date=False):
-    _strict_mapping(payload, {"date_from", "date_to", "payment", "date"} if legacy_date
-                    else {"date_from", "date_to", "payment"})
-    values = {key: payload.get(key, "") for key in ("date_from", "date_to", "payment")}
+    _strict_mapping(payload, {"date_from", "date_to", "payment", "member_phone", "date"} if legacy_date
+                    else {"date_from", "date_to", "payment", "member_phone"})
+    values = {key: payload.get(key, "") for key in ("date_from", "date_to", "payment", "member_phone")}
     if any(not isinstance(value, str) for value in values.values()):
         raise ValidationError("篩選條件格式不正確")
     date = payload.get("date", "") if legacy_date else ""
@@ -34,13 +35,18 @@ def _filters(payload, legacy_date=False):
             raise ValidationError("日期格式不正確") from None
         if len(value) != 10 or parsed.isoformat() != value:
             raise ValidationError("日期格式不正確")
+    # 會員電話:空白＝不篩;否則同收銀查詢,末三碼或完整 10 碼
+    values["member_phone"] = phone_pattern(values["member_phone"]) if values["member_phone"].strip() else ""
     if date and not values["date_from"] and not values["date_to"]:
         values["date_from"] = values["date_to"] = date
     return values
 
 
 def _checkout_payload(payload):
-    _strict_mapping(payload, {"payment", "order_discount", "member_discount", "paid", "items", "employee"})
+    _strict_mapping(payload, {"payment", "order_discount", "member_discount", "paid", "items", "employee", "member_id"})
+    member_id = payload.get("member_id")
+    if member_id is not None and not _is_int(member_id):
+        raise ValidationError("會員資料格式不正確")
     require_employee(payload.get("employee"))
     if not isinstance(payload.get("payment"), str) or not payload["payment"]:
         raise ValidationError("付款方式不正確")
@@ -66,7 +72,7 @@ def _checkout_payload(payload):
         clean.append(row)
     return {"payment": payload["payment"], "order_discount": payload.get("order_discount", 0),
             "member_discount": payload.get("member_discount", 0),
-            "paid": payload.get("paid", 0), "items": clean, "employee": payload["employee"]}
+            "paid": payload.get("paid", 0), "items": clean, "employee": payload["employee"], "member_id": member_id}
 
 
 class SalesRepository(BaseRepository):
@@ -87,10 +93,13 @@ class SalesRepository(BaseRepository):
             "LEFT JOIN Category c ON p.category_id=c.category_id WHERE v.variant_id=?",
             (variant_id,),).fetchone()
 
-    def create_sale(self, payment, order_discount, member_discount, total, paid, employee):
+    def create_sale(self, payment, order_discount, member_discount, total, paid, employee, member_id):
         return self.connection.execute(
-            "INSERT INTO Sale(payment,order_discount,member_discount,total,paid,change,employee) VALUES(?,?,?,?,?,?,?)",
-            (payment, order_discount, member_discount, total, paid, paid - total, employee)).lastrowid
+            "INSERT INTO Sale(payment,order_discount,member_discount,total,paid,change,employee,member_id) VALUES(?,?,?,?,?,?,?,?)",
+            (payment, order_discount, member_discount, total, paid, paid - total, employee, member_id)).lastrowid
+
+    def member_is_active(self, member_id):
+        return self.connection.execute("SELECT 1 FROM Member WHERE member_id=? AND active=1", (member_id,)).fetchone() is not None
 
     def add_item(self, sale_id, item):
         self.connection.execute(
@@ -111,11 +120,14 @@ class SalesRepository(BaseRepository):
         if filters["payment"]:
             sql += f" AND {prefix}payment=?"
             args.append(filters["payment"])
+        if filters["member_phone"]:
+            sql += f" AND EXISTS (SELECT 1 FROM MemberPhone mp WHERE mp.member_id={prefix or "Sale."}member_id AND mp.phone LIKE ?)"
+            args.append(filters["member_phone"])
         return sql, args
 
-    SALE_ROWS_SQL = ("SELECT s.*,i.variant_id,i.qty,i.unit_price,i.discount,p.name FROM Sale s "
+    SALE_ROWS_SQL = ("SELECT s.*,i.variant_id,i.qty,i.unit_price,i.discount,p.name,m.name member_name FROM Sale s "
                      "JOIN SaleItem i ON s.sale_id=i.sale_id JOIN Variant v ON i.variant_id=v.variant_id "
-                     "JOIN Product p ON v.product_id=p.product_id WHERE 1=1")
+                     "JOIN Product p ON v.product_id=p.product_id LEFT JOIN Member m ON m.member_id=s.member_id WHERE 1=1")
 
     def sale_rows(self, filters):
         suffix, args = self.filter_sql(filters)
@@ -139,6 +151,8 @@ class SalesService:
     def checkout(self, body):
         if body["payment"] not in self.repo.payments():
             raise ValidationError("付款方式未在設定中")
+        if body["member_id"] is not None and not self.repo.member_is_active(body["member_id"]):
+            raise ValidationError("會員不存在或已刪除，請重新查詢")
         required = {}
         variant_rows = {}
         for item in body["items"]:
@@ -160,7 +174,7 @@ class SalesService:
         if total < 0:
             raise ValidationError("折扣後總額不可為負數")
         sale_id = self.repo.create_sale(body["payment"], body["order_discount"], body["member_discount"], total, body["paid"],
-                                       body["employee"])
+                                       body["employee"], body["member_id"])
         for item in body["items"]:
             self.repo.add_item(sale_id, item)
         return {"sale_id": sale_id, "total": total, "change": body["paid"] - total}
@@ -180,7 +194,8 @@ class SalesService:
         for row in rows:
             sale = out.setdefault(row["sale_id"], {"sale_id": row["sale_id"], "ts": row["ts"],
                 "payment": row["payment"], "order_discount": row["order_discount"], "member_discount": row["member_discount"],
-                "total": row["total"], "employee": row["employee"], "items": []})
+                "total": row["total"], "employee": row["employee"],
+                "member_id": row["member_id"], "member_name": row["member_name"], "items": []})
             sale["items"].append({"variant_id": row["variant_id"], "name": row["name"],
                 "attributes": attrs.get(row["variant_id"], {}), "attr_display": display.get(row["variant_id"], ""),
                 "qty": row["qty"], "unit_price": row["unit_price"], "discount": row["discount"]})
@@ -196,9 +211,9 @@ class SalesService:
         display = product_data.display_attrs(self.repo.connection, [row["variant_id"] for row in rows])
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["銷售編號", "時間", "員工", "付款方式", "商品", "規格", "數量", "單價", "單項折扣", "訂單折扣", "會員折扣", "總額"])
+        writer.writerow(["銷售編號", "時間", "員工", "會員", "付款方式", "商品", "規格", "數量", "單價", "單項折扣", "訂單折扣", "會員折扣", "總額"])
         for row in rows:
-            writer.writerow([row["sale_id"], row["ts"], row["employee"], row["payment"], row["name"],
+            writer.writerow([row["sale_id"], row["ts"], row["employee"], row["member_name"] or "", row["payment"], row["name"],
                 display.get(row["variant_id"], ""), row["qty"], row["unit_price"], row["discount"],
                 row["order_discount"], row["member_discount"], row["total"]])
         return {"filename": "sales.csv", "content": "\ufeff" + buf.getvalue()}

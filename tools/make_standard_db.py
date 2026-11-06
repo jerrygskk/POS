@@ -33,7 +33,7 @@ COPY_TABLES = [
     "Category", "AttributeField", "CategoryField", "AttributeOption", "OptionModel",
     "Brand", "BrandCategory", "PhoneBrand", "DeviceType", "PhoneModel",
     "Product", "Variant", "VariantAttribute", "VariantModel", "Barcode",
-    "VariantIssue",
+    "VariantIssue", "Member", "MemberPhone",
 ]
 SKIP_TABLES = ["Sale", "SaleItem", "StockMovement", "StocktakeSession", "StocktakeItem",
                "ReturnSession", "ReturnItem"]

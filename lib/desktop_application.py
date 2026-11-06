@@ -11,6 +11,7 @@ from lib.stock_service import StockFacade
 from lib.sales_service import SalesFacade
 from lib.stocktake_service import StocktakeFacade
 from lib.returns_service import ReturnsFacade
+from lib.member_service import MemberFacade
 from lib.printing_service import PrintingFacade
 from lib.application_errors import ValidationError
 from lib.child_window import (ChildWindowCoordinator, fit_position, fit_size,
@@ -30,6 +31,7 @@ class DesktopFacade:
         self.stocktake = StocktakeFacade(db_path, session=self.session)
         self.returns = ReturnsFacade(db_path, session=self.session)
         self.printing = PrintingFacade(db_path)
+        self.members = MemberFacade(db_path, session=self.session)
 
     def invoke(self, action, payload=None):
         if not isinstance(action, str):
@@ -48,6 +50,8 @@ class DesktopFacade:
             return self.stocktake.invoke(action, payload)
         if action in ReturnsFacade.ACTIONS:
             return self.returns.invoke(action, payload)
+        if action in MemberFacade.ACTIONS:
+            return self.members.invoke(action, payload)
         if action in PrintingFacade.ACTIONS:
             return self.printing.invoke(action, payload)
         return self.settings.invoke(action, payload)

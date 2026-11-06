@@ -131,7 +131,8 @@ CREATE TABLE IF NOT EXISTS Sale(
   total INTEGER NOT NULL,         -- 應收
   paid INTEGER NOT NULL,          -- 實收
   change INTEGER NOT NULL DEFAULT 0,
-  employee INTEGER CHECK(employee BETWEEN 1 AND 6)  -- 結帳員工代號;舊單為 NULL
+  employee INTEGER CHECK(employee BETWEEN 1 AND 6),  -- 結帳員工代號;舊單為 NULL
+  member_id INTEGER REFERENCES Member(member_id)  -- 會員;一般客人與舊單為 NULL
 );
 CREATE TABLE IF NOT EXISTS SaleItem(
   item_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -201,6 +202,18 @@ CREATE TABLE IF NOT EXISTS VariantIssue(      -- 子產品待處理異常(必填
   related_variant_id INTEGER REFERENCES Variant(variant_id)    -- 衝突的另一子產品(適用時)
 );
 CREATE INDEX IF NOT EXISTS idx_variant_issue_variant ON VariantIssue(variant_id);
+CREATE TABLE IF NOT EXISTS Member(
+  member_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,  -- 刪除＝停用:舊銷售仍指向他
+  ts TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS MemberPhone(
+  member_id INTEGER NOT NULL REFERENCES Member(member_id),
+  phone TEXT NOT NULL CHECK(length(phone)=10 AND phone GLOB '09[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),
+  PRIMARY KEY(member_id, phone)  -- 多對多:同一支電話可屬於多位會員
+);
+CREATE INDEX IF NOT EXISTS idx_memberphone_phone ON MemberPhone(phone);
 """
 
 # 初版 schema 版號:讀不到 schema_version 的既有 DB 一律視為此版
@@ -565,6 +578,16 @@ def _mig_member_discount(conn):
         conn.execute("ALTER TABLE Sale ADD COLUMN member_discount INTEGER NOT NULL DEFAULT 0")
 
 
+def _mig_member(conn):
+    """會員名單與銷售單會員;舊單 member_id 為 NULL。"""
+    conn.execute("CREATE TABLE IF NOT EXISTS Member(" + _schema_ddl("Member"))
+    conn.execute("CREATE TABLE IF NOT EXISTS MemberPhone(" + _schema_ddl("MemberPhone"))
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memberphone_phone ON MemberPhone(phone)")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(Sale)")}
+    if "member_id" not in cols:
+        conn.execute("ALTER TABLE Sale ADD COLUMN member_id INTEGER REFERENCES Member(member_id)")
+
+
 def _schema_ddl(table):
     """取現行 SCHEMA 裡該表括號內的定義(含結尾右括號),避免 migration 另抄一份。"""
     return SCHEMA.split(f"CREATE TABLE IF NOT EXISTS {table}(", 1)[1].split(";", 1)[0]
@@ -591,6 +614,7 @@ MIGRATIONS = [
     (BASE_VERSION + 18, _mig_device_type),
     (BASE_VERSION + 19, _mig_returns),
     (BASE_VERSION + 20, _mig_member_discount),
+    (BASE_VERSION + 21, _mig_member),
 ]
 
 # 最新版號 = 初版 + 遷移筆數;全新 DB 建 SCHEMA 即為此版

@@ -31,6 +31,7 @@ const API = {
       "stocktake.create", "stocktake.list", "stocktake.history", "stocktake.detail", "stocktake.scan", "stocktake.set_counted", "stocktake.remove_item", "stocktake.close", "stocktake.withdraw", "stocktake.return", "stocktake.approve", "stocktake.pending_count", "stocktake.set_note", "stocktake.cancel",
       "returns.create", "returns.list", "returns.history", "returns.detail", "returns.scan", "returns.set_qty", "returns.set_sale", "returns.set_reason", "returns.remove_item", "returns.close", "returns.withdraw", "returns.set_disposition", "returns.approve", "returns.cancel", "returns.pending_count",
       "payments.list", "sales.checkout", "sales.list", "sales.recent", "sales.summary", "sales.export_save", "printing.barcode", "printing.preview", "printing.check",
+      "members.lookup", "members.list", "members.create", "members.update", "members.phone_owners", "members.delete",
       "desktop.child_window.open", "desktop.child_window.context", "desktop.child_window.close",
       "desktop.update.check", "desktop.update.start", "desktop.update.status", "desktop.update.restart", "desktop.update.busy"
     ]);
@@ -91,6 +92,9 @@ const API = {
   batchCreateVariants: (product_id, drafts) => API.invoke("variants.batch_create", {product_id, drafts}), batchPrecheckVariants: (product_id, drafts) => API.invoke("variants.batch_precheck", {product_id, drafts}), fieldUsage: (category_id, field_id, scope) => API.invoke("variants.field_usage", Object.assign({category_id, field_id}, scope || {})), modelUsage: (category_id, scope) => API.invoke("variants.model_usage", Object.assign({category_id}, scope || {})),
   activateVariant: id => API.invoke("variants.activate", {id}), variantIssues: () => API.invoke("variants.issues", {}),
   scanBarcode: code => API.invoke("barcodes.scan", {code}),
+  lookupMembers: query => API.invoke("members.lookup", {query}), listMembers: query => API.invoke("members.list", {query}),
+  createMember: p => API.invoke("members.create", p), updateMember: p => API.invoke("members.update", p),
+  memberPhoneOwners: p => API.invoke("members.phone_owners", p), deleteMember: member_id => API.invoke("members.delete", {member_id}),
   receiveStock: p => API.invoke("stock.receive", p), stockDetail: variant_id => API.invoke("stock.detail", {variant_id}),
   createStocktake: p => API.invoke("stocktake.create", p), listStocktakes: () => API.invoke("stocktake.list", {}), stocktakeDetail: session_id => API.invoke("stocktake.detail", {session_id}), stocktakeScan: p => API.invoke("stocktake.scan", p), setStocktakeCounted: p => API.invoke("stocktake.set_counted", p), closeStocktake: session_id => API.invoke("stocktake.close", {session_id}),
   listPayments: () => API.invoke("payments.list", {}), checkout: p => API.invoke("sales.checkout", p), listSales: p => API.invoke("sales.list", p), recentSales: () => API.invoke("sales.recent", {}), salesSummary: p => API.invoke("sales.summary", p),
