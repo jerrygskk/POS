@@ -13,9 +13,10 @@ window.PosPages["page-records"] = {
   template: "#tpl-records",
   inject: ["showError"],
   data() {
-    return { kinds: [["sales", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"], ["returns", "退貨"]], kind: "sales",
+    return { kinds: [["sales", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"], ["returns", "退貨"], ["members", "資料設定"]], kind: "sales",
              ...defaultRange("sales"), payment: "", payments: [],
-             sales: [], summary: null, receipts: [], stocktakes: [], returns: [], expanded: new Set() };
+             sales: [], summary: null, receipts: [], stocktakes: [], returns: [], expanded: new Set(),
+             memberPhone: "", memberQuery: "", members: [], memberPopup: null };
   },
   computed: {
     isAdmin() { return window.PosAuth.isAdmin; },
@@ -24,6 +25,7 @@ window.PosPages["page-records"] = {
       if (this.kind === "sales") return this.sales.map(s => s.sale_id);
       if (this.kind === "receive") return this.receipts.map((_, i) => i);
       if (this.kind === "returns") return this.returns.map(t => t.return_id);
+      if (this.kind === "members") return [];
       return this.stocktakes.map(t => t.session_id);
     },
   },
@@ -58,9 +60,11 @@ window.PosPages["page-records"] = {
       await this.guard(async () => {
         const range = {date_from: this.dateFrom, date_to: this.dateTo};
         if (this.kind === "sales") {
-          const filters = {...range, payment: this.payment || ""};
+          const filters = {...range, payment: this.payment || "", member_phone: this.memberPhone.trim()};
           this.sales = await API.listSales(filters);
           this.summary = await API.salesSummary(filters);
+        } else if (this.kind === "members") {
+          this.members = await API.listMembers(this.memberQuery.trim());
         } else if (this.kind === "receive") {
           this.receipts = await API.listReceipts(range);
         } else if (this.kind === "returns") {
@@ -70,11 +74,28 @@ window.PosPages["page-records"] = {
         }
       });
     },
+    phonesText(m) { return m.phones.join("、"); },
+    newMember() { this.memberPopup = { member_id: null, name: "", phones: [""] }; },
+    editMember(m) { this.memberPopup = { member_id: m.member_id, name: m.name, phones: [...m.phones] }; },
+    async memberEditorClosed(saved) {
+      this.memberPopup = null;
+      if (saved) await this.guard(async () => { this.members = await API.listMembers(this.memberQuery.trim()); });
+    },
+    async removeMember(m) {
+      if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
+      if (!await PosConfirm.ask(`確定刪除會員「${m.name}」？舊的銷售紀錄仍會顯示此會員。`, { danger: true })) return;
+      // 確認框期間可能已登出:送出前再檢查一次
+      if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
+      await this.guard(async () => {
+        await API.deleteMember(m.member_id);
+        this.members = await API.listMembers(this.memberQuery.trim());
+      });
+    },
     async exportCsv() {
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
       await this.guard(async () => {
         await API.exportSales({ date_from: this.dateFrom, date_to: this.dateTo,
-          payment: this.payment || "" });
+          payment: this.payment || "", member_phone: this.memberPhone.trim() });
       });
     },
   },

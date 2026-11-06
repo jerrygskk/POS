@@ -58,7 +58,7 @@ main.py → RuntimePaths.detect() → 升級前備份 → init_db(pos.db, requir
 ### 收銀與進貨
 
 - **收銀鎖定**：購物車在 `window.PosCheckoutDraft`，切頁保留。送出到回應前以 `submitting` 鎖住並遞增 `generation`；加入商品在開頭與每個 `await` 回來後都要檢查。⚠️ 沒鎖時，等待中加入的商品會在結帳成功清空時無聲消失。
-- **應收**：品項小計－整單折抵－會員折扣。會員折扣是點數折換的金額，店員手動輸入，存 `Sale.member_discount`；系統不記錄會員與點數。
+- **應收**：品項小計－整單折抵－會員折扣。會員折扣是點數折換的金額，店員手動輸入，存 `Sale.member_discount`；系統不記錄點數。
 - **金額欄**：單價、數量、折扣、整單折抵、會員折扣、實收都是文字框，輸入時只留數字。金額清空視為 0；實收清空維持空白（視為剛好付清）；數量打字途中可留白，離開欄位補回至少 1。
 - **小計列**：待結帳表 `tfoot`，有品項才顯示；金額未扣整單折抵與會員折扣，所以可能與應收不同。
 - **進貨批次**：清單在 `window.PosReceiveDraft`，以 `stock.receive` 同一交易全有全無寫入。⚠️ 確認／清空流程期間以 `locked` 鎖定（掃描、改數量、刪列、加標籤、重按都在方法內擋），另有世代編號 `generation`：掃描回來時編號不同就拒絕。只看鎖定擋不住「入庫完成、解鎖後才回來的舊掃描」，它會進下一批而重複入庫。數量欄不用 `v-model`（會直接改資料，方法擋不住）。
@@ -96,6 +96,17 @@ main.py → RuntimePaths.detect() → 升級前備份 → init_db(pos.db, requir
 - **作廢**：進行中或待核准可作廢（待核准限管理者），記 `cancelled_at`／`cancelled_by`，不動庫存、保留紀錄。已核准不可作廢，以新盤點單修正。不提供真正刪除，避免做錯的單不留痕跡。
 - **差異原因**：`StocktakeItem.note` 選填，只在進行中可改。
 - **紀錄查詢**：只列已核准與已作廢，日期用 `COALESCE(approved_at,cancelled_at)`。
+
+### 會員
+
+用途只有一個：結帳時確認客人真的是會員，**金額不因此改變**。`lib/member_service.py`（`members.*`）。
+
+- **資料**：`Member`（名稱、`active`）與 `MemberPhone`（10 碼 `09xxxxxxxx`，資料庫 CHECK 擋格式）。電話與會員**多對多**：一位會員可多支電話，一支電話也可屬於多位會員（夫妻共用等）。`Sale.member_id` 可為 NULL（一般客人、舊單）。
+- **刪除＝停用**（`active=0`）：已有銷售指向他，硬刪會讓舊單對不到人。停用後收銀查不到、結帳送他的 id 被擋，舊單仍顯示名稱。銷售單只存 id，不存名稱快照。
+- **查詢**：輸入只留數字，3 碼比末三碼、10 碼比完整（`phone_pattern`，收銀與紀錄查詢的會員電話篩選共用），其他長度擋下。同一位會員多支電話都符合時只列一次。
+- **收銀**：⚠️ 查到幾筆都跳 `PosConfirm.choose`，**一筆也不自動帶入**——店員要當面跟客人確認。查無會員只提示、不在收銀新增（事後到紀錄查詢新增）。帶入的會員放 `PosCheckoutDraft.member`，結帳成功才清，失敗保留。選擇框每列有「修改」（`choose` 的 `actionLabel`，點了回傳 `{action: i}`）：先關選擇框再開編輯框（不疊兩層），關閉後用同一組號碼重查、讓店員再選一次；`members.lookup` 因此一併回傳該會員全部電話 `phones`。
+- **管理**：紀錄查詢側欄「會員」分組下的「資料設定」。新增／修改框是共用元件 `member-editor`（`static/js/membereditor.js`），紀錄查詢與收銀都用它。員工可新增、修改；刪除限管理者（`ADMIN_ACTIONS`＋Facade 交易內再查一次，前端確認框後也再查）。存檔前 `members.phone_owners` 查同號碼是否已屬別人，有就先確認。
+- **初始名單**：一次性工具 `docs/member_import/import_members.py`（不入庫）把整理好的 Excel 匯進標準資料庫副本；每列一位會員，同名不合併。
 
 ### 退貨
 
@@ -180,7 +191,7 @@ main.py → RuntimePaths.detect() → 升級前備份 → init_db(pos.db, requir
 
 產生「只有商品與設定、沒有營業紀錄」的資料庫：`init_db` 建全新資料庫後逐表原樣複製，庫存全為 0。不覆蓋既有檔案，來源唯讀。
 
-- ⚠️ 每張資料表與設定鍵都要歸在工具的「複製」或「不複製」清單，未歸類就停止。`next_store_barcode` 必須帶，否則新條碼會撞號。
+- ⚠️ 每張資料表與設定鍵都要歸在工具的「複製」或「不複製」清單，未歸類就停止。會員（`Member`、`MemberPhone`）屬「複製」。`next_store_barcode` 必須帶，否則新條碼會撞號。
 - **母版**：`docs/standard_db/pos_standard.db`（`docs/` 不入庫，換機器要自行複製）。schema 改版後母版落後工具會停止：複製一份、`init_db` 升級，以副本為 `--source` 產出，核對後換掉母版。
 
 ```

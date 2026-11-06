@@ -470,6 +470,9 @@ table.big-prod td:nth-child(3), table.big-prod td:nth-child(4) {
 .choose-label { font-weight: 600; }
 .choose-note { color: var(--danger); margin-left: 6px; font-size: 13px; }
 .choose-detail { display: block; color: var(--text-2); font-size: 13px; margin-top: 2px; }
+.choose-detail-lg { font-size: 16px; }
+.choose-row { display: flex; gap: 6px; align-items: stretch; }
+.choose-row > .choose-item { flex: 1; }
 /* 原廠碼共用提示，款式工作表與修改視窗共用。 */
 .barcode-shared { color: var(--danger); font-size: 12px; margin-left: 4px; white-space: nowrap; }
 .confirm-title { font-size: 16px; font-weight: 600; }
@@ -697,6 +700,9 @@ button.primary.danger:hover { filter: brightness(0.92); }
 /* 盤點審核:標記退回的品項整列淡紅底,一眼看出哪些會被退回 */
 tr.stocktake-row-returned > td { background: rgba(220, 38, 38, 0.08); color: var(--danger); }
 /* 紀錄查詢:小結靠左,展開／收合全部靠右 */
+/* 紀錄查詢收銀查詢列(日期×2、付款、會員電話、查詢、匯出)要一排放得下:卡片比設定頁寬,按鈕不折字 */
+.records-panel { max-width: 900px; }
+.records-panel > .scan-row > button { flex: 0 0 auto; white-space: nowrap; }
 .records-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
 .records-bar .pay-panel { flex: 1 1 auto; min-width: 0; margin: 0; flex-wrap: wrap; }
 .records-bar-actions { display: flex; gap: 8px; flex: 0 0 auto; margin-left: auto; }
@@ -719,3 +725,10 @@ tr.stocktake-row-returned > td { background: rgba(220, 38, 38, 0.08); color: var
 .records-table .records-detail td { background: transparent; padding: 5px 8px; }
 .records-table .records-detail tbody tr:last-child td { border-bottom: 0; }
 .records-spec { color: #636366; font-size: 14px; }
+/* 會員:收銀帶入、紀錄查詢電話列與銷售明細 */
+.member-picked, .member-lookup { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* 收銀會員獨立一排,放在折扣與結帳那排下面 */
+.checkout .pay-panel > .member-picked, .checkout .pay-panel > .member-lookup { order: 1; flex-basis: 100%; }
+.member-phone-row { display: flex; align-items: center; gap: 6px; }
+.member-phone-row > input { flex: 1; min-width: 0; }
+.records-member { margin: 2px 0 6px; font-weight: 600; }

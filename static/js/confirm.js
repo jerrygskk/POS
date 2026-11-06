@@ -6,6 +6,7 @@
 //   await PosConfirm.notify("已完成。");
 //   const value = await PosConfirm.input({ title:"輸入", value:"" });
 //   const index = await PosConfirm.choose({ title, message, items });
+//     items[i].actionLabel 有值時,該列右側多一顆鍵,點了回傳 { action: i }
 // 主視窗與子視窗共用(各自的 html 都要載入本檔)。
 window.PosConfirm = {
   // options:{ title, confirmText, cancelText, danger }
@@ -134,11 +135,22 @@ window.PosConfirm = {
           button.appendChild(note);
         }
         const detail = document.createElement("span");
-        detail.className = "choose-detail";
+        detail.className = options.detailLarge ? "choose-detail choose-detail-lg" : "choose-detail";
         detail.textContent = item.detail;
         button.appendChild(detail);
         button.addEventListener("click", () => { if (!button.disabled) close(index); });
-        list.appendChild(button);
+        // actionLabel:列右側另一顆鍵,點了回傳 { action: index }
+        if (item.actionLabel) {
+          const row = document.createElement("div");
+          row.className = "choose-row";
+          const action = document.createElement("button");
+          action.type = "button";
+          action.className = "btn-sm";
+          action.textContent = item.actionLabel;
+          action.addEventListener("click", () => close({ action: index }));
+          row.append(button, action);
+          list.appendChild(row);
+        } else list.appendChild(button);
         if (!button.disabled && !first) first = button;
       });
       box.appendChild(list);

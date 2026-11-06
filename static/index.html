@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=278">
+<link rel="stylesheet" href="css/pos.css?v=289">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=278" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=289" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -69,6 +69,11 @@
   <div class="pay-panel">
     <label>整單折抵 <input type="text" inputmode="numeric" class="w80" :value="draft.orderDiscount" @input="setDiscount('orderDiscount', $event)" :disabled="draft.submitting"></label>
     <label>會員折扣 <input type="text" inputmode="numeric" class="w80" :value="draft.memberDiscount" @input="setDiscount('memberDiscount', $event)" :disabled="draft.submitting"></label>
+    <span v-if="draft.member" class="member-picked">會員：{{ draft.member.name }} {{ draft.member.phone }}
+      <button class="btn-x" title="清除會員" @click="clearMember" :disabled="draft.submitting">✕</button></span>
+    <span v-else class="member-lookup"><input type="text" inputmode="numeric" class="w160" placeholder="會員電話末三碼"
+      :value="memberQuery" @input="setMemberQuery($event)" @keydown.enter="lookupMember" :disabled="draft.submitting">
+      <button @click="lookupMember" :disabled="draft.submitting">查詢會員</button></span>
     <label>付款方式
       <select v-model="payment" :disabled="draft.submitting"><option v-for="p in payments" :key="p">{{ p }}</option></select>
     </label>
@@ -78,6 +83,7 @@
     <button class="primary" :disabled="draft.submitting || !draft.cart.length || paidAmount < total"
             @click="checkout">結帳</button>
   </div>
+  <member-editor v-if="memberEdit" :member="memberEdit" @close="memberEditClosed"></member-editor>
   <div v-if="doneMsg" class="done-msg">{{ doneMsg }}</div>
   <template v-if="recent.length">
   <div class="grp-title recent-sales-title">本日最近成交
@@ -298,17 +304,25 @@
   <div class="prod-settings">
     <aside class="cat-list">
       <div class="cat-list-title">紀錄</div>
-      <div v-for="[key, label] in kinds" :key="key" class="cat-item"
-           :class="{active: kind===key}" @click="selectKind(key)">
-        <span class="cat-name">{{ label }}</span>
-      </div>
+      <template v-for="[key, label] in kinds" :key="key">
+        <div v-if="key==='members'" class="cat-list-title cat-list-group">會員</div>
+        <div class="cat-item" :class="{active: kind===key}" @click="selectKind(key)">
+          <span class="cat-name">{{ label }}</span>
+        </div>
+      </template>
     </aside>
-    <section class="cat-detail">
-      <div class="scan-row">
+    <section class="cat-detail records-panel">
+      <div v-if="kind==='members'" class="scan-row">
+        <input v-model="memberQuery" class="w160" placeholder="名稱或電話" @keydown.enter="reload">
+        <button class="primary" @click="reload">查詢</button>
+        <button @click="newMember">新增會員</button>
+      </div>
+      <div v-else class="scan-row">
         <label>起 <input type="date" v-model="dateFrom"></label>
         <label>迄 <input type="date" v-model="dateTo"></label>
         <select v-if="kind==='sales'" v-model="payment"><option value="">全部付款方式</option>
           <option v-for="p in payments" :key="p">{{ p }}</option></select>
+        <input v-if="kind==='sales'" v-model="memberPhone" class="w120" inputmode="numeric" placeholder="會員電話" @keydown.enter="reload">
         <button class="primary" @click="reload">查詢</button>
         <button v-if="kind==='sales' && isAdmin" @click="exportCsv">匯出 CSV</button>
       </div>
@@ -334,6 +348,7 @@
               <td class="records-action"><button class="records-toggle" :class="{on: isOpen(s.sale_id)}" :aria-expanded="isOpen(s.sale_id)" @click="toggle(s.sale_id)">{{ s.items.length }} 項 {{ isOpen(s.sale_id) ? '▴' : '▾' }}</button></td>
             </tr>
             <tr v-if="isOpen(s.sale_id)"><td colspan="8" class="records-detail-cell">
+              <div v-if="s.member_name" class="records-member">會員：{{ s.member_name }}</div>
               <table class="records-detail">
                 <colgroup><col><col class="col-w56"><col class="col-w72"><col class="col-w64"><col class="col-w72"></colgroup>
                 <thead><tr><th>商品</th><th class="num">數量</th><th class="num">單價</th><th class="num">折扣</th><th class="num">小計</th></tr></thead>
@@ -394,7 +409,7 @@
           </template>
         </tbody>
       </table>
-      <table v-else class="records-table">
+      <table v-else-if="kind==='stocktake'" class="records-table">
         <colgroup><col class="col-w56"><col class="col-w180"><col><col class="col-w180"><col class="col-w56"><col class="col-w88"><col class="col-w92"></colgroup>
         <thead><tr><th>單號</th><th>開始時間</th><th>狀態</th><th>核准／作廢時間</th><th>員工</th><th class="num">差異項數</th><th></th></tr></thead>
         <tbody>
@@ -419,8 +434,23 @@
           </template>
         </tbody>
       </table>
+      <table v-if="kind==='members'" class="records-table">
+        <colgroup><col><col><col class="col-w130"><col class="col-w130"></colgroup>
+        <thead><tr><th>名稱</th><th>電話</th><th>建立日期</th><th></th></tr></thead>
+        <tbody>
+          <tr v-for="m in members" :key="m.member_id">
+            <td>{{ m.name }}</td><td>{{ phonesText(m) }}</td><td>{{ m.ts.slice(0, 10) }}</td>
+            <td class="records-action"><button class="btn-sm" @click="editMember(m)">修改</button>
+              <button v-if="isAdmin" class="btn-sm danger" @click="removeMember(m)">刪除</button></td>
+          </tr>
+          <tr v-if="!members.length"><td colspan="4" class="dialog-hint">查無會員</td></tr>
+        </tbody>
+      </table>
     </section>
   </div>
+
+  <!-- 會員新增／修改(單層) -->
+  <member-editor v-if="memberPopup" :member="memberPopup" @close="memberEditorClosed"></member-editor>
 </div>
 </template>
     </tbody>
@@ -866,27 +896,28 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=278"></script>
-<script src="js/api.js?v=278"></script>
-<script src="js/confirm.js?v=278"></script>
-<script src="js/auth.js?v=278"></script>
-<script src="js/pos_shared.js?v=278"></script>
-<script src="js/catalogfields.js?v=278"></script>
-<script src="js/checkout.js?v=278"></script>
-<script src="js/receive.js?v=278"></script>
-<script src="js/stocktake.js?v=278"></script>
-<script src="js/returns.js?v=278"></script>
-<script src="js/records.js?v=278"></script>
-<script src="js/catalog.js?v=278"></script>
-<script src="js/sortable.js?v=278"></script>
-<script src="js/combobox.js?v=278"></script>
-<script src="js/optpicker.js?v=278"></script>
-<script src="js/modelpicker.js?v=278"></script>
-<script src="js/employeepicker.js?v=278"></script>
-<script src="js/attrfields.js?v=278"></script>
-<script src="js/settings.js?v=278"></script>
-<script src="js/labels.js?v=278"></script>
-<script src="js/app_update.js?v=278"></script>
-<script src="js/app.js?v=278"></script>
+<script src="js/vue.global.prod.js?v=289"></script>
+<script src="js/api.js?v=289"></script>
+<script src="js/confirm.js?v=289"></script>
+<script src="js/auth.js?v=289"></script>
+<script src="js/pos_shared.js?v=289"></script>
+<script src="js/catalogfields.js?v=289"></script>
+<script src="js/checkout.js?v=289"></script>
+<script src="js/receive.js?v=289"></script>
+<script src="js/stocktake.js?v=289"></script>
+<script src="js/returns.js?v=289"></script>
+<script src="js/records.js?v=289"></script>
+<script src="js/catalog.js?v=289"></script>
+<script src="js/sortable.js?v=289"></script>
+<script src="js/combobox.js?v=289"></script>
+<script src="js/optpicker.js?v=289"></script>
+<script src="js/modelpicker.js?v=289"></script>
+<script src="js/employeepicker.js?v=289"></script>
+<script src="js/membereditor.js?v=289"></script>
+<script src="js/attrfields.js?v=289"></script>
+<script src="js/settings.js?v=289"></script>
+<script src="js/labels.js?v=289"></script>
+<script src="js/app_update.js?v=289"></script>
+<script src="js/app.js?v=289"></script>
 </body>
 </html>

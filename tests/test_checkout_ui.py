@@ -154,7 +154,7 @@ s.guard = async operation => { try { await operation(); } catch (error) { s.show
 ''')
         self.assertEqual(out["draft"], {
             "cart": [{"variant_id": 1, "qty": 1, "unit_price": 100, "discount": 0}],
-            "orderDiscount": 50, "memberDiscount": 0, "submitting": False, "generation": 1})
+            "orderDiscount": 50, "memberDiscount": 0, "member": None, "submitting": False, "generation": 1})
         self.assertEqual(out["errors"], ["結帳失敗"])
         self.assertEqual(out["paid"], 100)
 
@@ -175,10 +175,10 @@ s.draft.orderDiscount = 50;
 })();
 ''')
         self.assertEqual(out["submitted"], {
-            "payment": "現金", "order_discount": 50, "member_discount": 0, "paid": 500, "employee": 1,
+            "payment": "現金", "order_discount": 50, "member_discount": 0, "paid": 500, "employee": 1, "member_id": None,
             "items": [{"variant_id": 7, "qty": 2, "unit_price": 250, "discount": 30}]})
         self.assertEqual(out["draft"], {
-            "cart": [], "orderDiscount": 0, "memberDiscount": 0, "submitting": False, "generation": 1})
+            "cart": [], "orderDiscount": 0, "memberDiscount": 0, "member": None, "submitting": False, "generation": 1})
         self.assertIsNone(out["paid"])
         self.assertEqual(out["total"], 0)
 
@@ -363,6 +363,111 @@ s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
         self.assertEqual(out, {"during": [1], "after": []})
 
 
+    def test_single_member_match_still_requires_choice(self):
+        out = self._run(r"""
+let asked;
+API.lookupMembers = async q => { out.query = q; return [{member_id:3, name:"王小明", phone:"0912000111"}]; };
+PosConfirm.choose = async opts => { asked = opts; return null; };
+const s = mkState();
+(async () => {
+  s.setMemberQuery({target:{value:"１２３"}});
+  out.fullwidth = s.memberQuery;
+  s.setMemberQuery({target:{value:"1a1-1"}});
+  out.filtered = s.memberQuery;
+  await s.lookupMember();
+  out.asked = {title: asked.title, message: asked.message, items: asked.items};
+  out.member = s.draft.member;
+  done();
+})();
+""")
+        self.assertEqual(out["fullwidth"], "123")
+        self.assertEqual(out["filtered"], "111")
+        self.assertEqual(out["query"], "111")
+        self.assertEqual(out["asked"], {"title": "請選擇會員", "message": "請與客人確認會員身分：",
+                                        "items": [{"label": "王小明", "detail": "0912000111", "actionLabel": "修改"}]})
+        self.assertIsNone(out["member"])
+
+    def test_edit_from_chooser_then_choose_again(self):
+        out = self._run(r"""
+const rows = [{member_id:3, name:"王小明", phone:"0912000111", phones:["0912000111","0988000222"]}];
+let calls = 0;
+API.lookupMembers = async () => rows;
+PosConfirm.choose = async opts => { calls++; out.large = opts.detailLarge; return calls === 1 ? {action:0} : 0; };
+const s = mkState();
+(async () => {
+  s.memberQuery = "111";
+  await s.lookupMember();
+  out.edit = JSON.parse(JSON.stringify(s.memberEdit));
+  out.memberWhileEditing = s.draft.member;
+  await s.memberEditClosed();
+  out.edit2 = s.memberEdit; out.calls = calls; out.member = s.draft.member;
+  done();
+})();
+""")
+        self.assertTrue(out["large"])
+        self.assertEqual(out["edit"], {"member_id": 3, "name": "王小明", "phones": ["0912000111", "0988000222"]})
+        self.assertIsNone(out["memberWhileEditing"])
+        self.assertIsNone(out["edit2"])
+        self.assertEqual(out["calls"], 2)
+        self.assertEqual(out["member"]["member_id"], 3)
+
+    def test_chosen_member_is_sent_and_cleared_after_success(self):
+        out = self._run(r"""
+let submitted;
+API.lookupMembers = async () => [{member_id:3, name:"王小明", phone:"0912000111"}, {member_id:4, name:"王太太", phone:"0912000111"}];
+PosConfirm.choose = async () => 1;
+API.checkout = async value => { submitted = value; return {change:0, sale_id:10}; };
+const s = mkState({paid:100});
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+(async () => {
+  s.memberQuery = "111";
+  await s.lookupMember();
+  out.before = {member: s.draft.member, query: s.memberQuery};
+  await s.checkout();
+  out.sent = submitted.member_id;
+  out.after = s.draft.member;
+  done();
+})();
+""")
+        self.assertEqual(out["before"], {"member": {"member_id": 4, "name": "王太太", "phone": "0912000111"}, "query": ""})
+        self.assertEqual(out["sent"], 4)
+        self.assertIsNone(out["after"])
+
+    def test_member_kept_when_checkout_fails(self):
+        out = self._run(r"""
+API.checkout = async () => { throw new Error("庫存不足"); };
+const s = mkState({paid:100});
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+s.draft.member = {member_id:3, name:"王小明", phone:"0912000111"};
+s.guard = async operation => { try { await operation(); } catch (error) { s.showError(error.message); } };
+(async () => { await s.checkout(); out.member = s.draft.member; done(); })();
+""")
+        self.assertEqual(out["member"]["member_id"], 3)
+
+    def test_no_member_found_message_and_bad_length(self):
+        out = self._run(r"""
+API.lookupMembers = async () => [];
+let chooseCalls = 0;
+PosConfirm.choose = async () => { chooseCalls++; return 0; };
+const s = mkState();
+(async () => {
+  s.memberQuery = "12";
+  await s.lookupMember();
+  s.memberQuery = "999";
+  await s.lookupMember();
+  out.errors = s._errors; out.chooseCalls = chooseCalls;
+  s.draft.member = {member_id:3, name:"王小明", phone:"0912000111"};
+  s.clearMember();
+  out.cleared = s.draft.member;
+  done();
+})();
+""")
+        self.assertEqual(out["errors"], ["請輸入電話末三碼或完整 10 碼",
+                                         "查無會員，請照一般客人結帳；新會員請事後至紀錄查詢新增"])
+        self.assertEqual(out["chooseCalls"], 0)
+        self.assertIsNone(out["cleared"])
+
+
 class CartTemplateContractTests(unittest.TestCase):
     def test_number_column_precedes_product_and_uses_shared_barcode_width(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
@@ -420,6 +525,7 @@ class CartTemplateContractTests(unittest.TestCase):
                 self.assertIn(':disabled="draft.submitting"', tag.group())
         self.assertIn('@click="removeItem(i)" :disabled="draft.submitting"', checkout)
         self.assertIn('@change="it.qty = Math.max(1, Math.floor(it.qty) || 1)"', checkout)
+
 
 
 class ConfirmAndResourceContractTests(unittest.TestCase):

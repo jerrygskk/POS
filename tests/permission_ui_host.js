@@ -9,6 +9,8 @@ context.window = {PosPages: {}, PosEmployee: {id: 1}, addEventListener(){}, remo
   PosDesktopLock: {lock(){}, unlock(){}}, fmtAttr: row => row.attr_display || ""};
 context.API = {};
 context.PosConfirm = {ask: async () => true, notify: async () => {}};
+// v-model 更新時會比對 getRootNode() 是否為 Document;替身節點一律不是焦點所在
+context.Document = class {}; context.ShadowRoot = class {};
 vm.createContext(context);
 const load = file => vm.runInContext(fs.readFileSync(path.join(root, file), "utf8"), context, {filename: file});
 load("static/js/vue.global.prod.js");
@@ -25,7 +27,7 @@ function node(tag, text = "") {
     get options() {return this.children.filter(n => n.tag === "option");},
     addEventListener(name, fn) {(this.listeners[name] ||= []).push(fn);},
     removeEventListener(){}, setAttribute(k,v){this.props[k]=v;}, removeAttribute(k){delete this.props[k];},
-    focus(){}, select(){}};
+    focus(){}, select(){}, getRootNode(){return {};}};
 }
 const renderer = Vue.createRenderer({
   createElement: tag => node(tag), createText: text => node("#text", text), createComment: text => node("#comment", text),
@@ -43,12 +45,15 @@ const renderer = Vue.createRenderer({
 function compile(source) {
   return Vue.compile(source, {hoistStatic:false, decodeEntities:s=>s.replace(/&gt;/g,">").replace(/&lt;/g,"<").replace(/&amp;/g,"&")});
 }
-function mount(definition, source, extra={}) {
+function mount(definition, source, extra={}, props=null) {
   const baseData=definition.data;
   const component={...definition, template:undefined, mounted:undefined, unmounted:undefined,
     data(){return {...(baseData ? baseData.call(this) : {}),...extra};}, render:compile(source)};
-  const app=renderer.createApp(component);
+  const app=renderer.createApp(component, props);
   app.mixin(context.window.PosMixin);
+  // 共用元件(如會員編輯框)以字串範本宣告,這裡先編譯再註冊
+  for (const [name, comp] of Object.entries(context.window.PosComponents || {}))
+    app.component(name, {...comp, template:undefined, render:compile(comp.template)});
   app.provide("showError",m=>errors.push(m));app.provide("goPage",(...args)=>calls.push(["goPage",...args]));
   const dom=node("root"), state=app.mount(dom);
   return {state,dom,app};

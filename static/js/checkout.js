@@ -1,13 +1,13 @@
 window.PosPages = window.PosPages || {};
 // 切頁會卸載收銀元件;購物車放元件外才撐得過切頁。只活在本次開啟程式期間,
 // 不落地——關閉程式後沒結帳的單本來就不該留著。
-window.PosCheckoutDraft = Vue.reactive({ cart: [], orderDiscount: 0, memberDiscount: 0, submitting: false, generation: 0 });
+window.PosCheckoutDraft = Vue.reactive({ cart: [], orderDiscount: 0, memberDiscount: 0, member: null, submitting: false, generation: 0 });
 window.PosPages["page-checkout"] = {
   template: "#tpl-checkout",
   inject: ["showError"],
   data() {
     return { scanCode: "", searchQ: "", searchResults: [], draft: window.PosCheckoutDraft,
-             payments: [], payment: "現金", paid: null, doneMsg: "", recent: [], recentOpen: false,
+             payments: [], payment: "現金", paid: null, memberQuery: "", memberEdit: null, doneMsg: "", recent: [], recentOpen: false,
              employee: window.PosEmployee };
   },
   computed: {
@@ -29,7 +29,9 @@ window.PosPages["page-checkout"] = {
       this.recent = await API.recentSales();
     });
     this.$refs.scan?.focus();
+    // 對話框開著時不搶焦點:否則點「儲存」「查詢會員」後重開的選擇框會被拉走,Enter／掃描打進背後
     this._refocus = () => setTimeout(() => {
+      if (document.querySelector(".modal-overlay")) return;
       if (document.activeElement.tagName !== "INPUT" &&
           document.activeElement.tagName !== "SELECT") this.$refs.scan?.focus();
     }, 300);
@@ -127,6 +129,38 @@ window.PosPages["page-checkout"] = {
       if (!this.searchQ.trim()) return;
       this.searchResults = await API.listProducts({q: this.searchQ.trim()});
     },
+    setMemberQuery(event) {
+      // 輸入法全形模式打的數字先轉半形,否則會被當成非數字刪掉
+      this.memberQuery = event.target.value
+        .replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).replace(/\D/g, "");
+      event.target.value = this.memberQuery;
+    },
+    // 查到幾筆都要店員點選:當面跟客人確認是本人,不自動帶入
+    async lookupMember() {
+      const query = this.memberQuery;
+      if (query.length !== 3 && query.length !== 10) { this.showError("請輸入電話末三碼或完整 10 碼"); return; }
+      await this.guard(async () => {
+        const matches = await API.lookupMembers(query);
+        if (!matches.length) { this.showError("查無會員，請照一般客人結帳；新會員請事後至紀錄查詢新增"); return; }
+        const index = await PosConfirm.choose({ title: "請選擇會員", message: "請與客人確認會員身分：",
+          detailLarge: true, items: matches.map(m => ({ label: m.name, detail: m.phone, actionLabel: "修改" })) });
+        if (index === null) return;
+        // 修改:先關選擇框再開編輯框(不疊兩層);關閉後重查,讓店員再選一次
+        if (typeof index === "object") {
+          const m = matches[index.action];
+          this.memberEdit = { member_id: m.member_id, name: m.name, phones: [...m.phones] };
+          return;
+        }
+        const { phones, ...member } = matches[index];
+        this.draft.member = member;
+        this.memberQuery = "";
+      });
+    },
+    async memberEditClosed() {
+      this.memberEdit = null;
+      await this.lookupMember();
+    },
+    clearMember() { this.draft.member = null; },
     async checkout() {
       if (this.draft.submitting) return;
       if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
@@ -138,12 +172,12 @@ window.PosPages["page-checkout"] = {
         await this.guard(async () => {
           const r = await API.checkout({
             payment: this.payment, order_discount: this.draft.orderDiscount, member_discount: this.draft.memberDiscount,
-            paid: this.paidAmount, employee: this.employee.id,
+            paid: this.paidAmount, employee: this.employee.id, member_id: this.draft.member ? this.draft.member.member_id : null,
             items: snapshot });
           this.doneMsg = this.paidBlank
             ? `結帳完成(交易編號 ${r.sale_id})`
             : `結帳完成，找零 ${r.change} 元(交易編號 ${r.sale_id})`;
-          this.draft.cart = []; this.draft.orderDiscount = 0; this.draft.memberDiscount = 0; this.paid = null;
+          this.draft.cart = []; this.draft.orderDiscount = 0; this.draft.memberDiscount = 0; this.draft.member = null; this.paid = null;
           setTimeout(() => this.doneMsg = "", 5000);
           this.recent = await API.recentSales();
         });
