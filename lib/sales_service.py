@@ -131,7 +131,8 @@ class SalesRepository(BaseRepository):
             args.append(filters["member_phone"])
         return sql, args
 
-    SALE_ROWS_SQL = ("SELECT s.*,i.variant_id,i.qty,i.unit_price,i.discount,p.name,m.name member_name FROM Sale s "
+    SALE_ROWS_SQL = ("SELECT s.*,i.variant_id,i.qty,i.unit_price,i.discount,p.name,m.name member_name,"
+                     "(SELECT group_concat(phone,'、') FROM (SELECT phone FROM MemberPhone mp WHERE mp.member_id=s.member_id ORDER BY phone)) member_phones FROM Sale s "
                      "JOIN SaleItem i ON s.sale_id=i.sale_id JOIN Variant v ON i.variant_id=v.variant_id "
                      "JOIN Product p ON v.product_id=p.product_id LEFT JOIN Member m ON m.member_id=s.member_id WHERE 1=1")
 
@@ -201,7 +202,8 @@ class SalesService:
             sale = out.setdefault(row["sale_id"], {"sale_id": row["sale_id"], "ts": row["ts"],
                 "payment": row["payment"], "order_discount": row["order_discount"], "member_discount": row["member_discount"],
                 "total": row["total"], "employee": row["employee"],
-                "member_id": row["member_id"], "member_name": row["member_name"], "items": []})
+                "member_id": row["member_id"], "member_name": row["member_name"],
+                "member_phones": row["member_phones"], "items": []})
             sale["items"].append({"variant_id": row["variant_id"], "name": row["name"],
                 "attributes": attrs.get(row["variant_id"], {}), "attr_display": display.get(row["variant_id"], ""),
                 "qty": row["qty"], "unit_price": row["unit_price"], "discount": row["discount"]})

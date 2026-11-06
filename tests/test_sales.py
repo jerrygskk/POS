@@ -195,6 +195,12 @@ class TestSalesMember(TestSales):
         recent = self.invoke("sales.recent")[0]
         self.assertEqual(recent["member_name"], "王小明")
 
+    def test_list_shows_all_member_phones_sorted(self):
+        self.invoke("members.update", {"member_id": self.mid, "name": "王小明", "phones": ["0988000222", "0912000111"]})
+        self._sale(member_id=self.mid)
+        self._sale()
+        self.assertEqual([s["member_phones"] for s in self.invoke("sales.list")], [None, "0912000111、0988000222"])
+
     def test_checkout_without_member_is_null(self):
         self._sale()
         self._sale(member_id=None)

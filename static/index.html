@@ -349,7 +349,7 @@
               <td class="records-action"><button class="records-toggle" :class="{on: isOpen(s.sale_id)}" :aria-expanded="isOpen(s.sale_id)" @click="toggle(s.sale_id)">{{ s.items.length }} 項 {{ isOpen(s.sale_id) ? '▴' : '▾' }}</button></td>
             </tr>
             <tr v-if="isOpen(s.sale_id)"><td colspan="8" class="records-detail-cell">
-              <div v-if="s.member_name" class="records-member">會員：{{ s.member_name }}</div>
+              <div v-if="s.member_name" class="records-member">會員：{{ s.member_name }} {{ s.member_phones || '' }}</div>
               <table class="records-detail">
                 <colgroup><col><col class="col-w56"><col class="col-w72"><col class="col-w64"><col class="col-w72"></colgroup>
                 <thead><tr><th>商品</th><th class="num">數量</th><th class="num">單價</th><th class="num">折扣</th><th class="num">小計</th></tr></thead>
