@@ -70,7 +70,7 @@ window.PosPages["page-checkout"] = {
       else this.draft.cart.push({ variant_id: r.variant_id, name: r.name,
         attributes: r.attributes, attr_display: r.attr_display, models: r.models,
         label_barcode: r.label_barcode,
-        unit_price: price, qty: 1, rate: null, stock: r.stock });
+        unit_price: price, sale_price: price, qty: 1, rate: null, stock: r.stock });
       this.searchResults = [];
     },
     // 只留數字;清空視為 0,並把濾掉後的結果寫回輸入框
@@ -85,18 +85,20 @@ window.PosPages["page-checkout"] = {
       this.paid = digits === "" ? null : Number(digits);
       event.target.value = digits === "" ? "" : String(this.paid);
     },
-    setItemAmount(item, key, event) {
+    // 實售價=每件成交價;單價唯讀。手填就取消折數(避免按鈕亮 95 折但價格對不上);清空視為 0
+    setSalePrice(item, event) {
       const digits = event.target.value.replace(/\D/g, "");
-      item[key] = digits === "" ? 0 : Number(digits);
-      event.target.value = String(item[key]);
+      item.sale_price = digits === "" ? 0 : Number(digits);
+      event.target.value = String(item.sale_price);
+      item.rate = null;
     },
-    // 單品折扣只有固定折數:存選了幾折,金額隨數量/單價即時重算;折後價四捨五入到整數元
-    lineDiscount(item) {
-      if (!item.rate) return 0;
-      const gross = (Number(item.qty) || 0) * item.unit_price;
-      return gross - Math.round(gross * item.rate / 100);
+    // 折數鈕直接改寫實售價:每件先四捨五入到元,再乘數量;再按已亮的鈕回到單價
+    toggleRate(item, rate) {
+      item.rate = item.rate === rate ? null : rate;
+      item.sale_price = item.rate ? Math.round(item.unit_price * item.rate / 100) : item.unit_price;
     },
-    toggleRate(item, rate) { item.rate = item.rate === rate ? null : rate; },
+    // 送後端仍是折扣金額;實售價高於單價時結帳前擋下,這裡不夾值
+    lineDiscount(item) { return (item.unit_price - item.sale_price) * (Number(item.qty) || 0); },
     // 數量打字途中可暫時留白,離開欄位時由 @change 補回至少 1
     setItemQty(item, event) {
       const digits = event.target.value.replace(/\D/g, "");
@@ -171,6 +173,8 @@ window.PosPages["page-checkout"] = {
     async checkout() {
       if (this.draft.submitting) return;
       if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
+      const over = this.draft.cart.find(i => i.sale_price > i.unit_price);
+      if (over) { this.showError(`「${over.name}」實售價不可高於單價 ${over.unit_price} 元`); return; }
       this.draft.submitting = true;
       this.draft.generation += 1;
       const snapshot = this.draft.cart.map(i => ({ variant_id: i.variant_id, qty: i.qty,

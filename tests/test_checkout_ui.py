@@ -58,7 +58,7 @@ const first = mkState();
     attributes:{顏色:"黑"}, attr_display:"黑"});
   first.draft.cart[0].qty = 2;
   first.draft.cart[0].unit_price = 250;
-  first.draft.cart[0].rate = 90;
+  first.toggleRate(first.draft.cart[0], 90);
   first.draft.orderDiscount = 50;
   first.paid = 1000;
   const second = mkState();
@@ -71,7 +71,7 @@ const first = mkState();
 ''')
         self.assertEqual(out["cart"], [{
             "variant_id": 7, "name": "保護殼", "attributes": {"顏色": "黑"},
-            "attr_display": "黑", "unit_price": 250, "qty": 2, "rate": 90}])
+            "attr_display": "黑", "unit_price": 250, "sale_price": 225, "qty": 2, "rate": 90}])
         self.assertEqual(out["orderDiscount"], 50)
         self.assertIsNone(out["paid"])
         self.assertEqual(out["total"], 400)
@@ -102,7 +102,7 @@ const s = mkState();
 let resolveCheckout, calls = 0;
 API.checkout = () => { calls++; return new Promise(resolve => { resolveCheckout = resolve; }); };
 const s = mkState({paid:100});
-s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, sale_price:100}];
 (async () => {
   const first = s.checkout();
   const second = s.checkout();
@@ -122,7 +122,7 @@ const resolvers = [];
 let calls = 0;
 API.checkout = () => { calls++; return new Promise(resolve => { resolvers.push(resolve); }); };
 const first = mkState({paid:100});
-first.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+first.draft.cart = [{variant_id:1, qty:1, unit_price:100, sale_price:100}];
 (async () => {
   const pending = first.checkout();
   const second = mkState({paid:100});
@@ -141,7 +141,7 @@ first.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
         out = self._run(r'''
 API.checkout = async () => { throw new Error("結帳失敗"); };
 const s = mkState({paid:100});
-s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, sale_price:100}];
 s.draft.orderDiscount = 50;
 s.guard = async operation => { try { await operation(); } catch (error) { s.showError(error.message); } };
 (async () => {
@@ -153,41 +153,63 @@ s.guard = async operation => { try { await operation(); } catch (error) { s.show
 })();
 ''')
         self.assertEqual(out["draft"], {
-            "cart": [{"variant_id": 1, "qty": 1, "unit_price": 100, "discount": 0}],
+            "cart": [{"variant_id": 1, "qty": 1, "unit_price": 100, "sale_price": 100}],
             "orderDiscount": 50, "memberDiscount": 0, "member": None, "submitting": False, "generation": 1})
         self.assertEqual(out["errors"], ["結帳失敗"])
         self.assertEqual(out["paid"], 100)
 
-    def test_line_rate_toggles_and_recomputes_with_qty_and_price(self):
+    def test_rate_buttons_fill_sale_price_and_manual_price_clears_rate(self):
         out = self._run(r'''
 const s = mkState();
-const it = {variant_id:1, qty:1, unit_price:2980, rate:null};
+const it = {variant_id:1, name:"插座", qty:1, unit_price:2980, sale_price:2980, rate:null};
 s.draft.cart = [it];
+const typed = v => { const e = {target:{value:v}}; s.setSalePrice(it, e); return e.target.value; };
 out.rates = s.rates;
 out.none = s.lineDiscount(it);
-s.toggleRate(it, 95); out.r95 = s.lineDiscount(it);
-s.toggleRate(it, 85); out.r85 = [it.rate, s.lineDiscount(it)];
-it.qty = 3; out.qty3 = s.lineDiscount(it);
-it.unit_price = 333; it.qty = 1; out.price = s.lineDiscount(it);
+s.toggleRate(it, 95); out.r95 = [it.sale_price, s.lineDiscount(it)];
+s.toggleRate(it, 85); out.r85 = [it.rate, it.sale_price];
+it.qty = 3; out.qty3 = [s.lineDiscount(it), s.cartSubtotal];
 it.qty = ""; out.blankQty = s.lineDiscount(it);
-it.qty = 1; s.toggleRate(it, 85); out.off = [it.rate, s.lineDiscount(it), s.cartSubtotal];
+it.qty = 1; s.toggleRate(it, 85); out.off = [it.rate, it.sale_price, s.lineDiscount(it)];
+s.toggleRate(it, 90); out.typed = [typed("2a500"), it.sale_price, it.rate, s.lineDiscount(it)];
+out.zero = [typed(""), it.sale_price, s.cartSubtotal];
+const odd = {variant_id:2, qty:2, unit_price:790, sale_price:790, rate:null};
+s.toggleRate(odd, 95); out.perUnit = [odd.sale_price, s.lineDiscount(odd)];
 done();
 ''')
         self.assertEqual(out["rates"], [95, 90, 85])
         self.assertEqual(out["none"], 0)
-        self.assertEqual(out["r95"], 149)
-        self.assertEqual(out["r85"], [85, 447])
-        self.assertEqual(out["qty3"], 1341)
-        self.assertEqual(out["price"], 50)
+        self.assertEqual(out["r95"], [2831, 149])
+        self.assertEqual(out["r85"], [85, 2533])
+        self.assertEqual(out["qty3"], [1341, 7599])
         self.assertEqual(out["blankQty"], 0)
-        self.assertEqual(out["off"], [None, 0, 333])
+        self.assertEqual(out["off"], [None, 2980, 0])
+        self.assertEqual(out["typed"], ["2500", 2500, None, 480])
+        self.assertEqual(out["zero"], ["0", 0, 0])
+        self.assertEqual(out["perUnit"], [751, 78])
+
+    def test_sale_price_above_unit_price_blocks_checkout(self):
+        out = self._run(r'''
+let called = false;
+API.checkout = async () => { called = true; return {change:0, sale_id:1}; };
+const s = mkState();
+s.draft.cart = [{variant_id:1, name:"插座", qty:1, unit_price:100, sale_price:120, rate:null}];
+(async () => {
+  await s.checkout();
+  out.called = called; out.errors = s._errors; out.submitting = s.draft.submitting;
+  done();
+})();
+''')
+        self.assertFalse(out["called"])
+        self.assertEqual(out["errors"], ["「插座」實售價不可高於單價 100 元"])
+        self.assertFalse(out["submitting"])
 
     def test_successful_checkout_clears_global_draft(self):
         out = self._run(r'''
 let submitted;
 API.checkout = async value => { submitted = value; return {change:80, sale_id:10}; };
 const s = mkState({paid:500});
-s.draft.cart = [{variant_id:7, qty:2, unit_price:250, rate:90}];
+s.draft.cart = [{variant_id:7, qty:2, unit_price:250, sale_price:225, rate:90}];
 s.draft.orderDiscount = 50;
 (async () => {
   await s.checkout();
@@ -211,7 +233,7 @@ s.draft.orderDiscount = 50;
 let submitted;
 API.checkout = async value => { submitted = value; return {change:0, sale_id:11}; };
 const s = mkState();
-s.draft.cart = [{variant_id:7, qty:2, unit_price:250, rate:90}];
+s.draft.cart = [{variant_id:7, qty:2, unit_price:250, sale_price:225, rate:90}];
 s.draft.orderDiscount = 50;
 (async () => {
   out.before = {paidAmount:s.paidAmount, blank:s.paidBlank};
@@ -230,7 +252,7 @@ s.draft.orderDiscount = 50;
 let calls = 0;
 API.checkout = async () => { calls += 1; return {change:0, sale_id:1}; };
 const s = mkState({paid:500});
-s.draft.cart = [{variant_id:7, qty:1, unit_price:500, discount:0}];
+s.draft.cart = [{variant_id:7, qty:1, unit_price:500, sale_price:500}];
 (async () => {
   context.window.PosEmployee.id = null;
   await s.checkout();
@@ -303,7 +325,7 @@ const s = mkState();
 let release, submitted, focused = 0;
 API.checkout = value => { submitted = value; return new Promise(resolve => { release = resolve; }); };
 const first = mkState();
-first.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+first.draft.cart = [{variant_id:1, qty:1, unit_price:100, sale_price:100}];
 (async () => {
   const pending = first.checkout();
   const second = mkState({scanCode:"NEXT", $refs:{scan:{focus:() => focused++}}});
@@ -328,7 +350,7 @@ let release, calls = 0, focused = 0;
 API.checkout = () => new Promise(resolve => { release = resolve; });
 context.window.PosScan = async () => { calls++; return {data:{variant_id:2, price:200}}; };
 const s = mkState({scanCode:"NEXT", $refs:{scan:{focus:() => focused++}}});
-s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, sale_price:100}];
 (async () => {
   const pending = s.checkout(); await s.onScan();
   out.during = {calls, focused, scan:s.scanCode, errors:s._errors, count:s.draft.cart.length};
@@ -344,7 +366,7 @@ let releaseScan;
 context.window.PosScan = () => new Promise(resolve => { releaseScan = resolve; });
 API.checkout = async () => ({change:0, sale_id:1});
 const s = mkState({scanCode:"NEXT"});
-s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, sale_price:100}];
 (async () => {
   const scan = s.onScan(); await s.checkout();
   releaseScan({data:{variant_id:2, price:200}}); await scan;
@@ -360,7 +382,7 @@ let releaseInput;
 PosConfirm.input = () => new Promise(resolve => { releaseInput = resolve; });
 API.checkout = async () => ({change:0, sale_id:1});
 const s = mkState();
-s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, sale_price:100}];
 (async () => {
   const adding = s.addItem({variant_id:2, name:"未定價", price:null});
   await s.checkout(); releaseInput("200"); await adding;
@@ -375,7 +397,7 @@ s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
 let release;
 API.checkout = () => new Promise(resolve => { release = resolve; });
 const s = mkState();
-s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, sale_price:100}];
 (async () => {
   const pending = s.checkout(); s.removeItem(0);
   out.during = s.draft.cart.map(i => i.variant_id);
@@ -442,7 +464,7 @@ API.lookupMembers = async () => [{member_id:3, name:"王小明", phone:"09120001
 PosConfirm.choose = async () => 1;
 API.checkout = async value => { submitted = value; return {change:0, sale_id:10}; };
 const s = mkState({paid:100});
-s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, sale_price:100}];
 (async () => {
   s.memberQuery = "111";
   await s.lookupMember();
@@ -461,7 +483,7 @@ s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
         out = self._run(r"""
 API.checkout = async () => { throw new Error("庫存不足"); };
 const s = mkState({paid:100});
-s.draft.cart = [{variant_id:1, qty:1, unit_price:100, discount:0}];
+s.draft.cart = [{variant_id:1, qty:1, unit_price:100, sale_price:100}];
 s.draft.member = {member_id:3, name:"王小明", phone:"0912000111"};
 s.guard = async operation => { try { await operation(); } catch (error) { s.showError(error.message); } };
 (async () => { await s.checkout(); out.member = s.draft.member; done(); })();
@@ -508,7 +530,7 @@ class CartTemplateContractTests(unittest.TestCase):
         checkout = html.split('<template id="tpl-checkout">', 1)[1].split("</template>", 1)[0]
         # 商品、屬性不設寬度,吸收剩餘空間;數字欄與移除欄固定窄寬
         self.assertIn("<col><col>", checkout)
-        for name in ("price", "qty", "discount", "subtotal", "stock", "remove"):
+        for name in ("price", "qty", "discount", "sale", "subtotal", "stock", "remove"):
             self.assertIn(f'class="cart-col-{name}"', checkout)
             self.assertRegex(css, rf"\.cart-col-{name}[ ,][^{{]*\{{ width: \d+px; \}}")
         self.assertIn('<button class="btn-x" title="移除" @click="removeItem(i)" :disabled="draft.submitting">✕</button>', checkout)
@@ -530,7 +552,7 @@ class CartTemplateContractTests(unittest.TestCase):
                                 + re.escape(model) + r'"[^>]*>', checkout)
                 self.assertIsNotNone(tag)
                 self.assertIn(':disabled="draft.submitting"', tag.group())
-        for model in ("it.unit_price", "it.qty"):
+        for model in ("it.sale_price", "it.qty"):
             with self.subTest(model=model):
                 tag = re.search(r'<input\b[^>]*:value="' + re.escape(model) + r'"[^>]*>', checkout)
                 self.assertIsNotNone(tag)

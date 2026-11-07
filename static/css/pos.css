@@ -671,12 +671,14 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .checkout .pay-panel { gap: 12px; }
 /* 收銀購物車:數字欄固定窄寬(放得下標題與輸入框即可),其餘寬度全給商品與屬性 */
 /* 收銀／進貨欄寬固定:掃入商品時標題列不得跟著內容跳動;文字欄平分剩餘寬度,最窄 140 */
-.cart-table { table-layout: fixed; min-width: 1037px; }
+.cart-table { table-layout: fixed; min-width: 1049px; }
 .cart-table td { overflow-wrap: anywhere; }
 .cart-summary td { background: var(--surface-alt); font-weight: 600; }
 .cart-summary td:first-child { text-align: right; }
 .checkout th { white-space: nowrap; }
-.cart-col-price { width: 102px; }
+.cart-col-price { width: 72px; }
+.cart-col-sale { width: 84px; }
+.cart-table td.cell-error input { border-color: var(--danger); color: var(--danger); }
 .cart-col-discount { width: 150px; }
 .cart-col-qty { width: 66px; }
 .cart-table td input.w60 { width: 100%; min-width: 0; box-sizing: border-box; padding: 8px 6px; }
