@@ -83,7 +83,7 @@ view.app.unmount();auth.isAdmin=false;
 let filters=null;
 API.listPayments=async()=>["現金"];
 API.listSales=async f=>{filters=f;return [{sale_id:1,ts:"2026-11-06 10:00",employee:1,payment:"現金",order_discount:0,member_discount:0,total:100,member_name:"王小明",member_phones:"0912000111",items:[]}];};
-API.salesSummary=async()=>({count:1,total:100,by_payment:{}});
+API.salesSummary=async()=>({count:1,total:100,by_payment:[]});
 const view=mount(context.window.PosPages["page-records"],template("records"));
 const s=view.state;
 s.memberPhone="111";await s.reload();await tick();s.toggle(1);await tick();

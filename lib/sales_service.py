@@ -64,7 +64,7 @@ def _checkout_payload(payload):
         if not _is_int(row["variant_id"]) or not _is_int(row["qty"]) or row["qty"] <= 0:
             raise ValidationError("商品或數量格式不正確")
         if not _is_int(row["unit_price"]) or row["unit_price"] < 0:
-            raise ValidationError("單價格式不正確")
+            raise ValidationError("原價格式不正確")
         if not _is_int(row["discount"]) or row["discount"] < 0:
             raise ValidationError("折扣格式不正確")
         if row["discount"] > row["qty"] * row["unit_price"]:
@@ -180,6 +180,8 @@ class SalesService:
         total = sum(i["qty"] * i["unit_price"] - i["discount"] for i in body["items"]) - body["order_discount"] - body["member_discount"]
         if total < 0:
             raise ValidationError("折扣後總額不可為負數")
+        if body["payment"] != "現金":
+            body["paid"] = total  # 非現金不找零,實收即應收
         sale_id = self.repo.create_sale(body["payment"], body["order_discount"], body["member_discount"], total, body["paid"],
                                        body["employee"], body["member_id"])
         for item in body["items"]:
@@ -212,14 +214,20 @@ class SalesService:
     def summary(self, filters):
         rows = self.repo.summary_rows(filters)
         return {"count": sum(row["c"] for row in rows), "total": sum(row["t"] or 0 for row in rows),
-                "by_payment": {row["payment"]: row["t"] for row in rows}}
+                "by_payment": self._by_payment(rows)}
+
+    # 依設定清單順序固定列出每種付款方式(沒交易的列 0);清單外的舊付款方式排在後面
+    def _by_payment(self, rows):
+        found = {row["payment"]: (row["c"], row["t"] or 0) for row in rows}
+        names = self.repo.payments() + [p for p in found if p not in self.repo.payments()]
+        return [{"payment": p, "count": found.get(p, (0, 0))[0], "total": found.get(p, (0, 0))[1]} for p in names]
 
     def export(self, filters):
         rows = self.repo.sale_rows(filters)
         display = product_data.display_attrs(self.repo.connection, [row["variant_id"] for row in rows])
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["銷售編號", "時間", "員工", "會員", "付款方式", "商品", "規格", "數量", "單價", "單項折扣", "訂單折扣", "會員折扣", "總額"])
+        writer.writerow(["銷售編號", "時間", "員工", "會員", "付款方式", "商品", "規格", "數量", "原價", "單項折扣", "訂單折扣", "會員折扣", "總額"])
         for row in rows:
             writer.writerow([row["sale_id"], row["ts"], row["employee"], _csv_text(row["member_name"] or ""),
                 _csv_text(row["payment"]), _csv_text(row["name"]), _csv_text(display.get(row["variant_id"], "")), row["qty"], row["unit_price"], row["discount"],

@@ -90,16 +90,25 @@ class TestSales(FacadeTestCase):
         self.assertIn("付款方式未在設定中", error.message)
         self.assertEqual(self._stock(), 10)
 
+    def test_non_cash_paid_forced_to_total(self):
+        r = self._sale(payment="行動支付", paid=2000)
+        self.assertEqual(r["change"], 0)
+        with db_conn(self.db) as conn:
+            row = conn.execute("SELECT paid,change FROM Sale WHERE sale_id=?", (r["sale_id"],)).fetchone()
+        self.assertEqual(tuple(row), (1000, 0))
+
     def test_summary(self):
-        self._sale(); self._sale(payment="刷卡")
+        self._sale(); self._sale(payment="轉帳")
         today = datetime.date.today().isoformat()
         s = self.invoke("sales.summary", {"date": today})
         self.assertEqual(s["count"], 2)
-        self.assertEqual(s["by_payment"]["現金"], 1000)
+        self.assertEqual(s["by_payment"], [{"payment": "現金", "count": 1, "total": 1000},
+                                           {"payment": "轉帳", "count": 1, "total": 1000},
+                                           {"payment": "行動支付", "count": 0, "total": 0}])
 
     def test_summary_date_range_and_payment(self):
         # 小結支援 date_from/date_to 區間與付款方式過濾(與明細清單一致)
-        self._sale(); self._sale(payment="刷卡")
+        self._sale(); self._sale(payment="轉帳")
         today = datetime.date.today().isoformat()
         tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
         s = self.invoke("sales.summary", {"date_from": today, "date_to": tomorrow})
@@ -134,10 +143,10 @@ class TestSales(FacadeTestCase):
 
     def test_export_filters_by_payment(self):
         self._sale(payment="現金")
-        self._sale(payment="刷卡")
+        self._sale(payment="轉帳")
         content = self.invoke("sales.export", {"payment": "現金"})["content"]
         self.assertIn("現金", content)
-        self.assertNotIn("刷卡", content)
+        self.assertNotIn("轉帳", content)
 
     def test_fixed_price_mismatch_is_rejected_without_writes(self):
         with db_conn(self.db) as conn:

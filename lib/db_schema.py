@@ -139,7 +139,7 @@ CREATE TABLE IF NOT EXISTS SaleItem(
   sale_id INTEGER NOT NULL REFERENCES Sale(sale_id),
   variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
   qty INTEGER NOT NULL,
-  unit_price INTEGER NOT NULL,    -- 成交單價
+  unit_price INTEGER NOT NULL,    -- 原價(商品售價或未定價時店員輸入)
   discount INTEGER NOT NULL DEFAULT 0  -- 單品折扣(元)
 );
 CREATE TABLE IF NOT EXISTS StocktakeSession(
@@ -222,6 +222,8 @@ BASE_VERSION = 1
 # 遷移清單:[(目標版號, callable(conn)), ...],第 N 筆將 DB 由 (N) 升至 (N+1)。
 # 目標版號須連續遞增(BASE_VERSION+1, +2, ...)。callable 只用 conn.execute,
 # 勿自行 commit/executescript(runner 已包在同一交易裡)。
+
+import json
 
 from lib.legacy_migrations import (
     _mig_attributefield_global,
@@ -588,6 +590,17 @@ def _mig_member(conn):
         conn.execute("ALTER TABLE Sale ADD COLUMN member_id INTEGER REFERENCES Member(member_id)")
 
 
+def _mig_payment_transfer(conn):
+    """付款方式「刷卡」改為「轉帳」:設定清單與舊銷售單一併改名。"""
+    row = conn.execute("SELECT value FROM Setting WHERE key='payments'").fetchone()
+    if row:
+        names = json.loads(row[0])
+        names = [("轉帳" if n == "刷卡" else n) for n in names]
+        names = list(dict.fromkeys(names))
+        conn.execute("UPDATE Setting SET value=? WHERE key='payments'", (json.dumps(names, ensure_ascii=False),))
+    conn.execute("UPDATE Sale SET payment='轉帳' WHERE payment='刷卡'")
+
+
 def _schema_ddl(table):
     """取現行 SCHEMA 裡該表括號內的定義(含結尾右括號),避免 migration 另抄一份。"""
     return SCHEMA.split(f"CREATE TABLE IF NOT EXISTS {table}(", 1)[1].split(";", 1)[0]
@@ -615,6 +628,7 @@ MIGRATIONS = [
     (BASE_VERSION + 19, _mig_returns),
     (BASE_VERSION + 20, _mig_member_discount),
     (BASE_VERSION + 21, _mig_member),
+    (BASE_VERSION + 22, _mig_payment_transfer),
 ]
 
 # 最新版號 = 初版 + 遷移筆數;全新 DB 建 SCHEMA 即為此版

@@ -52,7 +52,18 @@ window.PosPages["page-records"] = {
     collapseAll() { this.expanded = new Set(); },
     // 主列時間只顯示到分;資料本身不變
     minuteText(ts) { return String(ts || "").slice(0, 16); },
-    amountText(value) { return value ? value : "—"; },
+    // 折抵金額帶減號,一眼看出是扣掉的錢;0 顯示「—」
+    amountText(value) { return value ? "−" + value : "—"; },
+    salePrice(it) { return it.unit_price - Math.round(it.discount / it.qty); },
+    // 明細底下的算式:商品小計 − 各項折抵 = 應收;沒有任何折抵只寫應收
+    formulaText(s) {
+      if (!s.order_discount && !s.member_discount) return `應收 ${s.total}`;
+      const sub = s.items.reduce((sum, it) => sum + it.qty * it.unit_price - it.discount, 0);
+      let text = `商品小計 ${sub}`;
+      if (s.order_discount) text += ` − 整單折抵 ${s.order_discount}`;
+      if (s.member_discount) text += ` − 會員折扣 ${s.member_discount}`;
+      return `${text} = 應收 ${s.total}`;
+    },
     specText(row) { return this.attrText(row).replaceAll("｜", "・"); },
     async reload() {
       // 查詢後資料可能換了;進貨舊紀錄只能用列序當鍵,保留展開會開到別筆

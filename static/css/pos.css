@@ -725,12 +725,19 @@ tr.stocktake-row-returned > td { background: rgba(220, 38, 38, 0.08); color: var
 .records-toggle { min-width: 64px; padding: 4px 8px; font-size: 14px; white-space: nowrap;
   background: var(--bg); border-color: var(--pressed); }
 .records-toggle:hover { background: var(--hover); }
-.records-toggle.on { background: var(--accent-soft); border-color: var(--accent); color: var(--primary-active); }
-.records-table td.records-detail-cell { padding: 6px 10px 10px 24px; background: var(--bg); }
-.records-detail { background: transparent; font-size: 15px; }
+.records-toggle.on { background: var(--surface); border-color: var(--accent); color: var(--primary-active); }
+/* 展開中的單:主列與明細同一塊淡藍灰底、左側強調色條,明細是白底小卡;四種紀錄共用 */
+.records-table > tbody > tr:has(.records-toggle.on) > td { background: var(--accent-soft); border-bottom: 0; }
+.records-table > tbody > tr:has(.records-toggle.on) > td:first-child { box-shadow: inset 4px 0 var(--accent); font-weight: 600; }
+/* 底下留一段白(元件底色)把相鄰兩筆展開的單隔開,否則兩塊淡藍灰底黏在一起 */
+.records-table td.records-detail-cell { padding: 0 10px 10px 24px; background: var(--accent-soft); box-shadow: inset 4px 0 var(--accent);
+  border-bottom: 5px solid var(--surface); background-clip: padding-box; }
+.records-detail { background: var(--surface); font-size: 15px; border: 1px solid var(--pressed); border-radius: 8px; border-collapse: separate; border-spacing: 0; }
+.records-table .records-detail tr > * { border-bottom: 1px solid var(--hover); }
 .records-table .records-detail th { color: #636366; font-size: 13px; font-weight: 400; background: transparent; padding: 4px 8px; }
 .records-table .records-detail td { background: transparent; padding: 5px 8px; }
 .records-table .records-detail tbody tr:last-child td { border-bottom: 0; }
+.records-table .records-detail td.records-formula { text-align: right; color: #636366; font-size: 13px; border-top: 1px solid var(--border); border-bottom: 0; }
 .records-spec { color: #636366; font-size: 14px; }
 /* 會員:收銀帶入、紀錄查詢電話列與銷售明細 */
 .member-picked, .member-lookup { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }

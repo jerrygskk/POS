@@ -8,7 +8,7 @@ from lib.auth import hash_password
 # 新種類建立時自動建的規格欄(選填),各種類自己一份;不需要可在設定頁刪除。
 # (name, field_type)
 NEW_CATEGORY_OWN_FIELDS = [("顏色", "select"), ("款式", "select")]
-DEFAULT_PAYMENTS = ["現金", "刷卡", "行動支付"]
+DEFAULT_PAYMENTS = ["現金", "轉帳", "行動支付"]
 
 def seed(conn, fresh=False):
     conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('payments',?)",

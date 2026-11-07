@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=294">
+<link rel="stylesheet" href="css/pos.css?v=301">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=294" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=301" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -45,7 +45,7 @@
       <col class="cart-col-price"><col class="cart-col-qty"><col class="cart-col-discount"><col class="cart-col-sale">
       <col class="cart-col-subtotal"><col class="cart-col-stock"><col class="cart-col-remove">
     </colgroup>
-    <thead><tr><th>條碼</th><th>商品</th><th>適用機型</th><th>屬性</th><th>單價</th><th>數量</th>
+    <thead><tr><th>條碼</th><th>商品</th><th>適用機型</th><th>屬性</th><th>原價</th><th>數量</th>
       <th>折扣</th><th>實售價</th><th>小計</th><th>庫存</th><th></th></tr></thead>
     <tbody>
       <tr v-for="(it, i) in draft.cart" :key="it.variant_id">
@@ -80,7 +80,7 @@
       <select v-model="payment" :disabled="draft.submitting"><option v-for="p in payments" :key="p">{{ p }}</option></select>
     </label>
     <div class="total">應收 {{ total }} 元</div>
-    <label>實收 <input type="text" inputmode="numeric" class="w80" :value="paid" @input="setPaid($event)" :disabled="draft.submitting"></label>
+    <label>實收 <input type="text" inputmode="numeric" class="w80" :value="isCash ? paid : total" @input="setPaid($event)" :disabled="draft.submitting || !isCash"></label>
     <div class="total">找零 {{ Math.max(0, paidAmount - total) }} 元</div>
     <button class="primary" :disabled="draft.submitting || !draft.cart.length || paidAmount < total"
             @click="checkout">結帳</button>
@@ -331,7 +331,7 @@
       <div v-if="(kind==='sales' && summary) || rowKeys.length" class="records-bar">
         <div v-if="kind==='sales' && summary" class="pay-panel">
           <div>合計 {{ summary.count }} 筆，共 {{ summary.total }} 元</div>
-          <div class="pay-breakdown"><span v-for="(amt, p) in summary.by_payment" :key="p">{{ p }}：{{ amt }} 元</span></div>
+          <div class="pay-breakdown"><span v-for="b in summary.by_payment" :key="b.payment">{{ b.payment }}：{{ b.count }} 筆 {{ b.total }} 元</span></div>
         </div>
         <div v-if="rowKeys.length" class="records-bar-actions">
           <button @click="expandAll">展開全部</button>
@@ -353,12 +353,13 @@
               <div v-if="s.member_name" class="records-member">會員：{{ s.member_name }} {{ s.member_phones || '' }}</div>
               <table class="records-detail">
                 <colgroup><col><col class="col-w56"><col class="col-w72"><col class="col-w64"><col class="col-w72"></colgroup>
-                <thead><tr><th>商品</th><th class="num">數量</th><th class="num">單價</th><th class="num">折扣</th><th class="num">小計</th></tr></thead>
+                <thead><tr><th>商品</th><th class="num">數量</th><th class="num">原價</th><th class="num">實售價</th><th class="num">小計</th></tr></thead>
                 <tbody><tr v-for="it in s.items">
                   <td>{{ it.name }} <span class="records-spec">{{ specText(it) }}</span></td>
-                  <td class="num">{{ it.qty }}</td><td class="num">{{ it.unit_price }}</td><td class="num">{{ amountText(it.discount) }}</td>
+                  <td class="num">{{ it.qty }}</td><td class="num">{{ it.unit_price }}</td><td class="num">{{ salePrice(it) }}</td>
                   <td class="num">{{ it.qty * it.unit_price - it.discount }}</td>
                 </tr></tbody>
+                <tfoot><tr><td colspan="5" class="records-formula">{{ formulaText(s) }}</td></tr></tfoot>
               </table>
             </td></tr>
           </template>
@@ -898,28 +899,28 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=294"></script>
-<script src="js/api.js?v=294"></script>
-<script src="js/confirm.js?v=294"></script>
-<script src="js/auth.js?v=294"></script>
-<script src="js/pos_shared.js?v=294"></script>
-<script src="js/catalogfields.js?v=294"></script>
-<script src="js/checkout.js?v=294"></script>
-<script src="js/receive.js?v=294"></script>
-<script src="js/stocktake.js?v=294"></script>
-<script src="js/returns.js?v=294"></script>
-<script src="js/records.js?v=294"></script>
-<script src="js/catalog.js?v=294"></script>
-<script src="js/sortable.js?v=294"></script>
-<script src="js/combobox.js?v=294"></script>
-<script src="js/optpicker.js?v=294"></script>
-<script src="js/modelpicker.js?v=294"></script>
-<script src="js/employeepicker.js?v=294"></script>
-<script src="js/membereditor.js?v=294"></script>
-<script src="js/attrfields.js?v=294"></script>
-<script src="js/settings.js?v=294"></script>
-<script src="js/labels.js?v=294"></script>
-<script src="js/app_update.js?v=294"></script>
-<script src="js/app.js?v=294"></script>
+<script src="js/vue.global.prod.js?v=301"></script>
+<script src="js/api.js?v=301"></script>
+<script src="js/confirm.js?v=301"></script>
+<script src="js/auth.js?v=301"></script>
+<script src="js/pos_shared.js?v=301"></script>
+<script src="js/catalogfields.js?v=301"></script>
+<script src="js/checkout.js?v=301"></script>
+<script src="js/receive.js?v=301"></script>
+<script src="js/stocktake.js?v=301"></script>
+<script src="js/returns.js?v=301"></script>
+<script src="js/records.js?v=301"></script>
+<script src="js/catalog.js?v=301"></script>
+<script src="js/sortable.js?v=301"></script>
+<script src="js/combobox.js?v=301"></script>
+<script src="js/optpicker.js?v=301"></script>
+<script src="js/modelpicker.js?v=301"></script>
+<script src="js/employeepicker.js?v=301"></script>
+<script src="js/membereditor.js?v=301"></script>
+<script src="js/attrfields.js?v=301"></script>
+<script src="js/settings.js?v=301"></script>
+<script src="js/labels.js?v=301"></script>
+<script src="js/app_update.js?v=301"></script>
+<script src="js/app.js?v=301"></script>
 </body>
 </html>

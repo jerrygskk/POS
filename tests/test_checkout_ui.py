@@ -201,7 +201,7 @@ s.draft.cart = [{variant_id:1, name:"插座", qty:1, unit_price:100, sale_price:
 })();
 ''')
         self.assertFalse(out["called"])
-        self.assertEqual(out["errors"], ["「插座」實售價不可高於單價 100 元"])
+        self.assertEqual(out["errors"], ["「插座」實售價不可高於原價 100 元"])
         self.assertFalse(out["submitting"])
 
     def test_successful_checkout_clears_global_draft(self):
@@ -558,10 +558,10 @@ class CartTemplateContractTests(unittest.TestCase):
                 self.assertIsNotNone(tag)
                 self.assertIn('type="text"', tag.group())
                 self.assertIn(':disabled="draft.submitting"', tag.group())
-        paid = re.search(r'<input\b[^>]*:value="paid"[^>]*>', checkout)
+        paid = re.search(r'<input\b[^>]*:value="isCash \? paid : total"[^>]*>', checkout)
         self.assertIsNotNone(paid)
         self.assertIn('type="text"', paid.group())
-        self.assertIn(':disabled="draft.submitting"', paid.group())
+        self.assertIn(':disabled="draft.submitting || !isCash"', paid.group())
         for key in ("orderDiscount", "memberDiscount"):
             with self.subTest(key=key):
                 tag = re.search(r'<input\b[^>]*:value="draft\.' + key + r'"[^>]*>', checkout)

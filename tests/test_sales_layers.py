@@ -66,11 +66,11 @@ class SalesLayersTest(unittest.TestCase):
 
     def test_csv_uses_same_payment_filter_and_bom(self):
         self.checkout()
-        self.checkout(payment="刷卡")
+        self.checkout(payment="轉帳")
         exported = self.facade.invoke("sales.export", {"payment": "現金"})
         self.assertTrue(exported["content"].startswith("\ufeff"))
         self.assertIn("現金", exported["content"])
-        self.assertNotIn("刷卡", exported["content"])
+        self.assertNotIn("轉帳", exported["content"])
         self.assertEqual(exported["filename"], "sales.csv")
 
     def test_filters_reject_non_iso_or_impossible_calendar_dates(self):
