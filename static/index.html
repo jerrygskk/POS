@@ -331,7 +331,7 @@
       <div v-if="(kind==='sales' && summary) || rowKeys.length" class="records-bar">
         <div v-if="kind==='sales' && summary" class="pay-panel">
           <div>合計 {{ summary.count }} 筆，共 {{ summary.total }} 元</div>
-          <div v-for="(amt, p) in summary.by_payment" :key="p">{{ p }}：{{ amt }} 元</div>
+          <div class="pay-breakdown"><span v-for="(amt, p) in summary.by_payment" :key="p">{{ p }}：{{ amt }} 元</span></div>
         </div>
         <div v-if="rowKeys.length" class="records-bar-actions">
           <button @click="expandAll">展開全部</button>
@@ -339,7 +339,7 @@
         </div>
       </div>
       <table v-if="kind==='sales'" class="records-table">
-        <colgroup><col class="col-w56"><col class="col-w170"><col class="col-w56"><col><col class="col-w96"><col class="col-w96"><col class="col-w88"><col class="col-w92"></colgroup>
+        <colgroup><col class="col-w80"><col class="col-w170"><col class="col-w56"><col><col class="col-w96"><col class="col-w96"><col class="col-w88"><col class="col-w92"></colgroup>
         <thead><tr><th>編號</th><th>時間</th><th>員工</th><th>付款</th><th class="num">整單折抵</th><th class="num">會員折扣</th><th class="num">應收</th><th></th></tr></thead>
         <tbody>
           <template v-for="s in sales" :key="s.sale_id">
@@ -387,7 +387,7 @@
         </tbody>
       </table>
       <table v-else-if="kind==='returns'" class="records-table">
-        <colgroup><col class="col-w56"><col class="col-w180"><col><col class="col-w180"><col class="col-w56"><col class="col-w92"></colgroup>
+        <colgroup><col class="col-w80"><col class="col-w180"><col><col class="col-w180"><col class="col-w56"><col class="col-w92"></colgroup>
         <thead><tr><th>單號</th><th>開單時間</th><th>狀態</th><th>核准／作廢時間</th><th>員工</th><th></th></tr></thead>
         <tbody>
           <template v-for="t in returns" :key="t.return_id">
@@ -412,7 +412,7 @@
         </tbody>
       </table>
       <table v-else-if="kind==='stocktake'" class="records-table">
-        <colgroup><col class="col-w56"><col class="col-w180"><col><col class="col-w180"><col class="col-w56"><col class="col-w88"><col class="col-w92"></colgroup>
+        <colgroup><col class="col-w80"><col class="col-w180"><col><col class="col-w180"><col class="col-w56"><col class="col-w88"><col class="col-w92"></colgroup>
         <thead><tr><th>單號</th><th>開始時間</th><th>狀態</th><th>核准／作廢時間</th><th>員工</th><th class="num">差異項數</th><th></th></tr></thead>
         <tbody>
           <template v-for="t in stocktakes" :key="t.session_id">

@@ -710,7 +710,8 @@ tr.stocktake-row-returned > td { background: rgba(220, 38, 38, 0.08); color: var
 .records-panel { max-width: 900px; }
 .records-panel > .scan-row > button { flex: 0 0 auto; white-space: nowrap; }
 .records-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-.records-bar .pay-panel { flex: 1 1 auto; min-width: 0; margin: 0; flex-wrap: wrap; }
+.records-bar .pay-panel { flex: 1 1 auto; min-width: 0; margin: 0; flex-direction: column; align-items: flex-start; gap: 4px; }
+.records-bar .pay-breakdown { display: flex; flex-wrap: wrap; gap: 4px 16px; }
 .records-bar-actions { display: flex; gap: 8px; flex: 0 0 auto; margin-left: auto; }
 /* 紀錄查詢列表:只留橫線,數字靠右;品名＋規格中位數約 30 個半形字、最長 67,明細品名欄佔剩餘寬度並允許折行 */
 .col-w56 { width: 56px; } .col-w64 { width: 64px; } .col-w72 { width: 72px; } .col-w88 { width: 88px; }
