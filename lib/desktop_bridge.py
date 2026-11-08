@@ -10,7 +10,7 @@ MAX_DETAILS_DEPTH = 32
 
 def window_title(is_admin):
     role = "管理者模式" if is_admin else "一般使用者"
-    return f"POS  [{role}]  - v{__version__}"
+    return f"膜型機門市管理系統  [{role}]  - v{__version__}"
 
 
 class DesktopBridge:

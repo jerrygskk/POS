@@ -25,8 +25,8 @@ class WindowTitleTests(unittest.TestCase):
         return DesktopBridge(facade=Facade(), window=window), titles
 
     def test_title_shows_role_and_version(self):
-        self.assertEqual(window_title(False), f"POS  [一般使用者]  - v{__version__}")
-        self.assertEqual(window_title(True), f"POS  [管理者模式]  - v{__version__}")
+        self.assertEqual(window_title(False), f"膜型機門市管理系統  [一般使用者]  - v{__version__}")
+        self.assertEqual(window_title(True), f"膜型機門市管理系統  [管理者模式]  - v{__version__}")
 
     def test_title_follows_auth_state_including_idle_logout(self):
         bridge, titles = self._bridge([False, True, True, False])
