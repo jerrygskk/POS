@@ -49,6 +49,10 @@ def stock_map(conn, variant_ids):
         f"WHERE variant_id IN ({qs}) GROUP BY variant_id", list(variant_ids))
     return {r["variant_id"]: r["s"] for r in rows}
 
+class DatabaseTooNewError(RuntimeError):
+    """資料庫版號比程式認得的新：舊程式寫入可能破壞新版資料，必須在寫入前停下。"""
+
+
 def _get_schema_version(conn):
     row = conn.execute(
         "SELECT value FROM Setting WHERE key='schema_version'").fetchone()
@@ -92,6 +96,11 @@ def init_db(db_path, require_existing=False):
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='Setting'"
     ).fetchone() is None
     try:
+        if not is_new:
+            version = _get_schema_version(conn)
+            if version > db_schema.SCHEMA_VERSION:
+                raise DatabaseTooNewError(
+                    f"資料庫版本 {version} 比程式支援的 {db_schema.SCHEMA_VERSION} 新")
         conn.executescript(SCHEMA)  # 建缺少的表(IF NOT EXISTS)
         if is_new:
             _set_schema_version(conn, db_schema.SCHEMA_VERSION)

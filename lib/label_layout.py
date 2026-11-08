@@ -2,7 +2,6 @@
 from io import BytesIO
 
 from barcode import Code128
-from barcode.writer import ImageWriter
 from PIL import Image, ImageDraw, ImageFont
 
 _SIZE = (320, 160)
@@ -154,16 +153,37 @@ def _model_line(draw, models, font, maximum):
     return text + "…" + suffix
 
 
+# 條碼可用寬度 296 點（左右各留 12 點，兼作條碼兩側空白區）。熱感頭只能印整數點，
+# 每單位寬度固定為整數點才能讓每根條粗細一致：優先每單位 2 點，放不下改 1 點，置中不縮放。
+_BARCODE_WIDTH = 296
+
+
+def _barcode_modules(value):
+    return Code128(str(value)).build()[0]
+
+
+def barcode_module_width(value):
+    """每單位要用幾點（2 或 1）；連 1 點都放不下回 0，表示條碼過長無法列印。"""
+    count = len(_barcode_modules(value))
+    for width in (2, 1):
+        if count * width <= _BARCODE_WIDTH:
+            return width
+    return 0
+
+
 def _barcode_image(value, height):
-    output = BytesIO()
-    Code128(value, writer=ImageWriter()).write(output, options={
-        "module_width": 0.23, "module_height": height / 8, "quiet_zone": 1.0,
-        "font_size": 0, "text_distance": 0, "write_text": False, "dpi": 203,
-        # 產生器預設上下各留約 5 點空白，會讓黑條比預留高度矮一截；版面已自行留白，故歸零。
-        "margin_top": 0, "margin_bottom": 0,
-    })
-    output.seek(0)
-    return Image.open(output).convert("RGB").resize((296, height), Image.Resampling.NEAREST)
+    modules = _barcode_modules(value)
+    width = barcode_module_width(value)
+    if not width:
+        raise ValueError("barcode too long")
+    image = Image.new("RGB", (_BARCODE_WIDTH, height), "white")
+    draw = ImageDraw.Draw(image)
+    left = (_BARCODE_WIDTH - len(modules) * width) // 2
+    for index, bit in enumerate(modules):
+        if bit == "1":
+            x = left + index * width
+            draw.rectangle((x, 0, x + width - 1, height - 1), fill="black")
+    return image
 
 
 # 有型號的商品靠規格區分款式，規格第二行比品名第二行重要，

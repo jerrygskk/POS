@@ -7,7 +7,7 @@ from io import BytesIO
 from lib import product_data
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import NotFoundError, ValidationError
-from lib.label_layout import render_label
+from lib.label_layout import barcode_module_width, render_label
 from lib.label_printer import LabelPrinter
 from lib.product_rules import allow_keys, is_int
 
@@ -15,6 +15,8 @@ from lib.product_rules import allow_keys, is_int
 _PRINT_LOCK = threading.Lock()
 _BUSY = "標籤機正在列印中，請稍候。"
 _NOT_OWNED = "此條碼已不屬於此子產品，請移除後重新加入。"
+_TOO_LONG = "條碼過長，無法列印。"
+MAX_COPIES = 99  # 前端 labels.js 的 MAX_COPIES 須同值
 
 
 def _validate(action, payload):
@@ -44,6 +46,8 @@ def _validate(action, payload):
         copies = payload.get("copies", 1)
         if not is_int(copies) or copies < 1:
             raise ValidationError("張數必須是正整數")
+        if copies > MAX_COPIES:
+            raise ValidationError(f"張數最多 {MAX_COPIES} 張")
         payload.setdefault("copies", 1)
 
 
@@ -74,6 +78,8 @@ class PrintingService:
             raise NotFoundError("找不到子產品")
         if not owned:
             raise ValidationError(_NOT_OWNED)
+        if not barcode_module_width(barcode):
+            raise ValidationError(_TOO_LONG)
         return render_label(content["name"], content["specification"], content["price"],
                             barcode, models=content["models"])
 
@@ -98,8 +104,11 @@ class PrintingService:
         for item in items:
             content, owned = self.repo.label_content(item["variant_id"], item["barcode"])
             valid = bool(content is not None and owned)
+            # 條碼過長是條碼本身印不出來，與「不屬於此款式」分開回報，前端據此擋下加入。
+            too_long = valid and not barcode_module_width(item["barcode"])
             result.append({"variant_id": item["variant_id"], "barcode": item["barcode"],
-                           "valid": valid, "label": content if valid else None})
+                           "valid": valid, "too_long": too_long,
+                           "label": content if valid else None})
         return {"items": result}
 
 

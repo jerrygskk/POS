@@ -1,5 +1,5 @@
 import traceback
-from lib.db import init_db, read_schema_version
+from lib.db import DatabaseTooNewError, init_db, read_schema_version
 from lib.db_schema import SCHEMA_VERSION
 from lib.backup import backup_before_upgrade, run_auto_backup
 from lib.desktop_application import DesktopApplication
@@ -28,6 +28,8 @@ def prepare_runtime(paths):
         except Exception as exc:
             try_log_runtime_error(paths, "資料庫初始化失敗", exc)
             raise
+        if version is not None and version > SCHEMA_VERSION:
+            raise DatabaseTooNewError(f"資料庫版本 {version} 比程式支援的 {SCHEMA_VERSION} 新")
         if version is not None and version < SCHEMA_VERSION:
             try:
                 backup_before_upgrade(paths.db_path, paths.backup_dir, version, SCHEMA_VERSION)
@@ -62,6 +64,16 @@ def main(application_factory=None, error_dialog=show_error_dialog):
         error_dialog(
             "POS 無法啟動",
             f"找不到資料庫檔案：\n{paths.db_path}\n\n請將資料庫檔案 pos.db 放到程式所在資料夾後再重新啟動。",
+        )
+        raise SystemExit(1)
+    except DatabaseTooNewError:
+        error_dialog("POS 無法啟動", "資料庫版本比程式新，請更新程式後再開啟。")
+        raise SystemExit(1)
+    except Exception as exc:
+        # prepare_runtime 已寫入 error.log，這裡只給使用者看得懂的簡短原因
+        error_dialog(
+            "POS 無法啟動",
+            f"資料庫準備失敗：{exc}\n\n詳細記錄已寫入：\n{paths.error_log_path}",
         )
         raise SystemExit(1)
     application_factory = application_factory or DesktopApplication

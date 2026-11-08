@@ -5,10 +5,12 @@ window.PosLabelQueue = Vue.reactive({
 let previewSeq = 0;
 // 列印或清空後,先前尚未完成的加入／搜尋不再改動清單。
 let queueSeq = 0;
+// 每列張數上限，須與後端 lib/printing_service.py 的 MAX_COPIES 同值。
+const MAX_COPIES = 99;
 
 // 加入列印清單的共用核心(標籤頁與進貨頁共用),不處理畫面選取與訊息。
 // 回傳 result:added／merged(已有同列,張數累加)／blocked(同列已失效)／
-// invalid(條碼不屬於此款式)／printing(列印中不可加入)／cancelled(期間已列印或清空)。
+// invalid(條碼不屬於此款式)／too_long(條碼過長無法列印)／too_many(累加後超過張數上限)／printing(列印中不可加入)／cancelled(期間已列印或清空)。
 window.PosLabelQueueAdd = async function (variant_id, barcode, copies) {
   const q = window.PosLabelQueue;
   if (q.printing) return {result: "printing"};
@@ -17,14 +19,17 @@ window.PosLabelQueueAdd = async function (variant_id, barcode, copies) {
     const existing = q.rows.find(r => r.key === key);
     if (!existing) return null;
     if (existing.status === "invalid") return {result: "blocked", key};
+    if (existing.copies + copies > MAX_COPIES) return {result: "too_many", key};
     existing.copies += copies;
     return {result: "merged", key};
   };
   const hit = merge();
   if (hit) return hit;
+  if (copies > MAX_COPIES) return {result: "too_many"};
   const data = await API.checkLabels([{variant_id, barcode}]);
   if (q.printing || seq !== queueSeq) return {result: "cancelled"};
   if (!data.items[0].valid) return {result: "invalid"};
+  if (data.items[0].too_long) return {result: "too_long"};
   // 同 key 的另一個加入請求可能已先完成,再查一次以免產生重複列。
   const again = merge();
   if (again) return again;
@@ -42,11 +47,14 @@ window.PosPages["page-labels"] = {
     // 從進貨頁加入的列沒有選取;進頁時沒有選取就選第一列,預覽才不會空白。
     if (!this.q.rows.some(r => r.key === this.q.selectedKey)) this.q.selectedKey = this.q.rows[0]?.key || null;
     await this.loadPreview();
+    this.focusScan();
   },
   watch: {
     query() { this.searched = false; },
   },
   methods: {
+    // 列印中掃描框停用，等畫面更新解除停用後才能取得焦點。
+    focusScan() { this.$nextTick(() => this.$refs.scan?.focus()); },
     rowKey(variant_id, barcode) { return `${variant_id}|${barcode}`; },
     defaultBarcode(row) {
       for (const source of ["store", "factory"]) {
@@ -78,6 +86,8 @@ window.PosPages["page-labels"] = {
         const added = await window.PosLabelQueueAdd(variant_id, barcode, 1);
         if (added.result === "blocked") this.q.notice = "此條碼已失效，請先移除該列後重新加入。";
         else if (added.result === "invalid") this.showError("此條碼已不屬於任何可列印的子產品。");
+        else if (added.result === "too_long") this.showError("條碼過長，無法列印。");
+        else if (added.result === "too_many") this.q.notice = `每項標籤最多列印 ${MAX_COPIES} 張。`;
         else if (added.result === "added" || added.result === "merged") await this.selectRow(added.key);
       });
     },
@@ -149,10 +159,12 @@ window.PosPages["page-labels"] = {
         }
       });
     },
-    setCopies(row, value) {
-      if (this.q.printing) return;
-      const n = Math.floor(Number(value));
-      row.copies = Number.isFinite(n) && n >= 1 ? n : 1;
+    setCopies(row, input) {
+      if (this.q.printing) { input.value = row.copies; return; }
+      const n = Math.floor(Number(input.value));
+      row.copies = Number.isFinite(n) && n >= 1 ? Math.min(n, MAX_COPIES) : 1;
+      if (n > MAX_COPIES) this.q.notice = `每項標籤最多列印 ${MAX_COPIES} 張。`;
+      input.value = row.copies;
     },
     confirmCopies(row) {
       if (this.q.printing) return;
@@ -167,6 +179,7 @@ window.PosPages["page-labels"] = {
         this.q.selectedKey = this.q.rows[0]?.key || null;
         this.loadPreview();
       }
+      this.focusScan();
     },
     async clearAll() {
       if (this.q.printing) return;
@@ -217,7 +230,7 @@ window.PosPages["page-labels"] = {
             } catch (_) { /* 無法重查時保留待核對,不自動重送。 */ }
             row.status = invalid ? "invalid" : "verify";
             this.q.notice = invalid ? "條碼已失效，列印已停止。"
-              : `列印失敗：${err.message}。請確認張數後按「確認張數」。`;
+              : `列印失敗：${String(err.message || "").replace(/[。.]+$/, "")}。請確認張數後按「確認張數」。`;
             this.selectRow(row.key);
             return;
           }
@@ -229,7 +242,7 @@ window.PosPages["page-labels"] = {
         }
         PosConfirm.notify(`已列印 ${total} 張標籤。`);
       } catch (err) { this.showError(err.message); }
-      finally { this.q.printing = false; }
+      finally { this.q.printing = false; this.focusScan(); }
     },
   },
 };

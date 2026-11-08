@@ -198,7 +198,7 @@ ACTION_CONTRACTS = {
     "members.update": schema([I("member_id", required=True), S("name", required=True, blank="reject"), field("phones", "list[str]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":1})]),
     "members.phone_owners": schema([field("phones", "list[str]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":1}), I("exclude_member_id", required=True, nullable=True)]),
     "members.delete": schema([I("member_id", required=True)], notes=("Admin only; soft delete (active=0).",)),
-    "printing.barcode": schema([I("variant_id", required=True), S("barcode", required=True, blank="reject"), I("copies", default=1, constraint=">=1")]),
+    "printing.barcode": schema([I("variant_id", required=True), S("barcode", required=True, blank="reject"), I("copies", default=1, constraint="1..99")]),
     "printing.preview": schema([I("variant_id", required=True), S("barcode", required=True, blank="reject")]),
     "printing.check": schema([field("items", "list[LabelItem]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), S("items[].barcode", required=True, blank="reject")]),
 }
@@ -488,6 +488,7 @@ def _constraint_invalid(spec):
     if rule == "min_length=1": return []
     if rule == "0..qty*unit_price": return -1
     if rule == "1..6": return 7
+    if rule == "1..99": return 100
     if rule == "must be None on create": return 1
     if rule == "must be present in Setting.payments": return "未設定付款"
     if "YYYY-MM-DD" in rule: return "2026/08/10"

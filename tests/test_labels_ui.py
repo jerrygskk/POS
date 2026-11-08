@@ -29,7 +29,7 @@ API.checkLabels=async rows=>({items:rows.map(r=>({...r,valid:true,label:label(r.
 API.previewLabel=async(id,barcode)=>({image:`image:${id}|${barcode}`});
 API.printBarcode=async(...args)=>{printed.push(args)};
 context.PosConfirm.notify=text=>notices.push(text);
-function mkState(extra){const s={showError:message=>errors.push(message),takePageContext:()=>null};
+function mkState(extra){const s={showError:message=>errors.push(message),takePageContext:()=>null,$nextTick:f=>f(),$refs:{}};
 Object.assign(s,context.window.PosMixin.methods,page.data());
 for(const[name,method]of Object.entries(page.methods))s[name]=method.bind(s);
 return Object.assign(s,extra||{})}
@@ -127,7 +127,7 @@ assert.equal(q.selectedKey,null);assert.equal(q.previewUrl,"");
 const s=mkState({query:"X",results:[{}],searched:true});s.q.rows=[item(1)];s.q.rows[0].status="verify";s.q.printing=true;
 const before=JSON.stringify(s.q);context.PosConfirm.ask=()=>assert.fail("confirm");
 for(const name of["scanBarcode","checkLabels","printBarcode","listCatalog"])API[name]=()=>assert.fail(name);
-await s.submitInput();await s.pick({variant_id:2});s.setCopies(s.q.rows[0],9);s.confirmCopies(s.q.rows[0]);
+await s.submitInput();await s.pick({variant_id:2});s.setCopies(s.q.rows[0],{value:9});s.confirmCopies(s.q.rows[0]);
 s.removeRow(s.q.rows[0]);await s.clearAll();await s.printAll();assert.equal(JSON.stringify(s.q),before);assert.equal(s.query,"X");
 ''')
 
@@ -153,10 +153,20 @@ assert.equal(s.q.rows[0].status,"verify");s.confirmCopies(s.q.rows[0]);assert.eq
 API.printBarcode=async(...args)=>printed.push(args);await s.printAll();assert.deepEqual(printed,[[1,"TL1",1]]);
 ''')
 
+    def test_queue_add_caps_copies_and_blocks_long_barcode(self):
+        self._run(r'''
+const q=context.window.PosLabelQueue;q.rows=[item(1)];q.rows[0].copies=98;
+assert.equal((await context.window.PosLabelQueueAdd(1,"TL1",1)).result,"merged");
+assert.equal((await context.window.PosLabelQueueAdd(1,"TL1",1)).result,"too_many");assert.equal(q.rows[0].copies,99);
+assert.equal((await context.window.PosLabelQueueAdd(2,"TL2",100)).result,"too_many");
+API.checkLabels=async rows=>({items:rows.map(r=>({...r,valid:true,too_long:true,label:label(r.variant_id)}))});
+assert.equal((await context.window.PosLabelQueueAdd(3,"TL3",1)).result,"too_long");assert.equal(q.rows.length,1);
+''')
+
     def test_copies_do_not_clear_verify_and_normalize(self):
         self._run(r'''
 const s=mkState();s.q.rows=[item(1)];const row=s.q.rows[0];row.status="verify";
-for(const[value,want]of[["3.8",3],[0,1],[-4,1],["bad",1],[Infinity,1]]){s.setCopies(row,value);assert.equal(row.copies,want);assert.equal(row.status,"verify")}
+for(const[value,want]of[["3.8",3],[0,1],[-4,1],["bad",1],[Infinity,1],[150,99]]){const input={value};s.setCopies(row,input);assert.equal(row.copies,want);assert.equal(input.value,want);assert.equal(row.status,"verify")}
 await s.printAll();assert.equal(printed.length,0);assert.match(s.q.notice,/確認張數/);
 ''')
 
@@ -271,7 +281,7 @@ class LabelsTemplateContractTests(unittest.TestCase):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         labels = html.split('<template id="tpl-labels">', 1)[1].split('</template>', 1)[0]
         for text in ['class="label-queue"', 'class="label-preview"', '查無此條碼或商品。',
-                     '@change="setCopies(row, $event.target.value)"', ':title="modelsTitle(r)"',
+                     '@change="setCopies(row, $event.target)"', ':title="modelsTitle(r)"',
                      ':disabled="q.printing"', '@click="selectRow(row.key)"', 'row.label.models']:
             self.assertIn(text, labels)
         self.assertNotIn('v-model.number="row.copies"', labels)

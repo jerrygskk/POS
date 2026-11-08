@@ -98,13 +98,20 @@ class AppUpdater:
             with self._state_lock:
                 self._state = "done"
         except Exception as exc:
-            try:
-                if os.path.exists(new):
-                    os.remove(new)
-            except OSError:
-                pass  # 下次開啟清理
+            # 換檔兩次改名都失敗時原檔已不在：.new／.old 是唯一能救回的程式檔，不可刪
+            exe_missing = not os.path.exists(self.exe)
+            if not exe_missing:
+                try:
+                    if os.path.exists(new):
+                        os.remove(new)
+                except OSError:
+                    pass  # 下次開啟清理
             if not isinstance(exc, InterruptedError):
                 self._logger.error("線上更新失敗：%s", exc, exc_info=exc)
+            if exe_missing:
+                self._logger.error(
+                    "換檔失敗且 %s 已不存在。請手動將 %s（新版）或 %s（舊版）改名回 %s 後再開啟。",
+                    self.exe, new, selfupdate.old_path(self.exe), os.path.basename(self.exe))
             with self._state_lock:
                 self._state = "failed"
         finally:

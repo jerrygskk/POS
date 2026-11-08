@@ -90,11 +90,11 @@ class LabelLayoutTests(unittest.TestCase):
         self.assertEqual(_spec_lines(draw, "", font, 296, 296, max_lines=1), [""])
 
     def test_no_models_matches_baseline_pixels(self):
-        # 條碼固定在底部、號碼在條碼下方後重新產生（已目視確認），鎖住無型號排版。
+        # 條碼改為每單位整數點寬、置中不縮放後重新產生，鎖住無型號排版。
         cases = (
-            (_SHORT_NAME, _SHORT_SPEC, "$590", "da2b3debdc0c0b7c8f0d13a9b7cf664ef1b7138139763b3e56d27c78bf87b998"),
-            (_LONG_NAME, _LONG_SPEC, "$1290", "e448949c7f8f9382b9198dee9d439f196bbd57931f11c7c4469b1be31e51d6d8"),
-            ("超長品名" * 40, _LONG_SPEC, "", "5c6dfde5048e8f66c2618b84b97ec27e621d0b579fd22a02a929a9af0613dec7"),
+            (_SHORT_NAME, _SHORT_SPEC, "$590", "908c988922a92287cfe60a2ab54f0492feb4be13b9b2d52837732accb4805f56"),
+            (_LONG_NAME, _LONG_SPEC, "$1290", "ff9ff24c7308fb29f420ede6227f20f5f5f8443a462e9ee1467cbfbe9bd11691"),
+            ("超長品名" * 40, _LONG_SPEC, "", "0a97a84148b6d7c2c7184db7f57cfb419bc26618b0c4d1f8bd46e2c146168fb3"),
         )
         for name, spec, price, expected in cases:
             for kwargs in ({}, {"models": ()}):
@@ -212,7 +212,7 @@ class LabelLayoutTests(unittest.TestCase):
 
     def test_number_sits_centered_below_barcode_above_margin(self):
         draw, font = _draw(), _font("C:/Windows/Fonts/msjh.ttc", 14)
-        for code in (_CODE, "4711866050639", "FACTORY-LONG-ABC-123456789"):
+        for code in (_CODE, "4711866050639", "FACTORY-LONG-12345678"):
             with self.subTest(code=code):
                 original = ImageDraw.ImageDraw.text
                 with patch.object(ImageDraw.ImageDraw, "text", autospec=True, side_effect=original) as text:

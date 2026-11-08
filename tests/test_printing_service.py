@@ -132,10 +132,10 @@ class PrintingServiceTests(FacadeTestCase):
                  {"variant_id": other_vid, "barcode": "CHECK-OWNED"},
                  {"variant_id": 999999, "barcode": "CHECK-OWNED"}]
         self.assertEqual(self.invoke("printing.check", {"items": items}), {"items": [
-            {**items[0], "valid": True, "label": {"name": "玻璃保護貼", "specification": "透明",
+            {**items[0], "valid": True, "too_long": False, "label": {"name": "玻璃保護貼", "specification": "透明",
                 "price": "$590", "models": ["虛構型號"]}},
-            {**items[1], "valid": False, "label": None},
-            {**items[2], "valid": False, "label": None},
+            {**items[1], "valid": False, "too_long": False, "label": None},
+            {**items[2], "valid": False, "too_long": False, "label": None},
         ]})
         render.assert_not_called()
         print_label.assert_not_called()

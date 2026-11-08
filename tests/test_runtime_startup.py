@@ -6,7 +6,7 @@ from unittest.mock import patch
 import main
 from lib import db_schema
 from lib.backup import run_auto_backup
-from lib.db import get_conn, init_db, read_schema_version
+from lib.db import DatabaseTooNewError, get_conn, init_db, read_schema_version
 from lib.runtime_paths import RuntimePaths
 
 
@@ -174,9 +174,10 @@ class UpgradeBackupTest(unittest.TestCase):
         main.prepare_runtime(self.paths)
         self.assertEqual(self.upgrade_backups(self.paths), [])
 
-    def test_no_upgrade_backup_when_db_newer(self):
+    def test_newer_db_stops_without_backup(self):
         self.make_db(self.paths, NEW + 1)
-        main.prepare_runtime(self.paths)
+        with self.assertRaises(DatabaseTooNewError):
+            main.prepare_runtime(self.paths)
         self.assertEqual(self.upgrade_backups(self.paths), [])
 
     def test_upgrade_backup_failure_stops_before_migration(self):
