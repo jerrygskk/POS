@@ -120,10 +120,13 @@ window.PosPages["page-returns"] = {
         ? `返修不入庫 ${count("repair")} 項。核准後此單轉為返修中，等待返新進貨或結案，不會調整庫存。確定核准?`
         : `加回庫存 ${count("restock")} 項、退貨不入庫 ${count("discard")} 項、不同意 ${count("reject")} 項。核准後依此調整庫存。確定核准?`;
       if (!await PosConfirm.ask(message)) return;
-      if (!this.canReview || this.current !== rid) { this.showError("需要管理者權限"); return; }
-      try {
-        await API.approveReturn(rid);
-      } catch (e) { this.showError(e.message); }
+      // 確認期間換到別張單就不動;仍在原單才檢查權限
+      if (this.current !== rid) return;
+      if (!this.canReview) { this.showError("需要管理者權限"); return; }
+      // 失敗留在原單並重新載入,成功才清空回清單
+      let ok = false;
+      await this.write(async () => { await API.approveReturn(rid); ok = true; });
+      if (!ok) return;
       this.current = null; this.detail = null;
       await this.guard(() => this.reload());
       await this.guard(() => window.PosAuthOps.refresh());

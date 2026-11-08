@@ -42,6 +42,7 @@ def _validate(action, payload):
     if action == "returns.close_item":
         if not isinstance(payload.get("reason"), str) or not payload["reason"].strip():
             raise ValidationError("請輸入結案理由")
+        if len(payload["reason"].strip()) > REASON_MAX: raise ValidationError(f"結案理由最多 {REASON_MAX} 字")
     if action in {"returns.create", "returns.cancel", "returns.repair_receive"}:
         require_employee(payload.get("employee"))
     if action == "returns.set_sale":
@@ -118,21 +119,35 @@ class ReturnsService:
             rows = self.repo.all(f"SELECT return_id FROM ReturnSession WHERE {REPAIR_SQL} AND (status='repairing' OR "
                                  "(status='closed'" + suffix + ")) ORDER BY return_id DESC", args)
         else:
+            # 返修單核准前(進行中/待核准)仍算一般退貨,核准後才移到返修區
             suffix, args = date_sql(filters, "COALESCE(approved_at,submitted_at,started_at)")
-            rows = self.repo.all(f"SELECT return_id FROM ReturnSession WHERE status<>'cancelled' AND NOT {REPAIR_SQL}" + suffix +
-                                 " ORDER BY return_id DESC", args)
-        return [self.detail(r["return_id"]) for r in rows]
+            rows = self.repo.all(f"SELECT return_id FROM ReturnSession WHERE status<>'cancelled' AND NOT "
+                                 f"(status IN ('repairing','closed') AND {REPAIR_SQL})" + suffix + " ORDER BY return_id DESC", args)
+        return self._details([r["return_id"] for r in rows])
     def detail(self, rid):
-        session = self.repo.session(rid)
-        if session is None: raise NotFoundError("找不到退貨單")
-        rows = self.repo.all("SELECT ri.*,p.name FROM ReturnItem ri JOIN Variant v ON ri.variant_id=v.variant_id "
-                             "JOIN Product p ON v.product_id=p.product_id WHERE ri.return_id=? ORDER BY ri.id", (rid,))
-        vids = [r["variant_id"] for r in rows]
+        if self.repo.session(rid) is None: raise NotFoundError("找不到退貨單")
+        return self._details([rid])[0]
+    # 多張單一次撈品項、屬性、返新數、標籤碼再分組,避免逐張查詢
+    def _details(self, rids):
+        if not rids: return []
+        marks = ",".join("?" * len(rids))
+        sessions = {r["return_id"]: r for r in self.repo.all(f"SELECT * FROM ReturnSession WHERE return_id IN ({marks})", rids)}
+        all_rows = self.repo.all("SELECT ri.*,p.name FROM ReturnItem ri JOIN Variant v ON ri.variant_id=v.variant_id "
+                                 f"JOIN Product p ON v.product_id=p.product_id WHERE ri.return_id IN ({marks}) ORDER BY ri.id", rids)
+        vids = list(dict.fromkeys(r["variant_id"] for r in all_rows))
         attrs = product_data.attrs_by_variant(self.repo.connection, vids)
         disp = product_data.display_attrs(self.repo.connection, vids)
         models = product_data.display_models_by_variant(self.repo.connection, vids)
-        repaired = self.repo.repaired(rid)
         codes = self.repo.label_codes(vids)
+        done = {}
+        for r in self.repo.all("SELECT ref_id,variant_id,SUM(qty) AS n FROM StockMovement WHERE kind='repair' "
+                               f"AND ref_id IN ({marks}) GROUP BY ref_id,variant_id", rids):
+            done.setdefault(r["ref_id"], {})[r["variant_id"]] = r["n"]
+        grouped = {rid: [] for rid in rids}
+        for r in all_rows: grouped[r["return_id"]].append(r)
+        return [self._shape(sessions[rid], grouped[rid], attrs, disp, models, done.get(rid, {}), codes) for rid in rids]
+    @staticmethod
+    def _shape(session, rows, attrs, disp, models, repaired, codes):
         items = [{"variant_id": r["variant_id"], "name": r["name"], "attributes": attrs.get(r["variant_id"], {}),
                   "attr_display": disp.get(r["variant_id"], ""), "models": models.get(r["variant_id"], []), "qty": r["qty"], "sale_id": r["sale_id"], "reason": r["reason"],
                   "disposition": r["disposition"], "closed_qty": r["closed_qty"], "closed_reason": r["closed_reason"],
@@ -142,8 +157,10 @@ class ReturnsService:
     def scan(self, rid, vid, qty):
         self.repo.require_open(rid)
         self.repo.require_variant(vid)
-        self.repo.execute("INSERT INTO ReturnItem(return_id,variant_id,qty) VALUES(?,?,?) "
-                          "ON CONFLICT(return_id,variant_id) DO UPDATE SET qty=qty+excluded.qty", (rid, vid, qty))
+        # 返修是整張單的模式:單上已是返修(抽回後再掃)時,新品項也設返修
+        disp = "repair" if self.repo.one("SELECT 1 FROM ReturnItem WHERE return_id=? AND disposition='repair' LIMIT 1", (rid,)) else "restock"
+        self.repo.execute("INSERT INTO ReturnItem(return_id,variant_id,qty,disposition) VALUES(?,?,?,?) "
+                          "ON CONFLICT(return_id,variant_id) DO UPDATE SET qty=qty+excluded.qty", (rid, vid, qty, disp))
         return {"qty": self.repo.one("SELECT qty FROM ReturnItem WHERE return_id=? AND variant_id=?", (rid, vid))["qty"]}
     def set_qty(self, rid, vid, qty):
         self.repo.require_open(rid)

@@ -75,6 +75,10 @@ window.PosPages["page-receive"] = {
           this.showError("標籤列印中，請稍候再加入列印清單。");
         } else if (added.result === "cancelled") {
           this.showError("加入已取消，請重新加入列印清單。");
+        } else if (added.result === "too_long") {
+          this.showError("條碼過長，無法列印。");
+        } else if (added.result === "too_many") {
+          this.showError("每項標籤最多列印 99 張。");
         } else if (added.result === "blocked") {
           this.showError("此條碼在列印清單中已失效，請先至標籤列印頁移除該列。");
         } else {
@@ -151,7 +155,14 @@ window.PosPages["page-receive"] = {
         this.draft.repairLabeled = {};
         this.draft.doneMsg = "";
       } catch (e) { this.showError(e.message); }
-      finally { this.draft.repairBusy = false; }
+      finally {
+        // 欄位在忙碌時停用,要等解除停用畫面更新後才放得進焦點:帶入成功到第一個可填的返新數量,否則回單號框
+        this.draft.repairBusy = false;
+        this.$nextTick(() => {
+          const first = this.draft.repair && (this.$refs.repairQtyInputs || []).find(el => !el.disabled);
+          (first || this.$refs.repairInput)?.focus();
+        });
+      }
     },
     setRepairQty(it, event) {
       if (this.draft.repairBusy) { event.target.value = this.draft.repairQty[it.variant_id] || 0; return; }
@@ -169,6 +180,8 @@ window.PosPages["page-receive"] = {
         const added = await window.PosLabelQueueAdd(it.variant_id, it.label_barcode, n);
         if (added.result === "added" || added.result === "merged")
           this.draft.repairLabeled[it.variant_id] = (this.draft.repairLabeled[it.variant_id] || 0) + n;
+        else if (added.result === "too_long") this.showError("條碼過長，無法列印。");
+        else if (added.result === "too_many") this.showError("每項標籤最多列印 99 張。");
         else this.showError("無法加入列印清單，請至標籤列印頁確認。");
       } catch (e) { this.showError(e.message); }
       finally { this.draft.repairBusy = false; }
@@ -191,7 +204,7 @@ window.PosPages["page-receive"] = {
         setTimeout(() => { if (this.draft.doneMsg === message) this.draft.doneMsg = ""; }, 5000);
         this.draft.repair = null; this.draft.repairInput = ""; this.draft.repairQty = {}; this.draft.repairLabeled = {};
       } catch (e) { this.showError(e.message); }
-      finally { this.draft.repairBusy = false; this.$refs.repairInput?.focus(); }
+      finally { this.draft.repairBusy = false; this.$nextTick(() => this.$refs.repairInput?.focus()); }
     },
     goSettings() {
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
