@@ -74,6 +74,27 @@ def _resolve_field(conn, name, category_id):
     return field
 
 
+def find_option(conn, field_id, value, prefer=()):
+    """依批次新增同一套正規化(normalize_key:大小寫／全半形／空白)找既有選項,含停用者。
+
+    舊資料可能同時有 Blue 與 BLUE,不可無聲改掛:字串完全相同者優先,其次是款式
+    原本就引用的(prefer),再其次啟用中的,最後才是編號最小的停用選項。"""
+    key = normalize_key(value)
+    rows = [row for row in conn.execute(
+        "SELECT option_id,value,active FROM AttributeOption WHERE field_id=? ORDER BY option_id",
+        (field_id,)) if normalize_key(row["value"]) == key]
+    if not rows:
+        return None
+    prefer = set(prefer or ())
+    exact = [row for row in rows if row["value"] == value]
+    for group in (exact, rows):
+        for test in (lambda r: r["option_id"] in prefer, lambda r: r["active"], lambda r: True):
+            for row in group:
+                if test(row):
+                    return row
+    return None
+
+
 def cleanup_unused_options(conn, option_ids):
     """硬刪使用數已歸零且非任何種類模板預設值的選項(連同 OptionModel)。
 
@@ -131,10 +152,10 @@ def set_variant_attributes(conn, vid, category_id, attributes):
         if kind == "select" and len(values) != 1: raise ValidationError(f"規格欄「{name}」格式不正確")
         original = prev.get(fid, set())
         for val in values:
-            row = conn.execute("SELECT option_id,active FROM AttributeOption WHERE field_id=? AND value=?", (fid, val)).fetchone()
+            row = find_option(conn, fid, val, original)
             if row is None and kind == "tags":
                 conn.execute("INSERT OR IGNORE INTO AttributeOption(field_id,value,sort) VALUES(?,?,?)", (fid, val, next_sort(conn, "AttributeOption", "field_id=?", (fid,))))
-                row = conn.execute("SELECT option_id,active FROM AttributeOption WHERE field_id=? AND value=?", (fid, val)).fetchone()
+                row = find_option(conn, fid, val)
             if row is None: raise ValidationError(f"規格欄「{name}」查無選項「{val}」")
             oid = row["option_id"]
             # 停用選項僅允許沿用既有值,不得新增

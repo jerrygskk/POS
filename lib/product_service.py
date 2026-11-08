@@ -361,9 +361,20 @@ class ProductService:
         # 修改前是否為待處理筆(僅對既有問題筆重驗,不新標記正常子產品)
         had_issues = self.repo.one("SELECT 1 FROM VariantIssue WHERE variant_id=?", (vid,)) is not None
         activating = fields.get("active") == 1
-        _update_by_id(self.repo.connection, "Variant", "variant_id", vid, fields)
-        if marker: product_data.set_variant_attributes(self.repo.connection, vid, row["category_id"], attrs)
-        if model_ids is not None: product_data.set_variant_models(self.repo.connection, vid, model_ids)
+        conn = self.repo.connection
+        feature_id = self._feature_field_id(row["category_id"])
+        before = product_data.variant_signature(conn, vid, feature_id)
+        _update_by_id(conn, "Variant", "variant_id", vid, fields)
+        if marker: product_data.set_variant_attributes(conn, vid, row["category_id"], attrs)
+        if model_ids is not None: product_data.set_variant_models(conn, vid, model_ids)
+        after = product_data.variant_signature(conn, vid, feature_id)
+        # 規格有變才比對:改成和同商品另一筆完全相同的規格一律拒絕(比照批次新增的簽章)
+        if after != before:
+            for other in self.repo.all(
+                    "SELECT variant_id FROM Variant WHERE product_id=(SELECT product_id FROM Variant "
+                    "WHERE variant_id=?) AND variant_id<>?", (vid, vid)):
+                if product_data.variant_signature(conn, other["variant_id"], feature_id) == after:
+                    raise ConflictError("同商品已有相同規格的款式，無法儲存")
         if had_issues:
             from lib.variant_issue_service import VariantIssueService
             state = VariantIssueService(self.repo.connection).revalidate(vid)
@@ -396,23 +407,39 @@ class ProductService:
             store_barcodes.extend(code for owner, code in created if owner == vid)
         return {"ok": True, "store_barcodes": store_barcodes}
 
+    def _feature_field_id(self, category_id):
+        for r in self.repo.all(
+                "SELECT f.field_id,f.name FROM CategoryField cf JOIN AttributeField f "
+                "ON f.field_id=cf.field_id WHERE cf.category_id=? ORDER BY f.field_id",
+                (category_id,)):
+            if normalize_key(r["name"]) == product_data.FEATURE_FIELD_KEY:
+                return r["field_id"]
+        return None
+
     def _ensure_editor_options(self, category_id, attributes):
-        for name, raw in (attributes or {}).items():
-            field = product_data._resolve_field(self.repo.connection, name, category_id)
+        """編輯器輸入的選項:正規化後找得到既有選項就沿用既有值(停用者不碰,
+        交給 set_variant_attributes 擋新增停用值);找不到才新建。"""
+        conn = self.repo.connection
+        for name, raw in list((attributes or {}).items()):
+            field = product_data._resolve_field(conn, name, category_id)
             if field is None or field["field_type"] not in ("select", "multi", "tags"):
                 continue
             values = raw if isinstance(raw, (list, tuple)) else [raw]
             values = dict.fromkeys(
-                str(item).strip() for item in values if str(item).strip())
+                normalize_display(str(item)) for item in values if str(item).strip())
+            canonical = []
             for value in values:
-                self.repo.execute(
-                    "INSERT OR IGNORE INTO AttributeOption(field_id,value,sort) VALUES(?,?,?)",
-                    (field["field_id"], value, next_sort(
-                        self.repo.connection, "AttributeOption", "field_id=?",
-                        (field["field_id"],))))
-                self.repo.execute(
-                    "UPDATE AttributeOption SET active=1 WHERE field_id=? AND value=?",
-                    (field["field_id"], value))
+                existing = product_data.find_option(conn, field["field_id"], value)
+                if existing is None:
+                    self.repo.execute(
+                        "INSERT INTO AttributeOption(field_id,value,sort) VALUES(?,?,?)",
+                        (field["field_id"], value, next_sort(
+                            conn, "AttributeOption", "field_id=?", (field["field_id"],))))
+                    canonical.append(value)
+                else:
+                    canonical.append(existing["value"])
+            canonical = list(dict.fromkeys(canonical))
+            attributes[name] = canonical if isinstance(raw, (list, tuple)) else canonical[0] if canonical else raw
 
     def activate_variant(self, vid):
         self.repo.require_variant(vid)

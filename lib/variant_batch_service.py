@@ -1,7 +1,7 @@
 """子產品批次建立。
 
 單一 transaction 內:重新驗證全部 draft → 必填／model_mode／條碼檢查 →
-C 規則重複判定(批內互查＋對 DB)→ 建新選項／重新啟用停用選項 →
+C 規則重複判定(批內互查＋對 DB)→ 建新選項(等於停用選項者列為錯誤,不重新啟用)→
 建 Variant/VariantAttribute/VariantModel/Barcode → 需要時配自取碼。
 任一 draft 有誤即整批 raise;交易由呼叫端 rollback(含自取碼計數器與選項回復)。
 """
@@ -65,23 +65,18 @@ class VariantBatchService:
         return None
 
     def _options_of(self, field_id):
-        """欄位選項快照(供 normalize_key 比對重用/新建/重新啟用)。"""
+        """欄位選項快照(供 normalize_key 比對重用/新建)。"""
         return self.conn.execute(
             "SELECT option_id, value, active FROM AttributeOption WHERE field_id=?",
             (field_id,)).fetchall()
 
-    # ---- 選項解析(新建 / 重新啟用停用同名) ----
+    # ---- 選項解析(沿用既有 / 新建;停用同名回傳 None 由呼叫端列錯) ----
 
-    def _resolve_option(self, field_id, value, created, reactivated, dry=False):
+    def _resolve_option(self, field_id, value, created, dry=False):
         key = normalize_key(value)
         for o in self._options_of(field_id):
             if normalize_key(o["value"]) == key:
-                if not o["active"] and not dry:
-                    self.conn.execute(
-                        "UPDATE AttributeOption SET active=1 WHERE option_id=?",
-                        (o["option_id"],))
-                    reactivated.add(o["option_id"])
-                return o["option_id"]
+                return o["option_id"] if o["active"] else None
         if dry:
             return ("new", key)
         sort = next_sort(self.conn, "AttributeOption", "field_id=?", (field_id,))
@@ -94,7 +89,7 @@ class VariantBatchService:
     # ---- 單筆 draft 解析 ----
 
     def _resolve_draft(self, draft, category_id, writable, feature_id,
-                       model_mode, created, reactivated, dry=False):
+                       model_mode, created, dry=False):
         errors = []             # 全部錯誤(嚴格批次用)
         hard = []               # 結構性錯誤(容錯建立仍須拒絕,非 VariantIssue 可表達)
         attrs_out = []          # [(field_id, "option"/"text", value)]
@@ -137,7 +132,10 @@ class VariantBatchService:
                 continue
             provided.add(fid)
             for v in values:
-                oid = self._resolve_option(fid, v, created, reactivated, dry=dry)
+                oid = self._resolve_option(fid, v, created, dry=dry)
+                if oid is None:
+                    fail_hard("option_inactive", f"選項「{v}」已停用", fid)
+                    continue
                 attrs_out.append((fid, "option", oid))
                 if not is_feature:
                     sig.add((fid, "o", oid))
@@ -160,6 +158,7 @@ class VariantBatchService:
             sig.add(("m", mid))
         # 條碼
         barcodes = []
+        seen_codes = set()
         for bc in draft.get("barcodes") or []:
             code = bc.get("barcode")
             code = code.strip() if isinstance(code, str) else code
@@ -167,6 +166,11 @@ class VariantBatchService:
             if has_store_barcode_prefix(code):
                 fail_hard("store_prefix_barcode", "TL 不得作為自訂開頭條碼")
                 continue
+            if code:
+                if code in seen_codes:
+                    errors.append(_err("repeated_barcode", f"條碼重複「{code}」"))
+                    continue
+                seen_codes.add(code)
             barcodes.append({"barcode": code or None, "source": source})
         # 每筆至少要有一組條碼:沒有廠商條碼就得配自取碼。軟性錯誤——
         # 批次建立是全有全無,等於擋住;容錯建立(匯入舊資料)不受影響。
@@ -208,9 +212,9 @@ class VariantBatchService:
         model_mode = self.conn.execute(
             "SELECT model_mode FROM Category WHERE category_id=?",
             (category_id,)).fetchone()["model_mode"]
-        created, reactivated = set(), set()
+        created = set()
         resolved = [self._resolve_draft(d, category_id, writable, feature_id,
-                                        model_mode, created, reactivated, dry=dry)
+                                        model_mode, created, dry=dry)
                     for d in drafts]
 
         first_seen = {}
@@ -256,7 +260,7 @@ class VariantBatchService:
                         related_variant_id=owners[0]["variant_id"] if owners else None))
                 elif (batch_count[code] >= 2 or owners) and not r["notices"]:
                     r["notices"].append({"code": "shared_barcode", "message": "(已重複)"})
-        return resolved, {"created": created, "reactivated": reactivated,
+        return resolved, {"created": created,
                           "category_id": category_id, "feature_id": feature_id}
 
     # ---- 主流程 ----
@@ -319,8 +323,7 @@ class VariantBatchService:
 
         self._ensure_shared_codes(resolved, results)
         return {"product_id": product_id, "results": results,
-                "created_option_ids": sorted(ctx["created"]),
-                "reactivated_option_ids": sorted(ctx["reactivated"])}
+                "created_option_ids": sorted(ctx["created"])}
 
     # ---- 容錯建立(供未來匯入等入口;批次建立維持嚴格全有全無) ----
 
@@ -391,8 +394,7 @@ class VariantBatchService:
                             "issue_count": len(issues), "barcodes": codes})
         self._ensure_shared_codes(resolved, results)
         return {"product_id": product_id, "results": results,
-                "created_option_ids": sorted(ctx["created"]),
-                "reactivated_option_ids": sorted(ctx["reactivated"])}
+                "created_option_ids": sorted(ctx["created"])}
 
     def _ensure_shared_codes(self, resolved, results):
         codes = dict.fromkeys(bc["barcode"] for r in resolved for bc in r["barcodes"]

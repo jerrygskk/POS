@@ -150,43 +150,17 @@ class TestCatalog(FacadeTestCase):
             conn.commit()
         return result, vid, multi_id, tags_id
 
-    def test_editor_update_reactivates_only_selected_inactive_options(self):
+    def test_editor_update_rejects_inactive_options_without_reactivating(self):
+        # 停用選項只能沿用、不得新增;編輯存檔不得把管理者停用的選項重新啟用
         _, vid, multi_id, tags_id = self._inactive_editor_option_fixture()
-
-        self.invoke("variants.update_editor", {
-            "id": vid,
-            "fields": {"attributes": {
-                "color": "red", "功能": ["磁吸"], "特性詞條": ["軍規"]}},
-            "model_ids": [], "deleted_barcodes": [],
-            "factory_barcodes": [], "store_barcode_count": 0,
-        })
-
-        variant = next(v for v in self.invoke("catalog.list")[0]["variants"]
-                       if v["variant_id"] == vid)
-        self.assertEqual(variant["attributes"], {
-            "color": "red", "功能": ["磁吸"], "特性詞條": ["軍規"]})
-        with get_conn(self.db) as conn:
-            states = {(row["field_id"], row["value"]): row["active"] for row in conn.execute(
-                "SELECT field_id,value,active FROM AttributeOption WHERE "
-                "field_id IN (?,?,?)", (self.fid, multi_id, tags_id))}
-        self.assertEqual(states[(self.fid, "red")], 1)
-        self.assertEqual(states[(multi_id, "磁吸")], 1)
-        self.assertEqual(states[(tags_id, "軍規")], 1)
-        self.assertEqual(states[(self.fid, "black")], 0)
-
-    def test_editor_update_rolls_back_option_reactivation_when_barcode_fails(self):
-        _, vid, multi_id, tags_id = self._inactive_editor_option_fixture()
-        with get_conn(self.db) as conn:
-            conn.execute("UPDATE Barcode SET source='store' WHERE barcode='FX100000002'")
-
-        self.assert_application_error("conflict", "variants.update_editor", {
-            "id": vid,
-            "fields": {"attributes": {
-                "color": "red", "功能": ["磁吸"], "特性詞條": ["軍規"]}},
-            "model_ids": [], "deleted_barcodes": [],
-            "factory_barcodes": ["FX100000002"], "store_barcode_count": 0,
-        })
-
+        for attrs in ({"color": "red"}, {"color": "blue", "功能": ["磁吸"]},
+                      {"color": "blue", "特性詞條": ["軍規"]}):
+            with self.subTest(attrs=attrs):
+                self.assert_application_error("validation_error", "variants.update_editor", {
+                    "id": vid, "fields": {"attributes": attrs},
+                    "model_ids": [], "deleted_barcodes": [],
+                    "factory_barcodes": [], "store_barcode_count": 0,
+                })
         variant = next(v for v in self.invoke("catalog.list")[0]["variants"]
                        if v["variant_id"] == vid)
         self.assertEqual(variant["attributes"], {"color": "blue"})

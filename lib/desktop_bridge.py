@@ -88,7 +88,15 @@ class DesktopBridge:
             raise InternalError("桌面服務尚未初始化")
         if action == "sales.export_save":
             return self._export_sales(payload)
-        result = self._facade.invoke(action, {} if payload is None else payload)
+        # 子視窗開著時主視窗是鎖住的,管理者動作只會來自子視窗;按 X 關窗時主視窗要重讀。
+        # 寫入途中按 X 的關窗通知由協調器延到寫入結束才發(寫入失敗也發,只是多重讀一次)。
+        writing = (action in ADMIN_ACTIONS and self._child_window is not None
+                   and self._child_window.begin_write())
+        try:
+            result = self._facade.invoke(action, {} if payload is None else payload)
+        finally:
+            if writing:
+                self._child_window.end_write()
         if action == "auth.logout" and self._child_window is not None:
             self._child_window.close(saved=False)
         if action.startswith("auth."):

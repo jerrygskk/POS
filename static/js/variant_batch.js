@@ -409,7 +409,8 @@ window.PosPages["page-variant-batch"] = {
     },
     barcodeErrors(draft) {
       return this.errorsFor(draft).filter(err =>
-        err.code === "duplicate_barcode" || err.code === "store_prefix_barcode"
+        err.code === "duplicate_barcode" || err.code === "repeated_barcode"
+        || err.code === "store_prefix_barcode"
         || err.code === "missing_barcode");
     },
     duplicateErrors(draft) {

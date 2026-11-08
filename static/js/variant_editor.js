@@ -159,7 +159,8 @@ window.VariantEditorApp = {
       await API.invoke("desktop.child_window.close", {saved: this.committed});
     },
     async handleKeydown(event) {
-      if (event.key === "Escape") await this.cancel();
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      await this.cancel();
     },
   },
 };

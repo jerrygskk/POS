@@ -309,21 +309,23 @@ class VariantBatchTests(ConnTestCase):
         self.assertTrue(row["active"])
         conn.close()
 
-    def test_disabled_option_reactivated_reuses_option_id(self):
+    def test_disabled_option_is_error_not_reactivated(self):
+        # 文件規則:建檔不重新啟用停用選項;預檢就列為錯誤,送出整批拒絕
         conn = self._fresh()
         oid = conn.execute("INSERT INTO AttributeOption(field_id,value,sort,active) VALUES(?,?,9,0)",
                            (self.color_fid, "灰")).lastrowid
         conn.commit(); conn.close()
-        res = self.facade.invoke("variants.batch_create", {
-            "product_id": self.pid,
-            "drafts": [{"barcodes": [{"source": "store"}], "draft_id": "a", "attributes": {"顏色": "灰"}}]})
-        self.assertEqual(res["reactivated_option_ids"], [oid])
+        payload = {"product_id": self.pid, "drafts": [
+            {"barcodes": [{"source": "store"}], "draft_id": "a", "attributes": {"顏色": "灰"}}]}
+        pre = self.facade.invoke("variants.batch_precheck", payload)
+        self.assertEqual([e["code"] for e in pre["results"][0]["errors"]], ["option_inactive"])
+        self.assertIn("已停用", pre["results"][0]["errors"][0]["message"])
+        with self.assertRaises(Exception):
+            self.facade.invoke("variants.batch_create", payload)
         conn = self._fresh()
-        self.assertTrue(conn.execute("SELECT active FROM AttributeOption WHERE option_id=?",
-                                     (oid,)).fetchone()["active"])
-        # 沿用原 option_id
-        self.assertTrue(conn.execute("SELECT 1 FROM VariantAttribute WHERE option_id=?",
-                                     (oid,)).fetchone())
+        self.assertFalse(conn.execute("SELECT active FROM AttributeOption WHERE option_id=?",
+                                      (oid,)).fetchone()["active"])
+        self.assertEqual(self._variant_count(conn), 0)
         conn.close()
 
     def test_failed_batch_rolls_back_option_reactivation_and_counter(self):

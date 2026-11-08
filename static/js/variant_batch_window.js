@@ -17,8 +17,10 @@ document.addEventListener("DOMContentLoaded", () => {
       this.ready = true;
       this._keydown = (event) => {
         if (event.key !== "Escape") return;
-        if (event.repeat) return;
+        if (event.defaultPrevented || event.repeat) return;
         const page = this.$refs.batchPage;
+        // 送出建立中不關窗,避免款式已建立而主視窗不知道要重讀
+        if (page && page.submitting) { event.preventDefault(); return; }
         if (page && page.fixedEditor) {
           event.preventDefault();
           page.closeFixedEditor();
@@ -38,7 +40,10 @@ document.addEventListener("DOMContentLoaded", () => {
       markSaved() { this.saved = true; },
       async closeWindow() {
         try {
-          await API.invoke("desktop.child_window.close", {saved: this.saved});
+          // 送出中(按 X 關窗)也可能已寫入,一律請主視窗重讀
+          const page = this.$refs.batchPage;
+          const saved = this.saved || !!(page && page.submitting);
+          await API.invoke("desktop.child_window.close", {saved});
         } catch (error) {
           this.showError(error.message);
         }

@@ -117,6 +117,8 @@ class ChildWindowCoordinator:
         self._page = None
         self._context = None
         self._committed = False
+        self._writes = 0
+        self._close_pending = False
         self._lock = threading.RLock()
 
     def open(self, payload):
@@ -201,10 +203,27 @@ class ChildWindowCoordinator:
             self._committed = True
             return result
 
-    def close(self, saved=False):
+    # 子視窗經一般 invoke 的寫入(批次建立等)不持鎖執行,寫入途中可能按 X:
+    # 這時關窗通知延到寫入結束才發,主視窗重讀才讀得到已提交的資料。
+    def begin_write(self):
         with self._lock:
             if self._window is None:
-                return {"closed": False}
+                return False
+            self._committed = True
+            self._writes += 1
+            return True
+
+    def end_write(self):
+        with self._lock:
+            self._writes -= 1
+            if self._writes == 0 and self._close_pending:
+                self._close_pending = False
+                self._finish(True)
+
+    def close(self, saved=False):
+        with self._lock:
+            if self._window is None or self._close_pending:
+                return {"closed": False}  # 已按 X 關掉、等寫入結束才通知
             window = self._window
             self._finish(bool(saved) or self._committed)
             window.destroy()
@@ -213,7 +232,10 @@ class ChildWindowCoordinator:
     def _on_closed(self, window):
         with self._lock:
             if window is self._window:
-                self._finish(self._committed)
+                if self._writes:
+                    self._close_pending = True
+                else:
+                    self._finish(self._committed)
 
     def _finish(self, saved):
         if self._window is None:

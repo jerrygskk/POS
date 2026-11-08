@@ -212,8 +212,18 @@ window.PosPages["page-settings"] = {
     },
     async saveCategoryName(c) {
       const name = (c.name || "").trim();
-      if (!name) { this.showError("商品種類名稱不可空白"); return; }
-      await this.guard(() => API.updateCategory(c.category_id, { name }));
+      try {
+        if (!name) throw new Error("商品種類名稱不可空白");
+        await API.updateCategory(c.category_id, { name });
+      } catch (e) {
+        // 失敗或空白時重讀種類名稱,畫面才不會停在沒存進去的名稱(其他未存修改不動)
+        this.showError(e.message);
+        await this.guard(async () => {
+          const saved = (await API.listCategories({ all: 1 }))
+            .find(x => x.category_id === c.category_id);
+          if (saved) c.name = saved.name;
+        });
+      }
     },
     async toggleCategoryActive(c) {
       await this.guard(async () => {
@@ -529,10 +539,14 @@ window.PosPages["page-settings"] = {
     async saveAll(kind) {
       this.errorScope = kind;
       const m = _MAINT[kind];
+      // 先整批檢查空白名稱,有就一筆都不送,避免只存一半
+      if ((this[kind] || []).some(it => !this._itemBody(kind, it).name)) {
+        this.showError("名稱不可空白");
+        return;
+      }
       await this.guard(async () => {
         for (const it of (this[kind] || [])) {
           const body = this._itemBody(kind, it);
-          if (!body.name) { this.showError("名稱不可空白"); return; }
           if (this._snap[kind + ":" + it[m.id]] === JSON.stringify(body)) continue;
           await API[m.update](it[m.id], body);
         }

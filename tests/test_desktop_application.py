@@ -274,6 +274,65 @@ class DesktopApplicationTest(unittest.TestCase):
         self.assertEqual(len(webview.windows[0].js_calls), 2)
         self.assertIn('"saved": false', webview.windows[0].js_calls[1])
 
+    def test_native_x_after_child_admin_write_reports_saved(self):
+        # 批次建立等管理者動作經一般 invoke 寫入,按 X 關窗時主視窗仍要重讀
+        webview = FakeWebview()
+        bridge = DesktopBridge(facade=Mock())
+        DesktopApplication(
+            self.paths, bridge=bridge, webview_module=webview).run()
+        context = {"product": {"product_id": 1}, "variant": {"variant_id": 2}}
+        bridge.invoke("desktop.child_window.open",
+                      {"page": "variant_editor", "context": context})
+        bridge.invoke("variants.batch_create", {"product_id": 1, "drafts": []})
+        webview.windows[1].events.closed.fire()
+        self.assertIn('"saved": true', webview.windows[0].js_calls[-1])
+
+    def test_native_x_during_child_admin_write_reports_saved(self):
+        # 寫入尚未完成就按 X:關窗通知仍須帶 saved=true
+        webview = FakeWebview()
+        facade = Mock()
+        bridge = DesktopBridge(facade=facade)
+        DesktopApplication(
+            self.paths, bridge=bridge, webview_module=webview).run()
+        context = {"product": {"product_id": 1}, "variant": {"variant_id": 2}}
+        bridge.invoke("desktop.child_window.open",
+                      {"page": "variant_editor", "context": context})
+        child = webview.windows[1]
+
+        events = []
+
+        def close_mid_write(action, payload=None):
+            child.events.closed.fire()
+            events.append(("closes_during_write", len(main_closes())))
+            events.append("commit")
+            return {}
+        main_closes = lambda: [c for c in webview.windows[0].js_calls if "pos-child-window-closed" in c]
+        facade.invoke.side_effect = close_mid_write
+        bridge.invoke("variants.batch_create", {"product_id": 1, "drafts": []})
+        # 寫入期間不得先發通知(主視窗會讀到未提交的資料),提交後補發且只發一次
+        self.assertEqual(events, [("closes_during_write", 0), "commit"])
+        self.assertEqual(len(main_closes()), 1)
+        self.assertIn('"saved": true', main_closes()[0])
+        self.assertFalse(bridge.invoke("desktop.child_window.close", {"saved": False})["data"]["closed"])
+
+    def test_native_x_during_failed_child_write_still_notifies(self):
+        webview = FakeWebview()
+        facade = Mock()
+        bridge = DesktopBridge(facade=facade)
+        DesktopApplication(
+            self.paths, bridge=bridge, webview_module=webview).run()
+        bridge.invoke("desktop.child_window.open",
+                      {"page": "variant_editor", "context": {"product": {"product_id": 1}, "variant": {"variant_id": 2}}})
+        child = webview.windows[1]
+
+        def close_then_fail(action, payload=None):
+            child.events.closed.fire()
+            raise RuntimeError("boom")
+        facade.invoke.side_effect = close_then_fail
+        bridge.invoke("variants.batch_create", {"product_id": 1, "drafts": []})
+        closes = [c for c in webview.windows[0].js_calls if "pos-child-window-closed" in c]
+        self.assertEqual(len(closes), 1)
+
     def test_concurrent_child_window_open_creates_only_one_child(self):
         class BlockingWebview(FakeWebview):
             def __init__(self):
