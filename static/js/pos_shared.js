@@ -7,10 +7,10 @@ window.PosMixin = {
   methods: {
     // 盤點單／退貨單共用狀態文字
     statusText(status) {
-      return {open: "進行中", pending: "待核准", closed: "已結案", cancelled: "已作廢"}[status] || status;
+      return {open: "進行中", pending: "待核准", repairing: "返修中", closed: "已結案", cancelled: "已作廢"}[status] || status;
     },
     dispositionText(key) {
-      return {restock: "加回庫存", discard: "退貨不入庫", reject: "不同意退貨"}[key] || key;
+      return {restock: "加回庫存", discard: "退貨不入庫", reject: "不同意退貨", repair: "返修不入庫"}[key] || key;
     },
     async guard(fn) {
       try { return await fn(); }

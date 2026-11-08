@@ -5,7 +5,7 @@ window.PosPages["page-returns"] = {
   data() {
     return { sessions: [], current: null, detail: null, scanCode: "",
              employee: window.PosEmployee,
-             dispositions: [["restock", "加回庫存"], ["discard", "退貨不入庫"], ["reject", "不同意退貨"]] };
+             dispositions: [["restock", "加回庫存"], ["discard", "退貨不入庫"], ["reject", "不同意退貨"], ["repair", "返修不入庫"]] };
   },
   computed: {
     isAdmin() { return window.PosAuth.isAdmin; },
@@ -108,7 +108,10 @@ window.PosPages["page-returns"] = {
       if (!this.canReview) { this.showError("需要管理者權限"); return; }
       const rid = this.current;
       const count = key => this.detail.items.filter(i => i.disposition === key).length;
-      if (!await PosConfirm.ask(`加回庫存 ${count("restock")} 項、退貨不入庫 ${count("discard")} 項、不同意 ${count("reject")} 項。核准後依此調整庫存。確定核准?`)) return;
+      const message = count("repair")
+        ? `返修不入庫 ${count("repair")} 項。核准後此單轉為返修中，等待返新進貨或結案，不會調整庫存。確定核准?`
+        : `加回庫存 ${count("restock")} 項、退貨不入庫 ${count("discard")} 項、不同意 ${count("reject")} 項。核准後依此調整庫存。確定核准?`;
+      if (!await PosConfirm.ask(message)) return;
       if (!this.canReview || this.current !== rid) { this.showError("需要管理者權限"); return; }
       try {
         await API.approveReturn(rid);

@@ -15,7 +15,7 @@ window.PosPages["page-records"] = {
   data() {
     return { kinds: [["sales", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"], ["returns", "退貨"], ["members", "資料設定"]], kind: "sales",
              ...defaultRange("sales"), payment: "", payments: [],
-             sales: [], summary: null, receipts: [], stocktakes: [], returns: [], expanded: new Set(),
+             sales: [], summary: null, receipts: [], stocktakes: [], returns: [], returnKind: "normal", expanded: new Set(),
              memberPhone: "", memberQuery: "", members: [], memberPopup: null };
   },
   computed: {
@@ -79,10 +79,58 @@ window.PosPages["page-records"] = {
         } else if (this.kind === "receive") {
           this.receipts = await API.listReceipts(range);
         } else if (this.kind === "returns") {
-          this.returns = await API.returnHistory(range);
+          this.returns = await API.returnHistory({...range, kind: this.returnKind});
         } else {
           this.stocktakes = await API.stocktakeHistory(range);
         }
+      });
+    },
+    // 返修品項:未處理件數、狀態(待返新/部分返新/已全部返新/已結案)與副標
+    repairLeft(it) { return it.qty - it.closed_qty - it.repaired_qty; },
+    repairState(it) {
+      if (this.repairLeft(it) > 0) return it.repaired_qty > 0 ? "partial" : "waiting";
+      return it.closed_qty > 0 ? "closed" : "done";
+    },
+    repairStateText(it) {
+      return {waiting: "待返新", partial: "部分返新", done: "已全部返新", closed: "已結案"}[this.repairState(it)];
+    },
+    repairSpecText(it) {
+      return [this.specText(it), (it.models || []).join("、"), it.sale_id ? `銷售單 ${it.sale_id}` : ""]
+        .filter(Boolean).join(" ・ ") || "—";
+    },
+    returnSheetStatus(t) {
+      if (this.returnKind !== "repair") return this.statusText(t.status);
+      if (t.status === "closed") return "已完成";
+      const n = t.items.filter(it => this.repairLeft(it) > 0).length;
+      return `返修中（待處理 ${n} 項）`;
+    },
+    async selectReturnKind(kind) {
+      if (this.returnKind === kind) return;
+      this.returnKind = kind;
+      await this.reload();
+    },
+    // 返修結案／撤回只限管理者;確認視窗期間可能已登出,送出前再檢查一次。完成後保持展開該單
+    async closeRepairItem(t, it) {
+      if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
+      const reason = await PosConfirm.input({ title: "返修品項結案",
+        message: `「${it.name}」尚未返新的 ${this.repairLeft(it)} 件將結案，結案後不再等待返新。請輸入結案理由：`,
+        validate: v => (String(v || "").trim() ? "" : "請輸入結案理由") });
+      if (reason === null) return;
+      if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
+      await this.repairWrite(t, () => API.closeReturnItem(t.return_id, it.variant_id, String(reason).trim()));
+    },
+    async reopenRepairItem(t, it) {
+      if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
+      if (!await PosConfirm.ask(`撤回「${it.name}」的結案？此品項回到等待返新。`)) return;
+      if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
+      await this.repairWrite(t, () => API.reopenReturnItem(t.return_id, it.variant_id));
+    },
+    async repairWrite(t, fn) {
+      await this.guard(async () => {
+        await fn();
+        const keep = new Set(this.expanded);
+        this.returns = await API.returnHistory({date_from: this.dateFrom, date_to: this.dateTo, kind: this.returnKind});
+        this.expanded = keep;
       });
     },
     phonesText(m) { return m.phones.join("、"); },

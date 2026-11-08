@@ -176,7 +176,7 @@ class ReceiveTemplateTests(unittest.TestCase):
     def test_batch_template_and_guarded_quantity_contract(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         template = html.split('<template id="tpl-receive">')[1].split('</template>')[0]
-        for text in ('btn-x', '確認進貨', '清空', 'receive-col-label', 'setQty', ':value="row.qty"'):
+        for text in ('btn-x', '確認進貨', '清空', 'receive-col-qty-label', 'setQty', ':value="row.qty"'):
             self.assertIn(text, template)
         self.assertNotIn('!employee.id', template)
         self.assertNotIn('v-model.number="row.qty"', template)

@@ -257,6 +257,8 @@ tr.inactive > td { opacity: 0.55; }
 .chip-toggle.on:hover:not(:disabled) { background: var(--accent); color: #fff; }
 /* 鎖定時不轉灰:外觀與可按時相同,只是點不動(滑鼠提示說明原因) */
 .chip-toggle:disabled { cursor: default; }
+/* 同頁兩種模式切換(進貨一般／返新、紀錄查詢退貨一般／返修),與員工代號同一排 */
+.mode-switch { display: inline-flex; gap: 6px; margin-left: 16px; }
 .chip-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* 群組標題→說明→新增列拉開距離,三段黏在一起看起來很擠 */
 .cat-detail .grp-title { margin: 16px 0 4px; font-size: 16px; color: var(--text); }
@@ -291,6 +293,8 @@ tr.inactive > td { opacity: 0.55; }
 .recent-sales-title { margin: 32px 0 8px; font-size: 16px; display: flex; align-items: center; gap: 10px; }
 .model-group { margin-bottom: 10px; }
 .hint { color: var(--text-2); font-size: 14px; }
+/* 返新進貨:品名下方小字帶出退貨原因,不另佔欄位 */
+.receive-reason { color: var(--text-2); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
 .opt-block { margin: 8px 0; }
 .option-default { display: block; margin: 4px 0; }
 .option-add { margin: 6px 0; flex-wrap: nowrap; }
@@ -311,6 +315,12 @@ button.primary:active { background: var(--primary-active); transform: translateY
 .btn-sm:hover { background: var(--hover); }
 .btn-sm:active { background: var(--pressed); transform: translateY(1px); }
 .btn-sm.danger { color: var(--danger); }
+/* 低調紅框鈕(比照 PoliceDocSys 公版 convert:白底磚紅字＋淡紅框) */
+.btn-sm.convert { background: #fff; color: #a8442e; border: 1.5px solid #e6b9ad; }
+.btn-sm.convert:hover { background: #fdf2f0; }
+/* 低調藍框鈕(與 convert 同構同明度,紅換藍):撤回類操作 */
+.btn-sm.subtle { background: #fff; color: #3f6390; border: 1.5px solid #b9c9dd; }
+.btn-sm.subtle:hover { background: #f0f4f9; }
 /* 移除鈕(紅底白 ✕):沿用公文系統 remove 鈕規格 28×24、圓角 6;
    hover／active 要自己蓋掉 button 基準的灰底 */
 .btn-x { width: 28px; height: 24px; min-width: 0; padding: 0; border: 0; border-radius: 6px;
@@ -697,11 +707,12 @@ button.primary.danger:hover { filter: brightness(0.92); }
 .col-w70 { width: 70px; } .col-w80 { width: 80px; } .col-w81 { width: 81px; }
 .col-w100 { width: 100px; } .col-w102 { width: 102px; } .col-w110 { width: 110px; }
 .col-w122 { width: 122px; } .col-w130 { width: 130px; } .col-w142 { width: 142px; }
-.col-w160 { width: 160px; } .col-w200 { width: 200px; }
+.col-w160 { width: 160px; } .col-w200 { width: 200px; } .col-w240 { width: 240px; }
 /* 批次進貨固定欄寬，其餘沿用購物車公版。 */
 .cart-col-barcode, .receive-col-barcode { width: 142px; }
-.receive-col-qty { width: 110px; }
-.receive-col-label { width: 170px; }
+/* 進貨數量與列印標籤合併一格:數量框後面接「列印 N 張」,不另佔一欄 */
+.receive-col-qty-label { width: 196px; }
+.qty-label { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .receive-table tr.receive-row-hit > td { background: var(--accent-soft); }
 /* 盤點審核:標記退回的品項整列淡紅底,一眼看出哪些會被退回 */
 tr.stocktake-row-returned > td { background: rgba(220, 38, 38, 0.08); color: var(--danger); }
@@ -738,6 +749,28 @@ tr.stocktake-row-returned > td { background: rgba(220, 38, 38, 0.08); color: var
 .records-table .records-detail td { background: transparent; padding: 5px 8px; }
 .records-table .records-detail tbody tr:last-child td { border-bottom: 0; }
 .records-table .records-detail td.records-formula { text-align: right; color: #636366; font-size: 13px; border-top: 1px solid var(--border); border-bottom: 0; }
+/* 返修明細:每個品項一張白卡;品名為主、規格為從,件數與狀態同列靠右,原因獨立淺底區塊,按鈕靠右 */
+.repair-cards { display: flex; flex-direction: column; gap: 8px; }
+.repair-card { background: var(--surface); border: 1px solid var(--pressed); border-radius: 8px; padding: 10px 14px; }
+.repair-card-head { display: flex; align-items: center; gap: 6px; }
+.repair-card-title { flex: 1; min-width: 0; }
+.repair-card-name { font-size: 16px; font-weight: 600; }
+.repair-card-spec { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+/* 件數每項固定寬度、整組靠右貼齊狀態膠囊:各卡上下對齊;多一項(待返新＋結案並存)時往左延伸 */
+.repair-card-counts { display: flex; justify-content: flex-end; font-size: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.repair-card-counts > span { width: 74px; }
+.repair-card-counts > span:first-child { width: 58px; }
+.repair-count-done { color: var(--primary); }
+.repair-count-left { color: var(--danger); }
+.repair-count-closed { color: var(--text-2); }
+.repair-state { width: 92px; flex: 0 0 92px; text-align: center; font-size: 13px; padding: 2px 0; border-radius: 999px; border: 1px solid; }
+.repair-state-waiting, .repair-state-partial { background: var(--accent-soft); color: var(--primary-active); border-color: var(--accent); }
+.repair-state-done { background: #e7f6ec; color: var(--success); border-color: var(--success); }
+.repair-state-closed { background: var(--hover); color: var(--text-2); border-color: var(--border); }
+.repair-card-notes { margin-top: 8px; padding: 6px 10px; background: var(--panel); border-radius: 6px; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.repair-note-label { color: var(--text-2); margin-right: 1em; }
+.repair-note-date { color: var(--text-3); font-size: 13px; }
+.repair-card-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
 .records-spec { color: #636366; font-size: 14px; }
 /* 會員:收銀帶入、紀錄查詢電話列與銷售明細 */
 .member-picked, .member-lookup { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }

@@ -2,6 +2,8 @@ window.PosPages = window.PosPages || {};
 // 切頁保留本次開啟程式的進貨清單；關閉程式後清空。
 window.PosReceiveDraft = Vue.reactive({
   rows: [], notFound: "", highlightKey: null, doneMsg: "", locked: false, generation: 0,
+  // 返新進貨:輸入退貨單號帶入返修品項,填本次返新數量後一次寫入
+  mode: "normal", repairInput: "", repair: null, repairQty: {}, repairLabeled: {}, repairBusy: false,
 });
 window.PosPages["page-receive"] = {
   template: "#tpl-receive",
@@ -127,6 +129,65 @@ window.PosPages["page-receive"] = {
         this.draft.highlightKey = null;
       } catch (e) { this.showError(e.message); }
       finally { this.draft.locked = false; this.$refs.scan?.focus(); }
+    },
+    setMode(mode) {
+      if (this.draft.locked || this.draft.repairBusy) return;
+      this.draft.mode = mode;
+      this.$nextTick(() => (mode === "normal" ? this.$refs.scan : this.$refs.repairInput)?.focus());
+    },
+    repairLeft(it) { return it.qty - it.closed_qty - it.repaired_qty; },
+    repairItems() { return (this.draft.repair?.items || []).filter(it => it.disposition === "repair"); },
+    async loadRepair() {
+      if (this.draft.repairBusy) return;
+      const text = String(this.draft.repairInput || "").trim();
+      if (!/^[0-9]+$/.test(text)) { this.showError("請輸入退貨單號（數字）"); return; }
+      this.draft.repairBusy = true;
+      try {
+        const detail = await API.returnDetail(Number(text));
+        if (!detail.is_repair) { this.showError(`退貨單 ${text} 不是返修單`); return; }
+        if (detail.status !== "repairing") { this.showError(`退貨單 ${text} 目前為「${this.statusText(detail.status)}」，沒有待返新的品項`); return; }
+        this.draft.repair = detail;
+        this.draft.repairQty = {};
+        this.draft.repairLabeled = {};
+        this.draft.doneMsg = "";
+      } catch (e) { this.showError(e.message); }
+      finally { this.draft.repairBusy = false; }
+    },
+    setRepairQty(it, event) {
+      if (this.draft.repairBusy) { event.target.value = this.draft.repairQty[it.variant_id] || 0; return; }
+      const n = Math.min(this.repairLeft(it), Math.max(0, Math.floor(Number(event.target.value)) || 0));
+      this.draft.repairQty[it.variant_id] = n;
+      event.target.value = n;
+    },
+    async addRepairLabels(it) {
+      const n = (this.draft.repairQty[it.variant_id] || 0) - (this.draft.repairLabeled[it.variant_id] || 0);
+      if (n <= 0 || this.draft.repairBusy) return;
+      try {
+        const added = await window.PosLabelQueueAdd(it.variant_id, it.label_barcode, n);
+        if (added.result === "added" || added.result === "merged")
+          this.draft.repairLabeled[it.variant_id] = (this.draft.repairLabeled[it.variant_id] || 0) + n;
+        else this.showError("無法加入列印清單，請至標籤列印頁確認。");
+      } catch (e) { this.showError(e.message); }
+    },
+    async confirmRepair() {
+      if (this.draft.repairBusy || !this.draft.repair) return;
+      if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
+      const rid = this.draft.repair.return_id, employee = this.employee.id;
+      const items = this.repairItems().map(it => ({ variant_id: it.variant_id, qty: this.draft.repairQty[it.variant_id] || 0 }))
+        .filter(it => it.qty > 0);
+      if (!items.length) { this.showError("請填寫本次返新數量"); return; }
+      const m = items.reduce((sum, it) => sum + it.qty, 0);
+      this.draft.repairBusy = true;
+      try {
+        if (!await PosConfirm.ask(`退貨單 ${rid} 返新進貨 ${items.length} 項、共 ${m} 件，將加回庫存。確定?`, { title: "確認返新進貨" })) return;
+        if (this.employee.id !== employee) { this.showError("請先選擇員工代號"); return; }
+        const r = await API.repairReceive({ return_id: rid, employee, items });
+        const message = r.done ? `已返新 ${m} 件，退貨單 ${rid} 全部處理完成。` : `已返新 ${m} 件，退貨單 ${rid} 仍有品項待處理。`;
+        this.draft.doneMsg = message;
+        setTimeout(() => { if (this.draft.doneMsg === message) this.draft.doneMsg = ""; }, 5000);
+        this.draft.repair = null; this.draft.repairInput = ""; this.draft.repairQty = {}; this.draft.repairLabeled = {};
+      } catch (e) { this.showError(e.message); }
+      finally { this.draft.repairBusy = false; this.$refs.repairInput?.focus(); }
     },
     goSettings() {
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }

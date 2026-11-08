@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="css/pos.css?v=301">
+<link rel="stylesheet" href="css/pos.css?v=321">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=301" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=321" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -152,7 +152,41 @@
 </template>
 <template id="tpl-receive">
 <div class="page receive">
-  <div class="scan-row"><employee-picker></employee-picker></div>
+  <div class="scan-row"><employee-picker></employee-picker>
+    <span class="mode-switch">
+      <button type="button" class="chip-toggle" :class="{on: draft.mode==='normal'}" @click="setMode('normal')">一般進貨</button>
+      <button type="button" class="chip-toggle" :class="{on: draft.mode==='repair'}" @click="setMode('repair')">返新進貨</button>
+    </span></div>
+  <div v-if="draft.mode==='repair'">
+  <div class="scan-row">
+    <input ref="repairInput" v-model="draft.repairInput" class="w160" inputmode="numeric" placeholder="退貨單號"
+           @keyup.enter="loadRepair" :disabled="draft.repairBusy">
+    <button @click="loadRepair" :disabled="draft.repairBusy">帶入</button>
+  </div>
+  <table class="cart-table receive-table">
+    <colgroup><col><col class="col-w240"><col class="col-w72"><col class="col-w72"><col class="col-w72"><col class="col-w72"><col class="receive-col-qty-label"></colgroup>
+    <thead><tr><th>商品</th><th>規格</th><th class="num">返修數</th><th class="num">已返新</th><th class="num">已結案</th><th class="num">未處理</th>
+      <th>本次返新</th></tr></thead>
+    <tbody>
+      <tr v-if="!draft.repair"><td colspan="7" class="hint">請輸入返修中的退貨單號後按「帶入」。</td></tr>
+      <tr v-for="it in repairItems()" :key="it.variant_id">
+        <td>{{ it.name }}<div v-if="it.reason" class="receive-reason">退貨原因：{{ it.reason }}</div></td><td>{{ attrText(it) }}</td>
+        <td class="num">{{ it.qty }}</td><td class="num">{{ it.repaired_qty }}</td><td class="num">{{ it.closed_qty }}</td>
+        <td class="num">{{ repairLeft(it) }}</td>
+        <td><div class="qty-label"><input type="number" class="w80" min="0" :max="repairLeft(it)" :value="draft.repairQty[it.variant_id] || 0"
+                   :disabled="draft.repairBusy || repairLeft(it) === 0" @change="setRepairQty(it, $event)">
+            <button v-if="(draft.repairQty[it.variant_id] || 0) > (draft.repairLabeled[it.variant_id] || 0) && it.label_barcode" class="btn-sm"
+                    :disabled="draft.repairBusy" @click="addRepairLabels(it)">列印 {{ (draft.repairQty[it.variant_id] || 0) - (draft.repairLabeled[it.variant_id] || 0) }} 張</button>
+            <span v-else-if="draft.repairLabeled[it.variant_id]" class="hint">已加入 {{ draft.repairLabeled[it.variant_id] }} 張</span></div></td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="pay-panel">
+    <div v-if="draft.repair">退貨單 {{ draft.repair.return_id }}（開單 {{ draft.repair.started_at }}）</div>
+    <button class="primary" :disabled="draft.repairBusy || !draft.repair" @click="confirmRepair">確認返新</button>
+  </div>
+  </div>
+  <div v-else>
   <div class="scan-row">
     <input ref="scan" v-model="scanCode" @keyup.enter="onScan"
            placeholder="掃描條碼進貨" class="scan-input">
@@ -164,13 +198,13 @@
   <table class="cart-table receive-table">
     <colgroup>
       <col><col><col>
-      <col class="receive-col-barcode"><col class="cart-col-stock"><col class="receive-col-qty">
-      <col class="receive-col-label"><col class="cart-col-remove">
+      <col class="receive-col-barcode"><col class="cart-col-stock"><col class="receive-col-qty-label">
+      <col class="cart-col-remove">
     </colgroup>
     <thead><tr><th>商品</th><th>適用機型</th><th>規格</th><th>條碼</th><th>庫存</th>
-      <th>進貨數量</th><th>標籤</th><th></th></tr></thead>
+      <th>進貨數量</th><th></th></tr></thead>
     <tbody>
-      <tr v-if="!draft.rows.length"><td colspan="8" class="hint">請掃描條碼加入進貨清單。</td></tr>
+      <tr v-if="!draft.rows.length"><td colspan="7" class="hint">請掃描條碼加入進貨清單。</td></tr>
       <tr v-for="row in draft.rows" :key="row.variant_id"
           :class="{'receive-row-hit': draft.highlightKey === row.variant_id}">
         <td>{{ row.name }}</td>
@@ -178,11 +212,11 @@
         <td>{{ attrText(row) }}</td>
         <td>{{ row.label_barcode }}</td>
         <td>{{ row.stock }}</td>
-        <td><input type="number" :value="row.qty" min="1" class="w80"
-                   :disabled="draft.locked" @change="setQty(row, $event)"></td>
-        <td><button v-if="row.qty > row.labeled" class="btn-sm"
-                    :disabled="row.labelBusy || draft.locked" @click="addToLabels(row)">加入列印（{{ row.qty - row.labeled }} 張）</button>
-            <span v-else-if="row.labeled > 0" class="hint">已加入 {{ row.labeled }} 張</span></td>
+        <td><div class="qty-label"><input type="number" :value="row.qty" min="1" class="w80"
+                   :disabled="draft.locked" @change="setQty(row, $event)">
+            <button v-if="row.qty > row.labeled" class="btn-sm"
+                    :disabled="row.labelBusy || draft.locked" @click="addToLabels(row)">列印 {{ row.qty - row.labeled }} 張</button>
+            <span v-else-if="row.labeled > 0" class="hint">已加入 {{ row.labeled }} 張</span></div></td>
         <td><button class="btn-x" title="移除" :disabled="draft.locked" @click="removeRow(row)">✕</button></td>
       </tr>
     </tbody>
@@ -191,6 +225,7 @@
     <div>共 {{ draft.rows.length }} 項、{{ totalQty }} 件</div>
     <button class="primary" :disabled="draft.locked || !draft.rows.length" @click="confirmReceive">確認進貨</button>
     <button :disabled="draft.locked || !draft.rows.length" @click="clearAll">清空</button>
+  </div>
   </div>
   <div v-if="draft.doneMsg" class="done-msg">{{ draft.doneMsg }}</div>
 </div>
@@ -288,7 +323,7 @@
                    :disabled="!canEdit" @change="setQty(it)"></td>
         <td><input v-if="canEdit" v-model="it.sale_id" class="w100" placeholder="選填"
                    @change="setSale(it)"><template v-else>{{ it.sale_id ?? '' }}</template></td>
-        <td><input v-if="canEdit" v-model="it.reason" maxlength="100" placeholder="選填"
+        <td><input v-if="canEdit" v-model="it.reason" maxlength="30" placeholder="選填（30 字內）"
                    @change="setReason(it)"><template v-else>{{ it.reason }}</template></td>
         <td v-if="detail.status!=='open'">
           <select v-if="canReview" v-model="it.disposition" @change="setDisposition(it)">
@@ -325,6 +360,10 @@
         <select v-if="kind==='sales'" v-model="payment"><option value="">全部付款方式</option>
           <option v-for="p in payments" :key="p">{{ p }}</option></select>
         <input v-if="kind==='sales'" v-model="memberPhone" class="w120" inputmode="numeric" placeholder="會員電話" @keydown.enter="reload">
+        <span v-if="kind==='returns'" class="mode-switch">
+          <button type="button" class="chip-toggle" :class="{on: returnKind==='normal'}" @click="selectReturnKind('normal')">一般退貨</button>
+          <button type="button" class="chip-toggle" :class="{on: returnKind==='repair'}" @click="selectReturnKind('repair')">返修退貨</button>
+        </span>
         <button class="primary" @click="reload">查詢</button>
         <button v-if="kind==='sales' && isAdmin" @click="exportCsv">匯出 CSV</button>
       </div>
@@ -389,23 +428,46 @@
       </table>
       <table v-else-if="kind==='returns'" class="records-table">
         <colgroup><col class="col-w80"><col class="col-w180"><col><col class="col-w180"><col class="col-w56"><col class="col-w92"></colgroup>
-        <thead><tr><th>單號</th><th>開單時間</th><th>狀態</th><th>核准／作廢時間</th><th>員工</th><th></th></tr></thead>
+        <thead><tr><th>單號</th><th>開單時間</th><th>狀態</th><th>{{ returnKind==='repair' ? '核准／完成時間' : '核准時間' }}</th><th>員工</th><th></th></tr></thead>
         <tbody>
           <template v-for="t in returns" :key="t.return_id">
             <tr>
               <td>{{ t.return_id }}</td><td>{{ t.started_at }}</td>
-              <td>{{ t.status==='cancelled' ? '已作廢（員工 ' + t.cancelled_by + '）' : '已核准' }}</td>
-              <td>{{ t.approved_at || t.cancelled_at }}</td><td>{{ t.employee }}</td>
+              <td>{{ returnSheetStatus(t) }}</td>
+              <td>{{ t.completed_at || t.approved_at || '—' }}</td><td>{{ t.employee }}</td>
               <td class="records-action"><button class="records-toggle" :class="{on: isOpen(t.return_id)}" :aria-expanded="isOpen(t.return_id)" @click="toggle(t.return_id)">{{ t.items.length }} 項 {{ isOpen(t.return_id) ? '▴' : '▾' }}</button></td>
             </tr>
             <tr v-if="isOpen(t.return_id)"><td colspan="6" class="records-detail-cell">
-              <table class="records-detail">
+              <div v-if="returnKind==='repair'" class="repair-cards">
+                <div v-for="it in t.items" :key="it.variant_id" class="repair-card">
+                  <div class="repair-card-head">
+                    <div class="repair-card-title"><div class="repair-card-name">{{ it.name }}</div>
+                      <div class="repair-card-spec">{{ repairSpecText(it) }}</div></div>
+                    <div class="repair-card-counts"><span>數量 <b>{{ it.qty }}</b></span>
+                      <span class="repair-count-done">已返新 <b>{{ it.repaired_qty }}</b></span>
+                      <span v-if="repairLeft(it)" class="repair-count-left">待返新 <b>{{ repairLeft(it) }}</b></span>
+                      <span v-if="it.closed_qty" class="repair-count-closed">已結案 <b>{{ it.closed_qty }}</b></span>
+                      <span v-if="!repairLeft(it) && !it.closed_qty"></span></div>
+                    <span class="repair-state" :class="'repair-state-' + repairState(it)">{{ repairStateText(it) }}</span>
+                  </div>
+                  <div v-if="it.reason || it.closed_qty" class="repair-card-notes">
+                    <div v-if="it.reason"><span class="repair-note-label">退貨原因</span>{{ it.reason }}</div>
+                    <div v-if="it.closed_qty"><span class="repair-note-label">結案理由</span>{{ it.closed_reason }}</div>
+                    <div v-if="it.closed_qty" class="repair-note-date">{{ String(it.closed_at || '').slice(0, 10) }} 結案</div>
+                  </div>
+                  <div v-if="isAdmin && (it.closed_qty || (t.status==='repairing' && repairLeft(it)))" class="repair-card-actions">
+                    <button v-if="it.closed_qty" class="btn-sm subtle" @click="reopenRepairItem(t, it)">撤回結案</button>
+                    <button v-else class="btn-sm convert" @click="closeRepairItem(t, it)">結案</button>
+                  </div>
+                </div>
+              </div>
+              <table v-else class="records-detail">
                 <colgroup><col><col class="col-w56"><col class="col-w72"><col class="col-w96"><col class="col-w130"></colgroup>
                 <thead><tr><th>商品</th><th class="num">數量</th><th class="num">銷售單</th><th>處理方式</th><th>原因</th></tr></thead>
                 <tbody><tr v-for="it in t.items">
                   <td>{{ it.name }} <span class="records-spec">{{ specText(it) }}</span></td>
                   <td class="num">{{ it.qty }}</td><td class="num">{{ it.sale_id || '—' }}</td>
-                  <td>{{ t.status==='cancelled' ? '—' : dispositionText(it.disposition) }}</td><td>{{ it.reason || '—' }}</td>
+                  <td>{{ ['open','pending'].includes(t.status) ? '—' : dispositionText(it.disposition) }}</td><td>{{ it.reason || '—' }}</td>
                 </tr></tbody>
               </table>
             </td></tr>
@@ -899,28 +961,28 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=301"></script>
-<script src="js/api.js?v=301"></script>
-<script src="js/confirm.js?v=301"></script>
-<script src="js/auth.js?v=301"></script>
-<script src="js/pos_shared.js?v=301"></script>
-<script src="js/catalogfields.js?v=301"></script>
-<script src="js/checkout.js?v=301"></script>
-<script src="js/receive.js?v=301"></script>
-<script src="js/stocktake.js?v=301"></script>
-<script src="js/returns.js?v=301"></script>
-<script src="js/records.js?v=301"></script>
-<script src="js/catalog.js?v=301"></script>
-<script src="js/sortable.js?v=301"></script>
-<script src="js/combobox.js?v=301"></script>
-<script src="js/optpicker.js?v=301"></script>
-<script src="js/modelpicker.js?v=301"></script>
-<script src="js/employeepicker.js?v=301"></script>
-<script src="js/membereditor.js?v=301"></script>
-<script src="js/attrfields.js?v=301"></script>
-<script src="js/settings.js?v=301"></script>
-<script src="js/labels.js?v=301"></script>
-<script src="js/app_update.js?v=301"></script>
-<script src="js/app.js?v=301"></script>
+<script src="js/vue.global.prod.js?v=321"></script>
+<script src="js/api.js?v=321"></script>
+<script src="js/confirm.js?v=321"></script>
+<script src="js/auth.js?v=321"></script>
+<script src="js/pos_shared.js?v=321"></script>
+<script src="js/catalogfields.js?v=321"></script>
+<script src="js/checkout.js?v=321"></script>
+<script src="js/receive.js?v=321"></script>
+<script src="js/stocktake.js?v=321"></script>
+<script src="js/returns.js?v=321"></script>
+<script src="js/records.js?v=321"></script>
+<script src="js/catalog.js?v=321"></script>
+<script src="js/sortable.js?v=321"></script>
+<script src="js/combobox.js?v=321"></script>
+<script src="js/optpicker.js?v=321"></script>
+<script src="js/modelpicker.js?v=321"></script>
+<script src="js/employeepicker.js?v=321"></script>
+<script src="js/membereditor.js?v=321"></script>
+<script src="js/attrfields.js?v=321"></script>
+<script src="js/settings.js?v=321"></script>
+<script src="js/labels.js?v=321"></script>
+<script src="js/app_update.js?v=321"></script>
+<script src="js/app.js?v=321"></script>
 </body>
 </html>
