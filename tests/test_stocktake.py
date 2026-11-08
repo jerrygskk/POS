@@ -246,6 +246,24 @@ class TestStocktake(FacadeTestCase):
         self.assertEqual(self.invoke("stocktake.history", {"date_from": "2000-01-01", "date_to": "2000-01-02"}), [])
         self.assert_application_error("validation_error", "stocktake.history", {"date_from": "2026/01/01"})
 
+    def test_history_matches_per_session_detail(self):
+        self.scan(4)
+        self.submit()
+        self.invoke("stocktake.approve", {"session_id": self.sid})
+        second = self.invoke("stocktake.create", {"employee": 1})["session_id"]
+        for vid, qty in ((self.v1, 5), (self.v2, 1)):
+            self.invoke("stocktake.scan", {"session_id": second, "variant_id": vid, "qty": qty})
+        self.invoke("stocktake.cancel", {"session_id": second, "employee": 1})
+        empty = self.invoke("stocktake.create", {"employee": 1})["session_id"]
+        self.invoke("stocktake.cancel", {"session_id": empty, "employee": 1})
+        history = self.invoke("stocktake.history", {})
+        self.assertEqual([h["session_id"] for h in history], [empty, second, self.sid])
+        for h in history:
+            expected = self.invoke("stocktake.detail", {"session_id": h["session_id"]})
+            expected["diff_count"] = sum(1 for item in expected["items"] if item["diff"])
+            self.assertEqual(h, expected)
+        self.assertEqual([h["diff_count"] for h in history], [0, 2, 1])
+
     def test_list_keeps_latest_ten_sessions(self):
         self.submit()
         self.invoke("stocktake.approve", {"session_id": self.sid})

@@ -109,7 +109,8 @@ class AdminSession:
                 raise ValidationError("密碼必須是字串")
             if not verify_password(old, self._password_hash()):
                 raise ValidationError("舊密碼錯誤")
-            new = new.strip()
+            if new != new.strip():
+                raise ValidationError("密碼前後不可有空白")
             if len(new) < 4:
                 raise ValidationError("新密碼至少 4 個字")
             if new == old:

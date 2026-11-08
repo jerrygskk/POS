@@ -3,7 +3,7 @@ window.PosPages["page-stocktake"] = {
   template: "#tpl-stocktake",
   inject: ["showError"],
   data() {
-    return { sessions: [], current: null, detail: null, scanCode: "", marked: [],
+    return { sessions: [], current: null, detail: null, scanCode: "", marked: [], busy: false,
              employee: window.PosEmployee };
   },
   computed: {
@@ -37,16 +37,28 @@ window.PosPages["page-stocktake"] = {
       this.marked = [];
       this.$nextTick(() => this.$refs.scan?.focus());
     },
-    async onScan() {
-      if (this.detail?.status !== "open") return;
+    // 等待回應期間可能已返回列表或切到別張單：回應回來後再確認單號才更新畫面
+    async refreshDetail(sid) {
+      const detail = await API.stocktakeDetail(sid);
+      if (this.current === sid) this.detail = detail;
+    },
+    onScan() {
+      // 先取出條碼並清空輸入框，掃描槍接著打入的下一筆才不會被吃掉；排隊依序處理。
+      const code = this.scanCode;
+      this.scanCode = "";
+      if (this.detail?.status !== "open" || !code.trim()) return;
+      const sid = this.current;
+      this._scanChain = (this._scanChain || Promise.resolve()).then(() => this.scanOne(sid, code));
+      return this._scanChain;
+    },
+    async scanOne(sid, code) {
+      if (this.current !== sid || this.detail?.status !== "open") return;
       await this.guard(async () => {
-        const query = await window.PosScan(this.scanCode);
-        if (!query) { this.scanCode = ""; return; }
-        if (this.detail?.status !== "open") return;
-        const hit = query.data;
-        await API.stocktakeScan({session_id: this.current, variant_id: hit.variant_id, qty: 1});
-        this.detail = await API.stocktakeDetail(this.current);
-        this.scanCode = "";
+        const query = await window.PosScan(code);
+        if (!query) return;
+        if (this.current !== sid || this.detail?.status !== "open") return;
+        await API.stocktakeScan({session_id: sid, variant_id: query.data.variant_id, qty: 1});
+        await this.refreshDetail(sid);
       });
     },
     async setCounted(it) {
@@ -58,11 +70,11 @@ window.PosPages["page-stocktake"] = {
       try {
         await API.setStocktakeCounted({session_id: this.current,
           variant_id: it.variant_id, counted_qty: it.counted_qty});
-        this.detail = await API.stocktakeDetail(this.current);
+        await this.refreshDetail(this.current);
       } catch (e) {
         this.showError(e.message);
         // 寫入失敗:重新載入以還原畫面上未儲存的輸入值
-        this.detail = await API.stocktakeDetail(this.current);
+        await this.refreshDetail(this.current);
       }
     },
     async setNote(it) {
@@ -71,24 +83,28 @@ window.PosPages["page-stocktake"] = {
         await API.setStocktakeNote(this.current, it.variant_id, it.note || null);
       } catch (e) {
         this.showError(e.message);
-        this.detail = await API.stocktakeDetail(this.current);
+        await this.refreshDetail(this.current);
       }
     },
     async cancel(s) {
       if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
       if (s.status === "pending" && !this.isAdmin) { this.showError("需要管理者權限"); return; }
-      if (!await PosConfirm.ask(`作廢盤點單 ${s.session_id}?作廢後不會調整庫存，紀錄保留於紀錄查詢。`)) return;
+      if (this.busy) return;
+      this.busy = true;
       try {
-        await API.cancelStocktake(s.session_id, this.employee.id);
-      } catch (e) { this.showError(e.message); }
-      await this.guard(() => this.reload());
-      await this.guard(() => window.PosAuthOps.refresh());
+        if (!await PosConfirm.ask(`作廢盤點單 ${s.session_id}?作廢後不會調整庫存，紀錄保留於紀錄查詢。`)) return;
+        try {
+          await API.cancelStocktake(s.session_id, this.employee.id);
+        } catch (e) { this.showError(e.message); }
+        await this.guard(() => this.reload());
+        await this.guard(() => window.PosAuthOps.refresh());
+      } finally { this.busy = false; }
     },
     async removeItem(it) {
       if (!this.canEditCounted) { this.showError("盤點單不是進行中，無法移除品項"); return; }
       await this.guard(async () => {
         await API.removeStocktakeItem(this.current, it.variant_id);
-        this.detail = await API.stocktakeDetail(this.current);
+        await this.refreshDetail(this.current);
       });
     },
     async close() {
@@ -106,15 +122,19 @@ window.PosPages["page-stocktake"] = {
       });
     },
     async withdraw(sid) {
-      if (!await PosConfirm.ask("抽回後盤點單回到進行中，系統量會更新為目前庫存，可修改後再次送出。確定抽回?")) return;
+      if (this.busy) return;
+      this.busy = true;
       try {
-        await API.withdrawStocktake(sid);
-        await this.reload();
-        await window.PosAuthOps.refresh();
-      } catch (e) {
-        this.showError(e.message);
-        await this.guard(() => this.reload());
-      }
+        if (!await PosConfirm.ask("抽回後盤點單回到進行中，系統量會更新為目前庫存，可修改後再次送出。確定抽回?")) return;
+        try {
+          await API.withdrawStocktake(sid);
+          await this.reload();
+          await window.PosAuthOps.refresh();
+        } catch (e) {
+          this.showError(e.message);
+          await this.guard(() => this.reload());
+        }
+      } finally { this.busy = false; }
     },
     toggleMark(it) {
       if (!this.canReview) { this.showError("需要管理者權限"); return; }

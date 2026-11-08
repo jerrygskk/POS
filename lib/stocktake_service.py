@@ -78,11 +78,22 @@ class StocktakeService:
         suffix, args = date_sql(filters, "COALESCE(approved_at,cancelled_at)")
         sessions = self.repo.all("SELECT * FROM StocktakeSession WHERE status IN ('closed','cancelled')" + suffix +
                                  " ORDER BY session_id DESC", args)
+        if not sessions:
+            return []
+        sids = [s["session_id"] for s in sessions]
+        marks = ",".join("?" * len(sids))
+        rows = self.repo.all("SELECT si.*,p.name FROM StocktakeItem si JOIN Variant v ON si.variant_id=v.variant_id "
+                             "JOIN Product p ON v.product_id=p.product_id WHERE si.session_id IN (" + marks + ")", sids)
+        vids = sorted({r["variant_id"] for r in rows})
+        attrs = product_data.attrs_by_variant(self.repo.connection, vids)
+        disp = product_data.display_attrs(self.repo.connection, vids)
+        grouped = {sid: [] for sid in sids}
+        for r in rows:
+            grouped[r["session_id"]].append(self._item(r, attrs, disp))
         out = []
         for session in sessions:
-            detail = self.detail(session["session_id"])
-            detail["diff_count"] = sum(1 for item in detail["items"] if item["diff"])
-            out.append(detail)
+            items = grouped[session["session_id"]]
+            out.append({**dict(session), "items": items, "diff_count": sum(1 for item in items if item["diff"])})
         return out
     def scan(self, sid, vid, qty):
         self.repo.require_open(sid)
@@ -133,8 +144,11 @@ class StocktakeService:
         if session is None: raise NotFoundError("找不到盤點作業")
         rows=self.repo.all("SELECT si.*,p.name FROM StocktakeItem si JOIN Variant v ON si.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id WHERE si.session_id=?",(sid,))
         vids=[r["variant_id"] for r in rows]; attrs=product_data.attrs_by_variant(self.repo.connection,vids); disp=product_data.display_attrs(self.repo.connection,vids)
-        items=[{"variant_id":r["variant_id"],"name":r["name"],"attributes":attrs.get(r["variant_id"],{}),"attr_display":disp.get(r["variant_id"],""),"system_qty":r["system_qty"],"counted_qty":r["counted_qty"],"diff":r["counted_qty"]-r["system_qty"],"needs_recount":r["needs_recount"],"note":r["note"]} for r in rows]
+        items=[self._item(r,attrs,disp) for r in rows]
         return {**dict(session),"items":items}
+    @staticmethod
+    def _item(r,attrs,disp):
+        return {"variant_id":r["variant_id"],"name":r["name"],"attributes":attrs.get(r["variant_id"],{}),"attr_display":disp.get(r["variant_id"],""),"system_qty":r["system_qty"],"counted_qty":r["counted_qty"],"diff":r["counted_qty"]-r["system_qty"],"needs_recount":r["needs_recount"],"note":r["note"]}
     def close(self,sid):
         self.repo.require_open(sid)
         self.repo.require_recounted(sid)

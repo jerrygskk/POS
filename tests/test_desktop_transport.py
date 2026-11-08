@@ -176,6 +176,7 @@ vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
 const page = context.window.PosPages["page-stocktake"];
 const state = {
   current: 3, scanCode: "ABC", detail: {status:"open",items:[]},
+  scanOne: page.methods.scanOne, refreshDetail: page.methods.refreshDetail,
   guard: async operation => operation()
 };
 (async () => {

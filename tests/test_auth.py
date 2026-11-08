@@ -114,12 +114,16 @@ class AuthTests(ConnTestCase):
     def test_change_password_errors_and_success_logout(self):
         self.session.login("admin")
         for old, new, message in (("wrong", "Changed", "舊密碼錯誤"),
-                                  ("admin", " abc ", "新密碼至少 4 個字"),
+                                  ("admin", "abc", "新密碼至少 4 個字"),
                                   ("admin", "admin", "新密碼不可與舊密碼相同")):
             with self.subTest(message=message), self.assertRaisesRegex(ValidationError, message):
                 self.session.change_password(old, new)
             self.assertTrue(self.session.is_admin())
-        self.session.change_password("admin", "  Changed  ")
+        for new in (" Changed", "Changed ", "	Changed"):
+            with self.subTest(new=new), self.assertRaisesRegex(ValidationError, "密碼前後不可有空白"):
+                self.session.change_password("admin", new)
+            self.assertTrue(self.session.is_admin())
+        self.session.change_password("admin", "Changed")
         self.assertFalse(self.session.is_admin())
         self.assertFalse(self.session.login("admin"))
         self.assertTrue(self.session.login("Changed"))
