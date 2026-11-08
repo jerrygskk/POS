@@ -244,6 +244,8 @@ python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_s
 
 ## 3. 測試
 
+全專案走查清單與紀錄方式見入庫的 [WALKTHROUGH.md](WALKTHROUGH.md)。只有維護者明確要求走查才執行；修改、推送、進版、打包與發布均不自動觸發，也不以完整走查作為發布前置條件。依2026-11-08實測縮為7項複雜UI互動，每項選一個代表流程；已正常且未受改動影響者沿用，已知未修問題不重現，不重跑例行操作或等待閒置逾時。日常必要驗證與完整自動測試規定不變，走查結果另行記錄。
+
 ```powershell
 python -m unittest discover -s tests
 ```
