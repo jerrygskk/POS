@@ -165,21 +165,21 @@ window.PosPages["page-receive"] = {
       }
     },
     setRepairQty(it, event) {
-      if (this.draft.repairBusy) { event.target.value = this.draft.repairQty[it.variant_id] || 0; return; }
+      if (this.draft.repairBusy) { event.target.value = this.draft.repairQty[it.id] || 0; return; }
       const n = Math.min(this.repairLeft(it), Math.max(0, Math.floor(Number(event.target.value)) || 0));
-      this.draft.repairQty[it.variant_id] = n;
+      this.draft.repairQty[it.id] = n;
       event.target.value = n;
     },
     // 加入期間鎖住整個返新畫面，連點才不會用同一個待加張數重複加入
     async addRepairLabels(it) {
       if (this.draft.repairBusy) return;
-      const n = (this.draft.repairQty[it.variant_id] || 0) - (this.draft.repairLabeled[it.variant_id] || 0);
+      const n = (this.draft.repairQty[it.id] || 0) - (this.draft.repairLabeled[it.id] || 0);
       if (n <= 0) return;
       this.draft.repairBusy = true;
       try {
         const added = await window.PosLabelQueueAdd(it.variant_id, it.label_barcode, n);
         if (added.result === "added" || added.result === "merged")
-          this.draft.repairLabeled[it.variant_id] = (this.draft.repairLabeled[it.variant_id] || 0) + n;
+          this.draft.repairLabeled[it.id] = (this.draft.repairLabeled[it.id] || 0) + n;
         else if (added.result === "too_long") this.showError("條碼過長，無法列印。");
         else if (added.result === "too_many") this.showError("每項標籤最多列印 99 張。");
         else this.showError("無法加入列印清單，請至標籤列印頁確認。");
@@ -190,7 +190,7 @@ window.PosPages["page-receive"] = {
       if (this.draft.repairBusy || !this.draft.repair) return;
       if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
       const rid = this.draft.repair.return_id, employee = this.employee.id;
-      const items = this.repairItems().map(it => ({ variant_id: it.variant_id, qty: this.draft.repairQty[it.variant_id] || 0 }))
+      const items = this.repairItems().map(it => ({ item_id: it.id, qty: this.draft.repairQty[it.id] || 0 }))
         .filter(it => it.qty > 0);
       if (!items.length) { this.showError("請填寫本次返新數量"); return; }
       const m = items.reduce((sum, it) => sum + it.qty, 0);

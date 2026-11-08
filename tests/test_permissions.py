@@ -1,7 +1,7 @@
 """逐項固定管理者權限表，並從真正 bridge 邊界驗證。"""
 from unittest.mock import Mock
 
-from base import ConnTestCase
+from base import ConnTestCase, add_stock
 from lib.auth import ADMIN_ACTIONS
 from lib.desktop_application import DesktopFacade
 from lib.desktop_bridge import DesktopBridge
@@ -35,7 +35,7 @@ class PermissionTests(ConnTestCase):
         self.conn.execute("INSERT INTO Category(category_id,name) VALUES(1,'permission category')")
         self.conn.execute("INSERT INTO Product(product_id,name,category_id) VALUES(1,'permission product',1)")
         self.conn.execute("INSERT INTO Variant(variant_id,product_id,price) VALUES(1,1,10)")
-        self.conn.execute("INSERT INTO StockMovement(variant_id,qty,kind) VALUES(1,10,'purchase')")
+        add_stock(self.conn, 1, 10)
         self.conn.execute("INSERT INTO StocktakeSession(session_id,employee,status) VALUES(1,1,'pending')")
         self.conn.execute("INSERT INTO StocktakeItem(session_id,variant_id,system_qty,counted_qty) VALUES(1,1,10,8)")
         self.conn.commit()

@@ -135,15 +135,17 @@ class BatchReceiveTests(FacadeTestCase):
 
     def test_multiple_items_duplicates_and_employee(self):
         result=self.invoke("stock.receive", {"employee":3,"items":[{"variant_id":self.a,"qty":2},{"variant_id":self.b,"qty":4},{"variant_id":self.a,"qty":1}]})
-        self.assertEqual(result,{"items":[{"variant_id":self.a,"stock":3},{"variant_id":self.b,"stock":4},{"variant_id":self.a,"stock":3}]})
+        self.assertEqual(result,{"receipt_id":result["receipt_id"],"items":[{"variant_id":self.a,"stock":3},{"variant_id":self.b,"stock":4},{"variant_id":self.a,"stock":3}]})
         with closing(get_conn(self.db)) as conn, conn:
-            self.assertEqual([tuple(r) for r in conn.execute("SELECT variant_id,qty,employee FROM StockMovement ORDER BY move_id")], [(self.a,2,3),(self.b,4,3),(self.a,1,3)])
+            # 一張進貨單、員工記在單上;同款式兩列各自保留數量
+            self.assertEqual([tuple(r) for r in conn.execute("SELECT receipt_id,employee FROM Receipt")], [(result["receipt_id"],3)])
+            self.assertEqual([tuple(r) for r in conn.execute("SELECT i.variant_id,i.qty,m.qty,m.employee FROM ReceiptItem i JOIN StockMovement m ON m.receipt_item_id=i.receipt_item_id ORDER BY i.receipt_item_id")], [(self.a,2,2,None),(self.b,4,4,None),(self.a,1,1,None)])
 
     def test_unknown_item_rolls_back_all(self):
         with self.assertRaises(NotFoundError):
             self.invoke("stock.receive", {"employee":1,"items":[{"variant_id":self.a,"qty":2},{"variant_id":999999,"qty":1}]})
         with closing(get_conn(self.db)) as conn, conn:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM StockMovement").fetchone()[0],0)
+            self.assertEqual([conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("StockMovement","ReceiptItem","Receipt")],[0,0,0])
 
     def test_payload_validation(self):
         for payload in ({"employee":1,"items":[]}, {"items":[{"variant_id":self.a,"qty":1}]},

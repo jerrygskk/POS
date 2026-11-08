@@ -172,16 +172,13 @@ class TestSales(FacadeTestCase):
         self.assertEqual(result["total"], 777)
 
     def test_insufficient_stock_counts_duplicate_variant_lines(self):
+        # 庫存異動不可刪改:以目前庫存為準,單列超量與同款拆兩列合計超量都要擋
         with db_conn(self.db) as conn:
-            conn.execute("DELETE FROM StockMovement WHERE variant_id=?", (self.vid,))
-            conn.execute(
-                "INSERT INTO StockMovement(variant_id,qty,kind) VALUES(?,2,'purchase')",
-                (self.vid,),
-            )
-            conn.commit()
+            stock = conn.execute("SELECT COALESCE(SUM(qty),0) FROM StockMovement WHERE variant_id=?",
+                                 (self.vid,)).fetchone()[0]
         for items in (
-            [{"variant_id": self.vid, "qty": 3, "unit_price": 500}],
-            [{"variant_id": self.vid, "qty": 2, "unit_price": 500},
+            [{"variant_id": self.vid, "qty": stock + 1, "unit_price": 500}],
+            [{"variant_id": self.vid, "qty": stock, "unit_price": 500},
              {"variant_id": self.vid, "qty": 1, "unit_price": 500}],
         ):
             with self.subTest(items=items):
@@ -189,7 +186,7 @@ class TestSales(FacadeTestCase):
                     self._sale(items=items)
                 self.assertEqual(raised.exception.code, "validation_error")
                 self.assertIn("庫存不足", raised.exception.message)
-        self.assertEqual(self._stock(), 2)
+        self.assertEqual(self._stock(), stock)
 
 
 class TestSalesMember(TestSales):

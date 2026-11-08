@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess
 from unittest.mock import Mock, patch
 
-from base import ConnTestCase
+from base import ConnTestCase, add_stock
 from lib.desktop_bridge import DesktopBridge
 
 
@@ -13,7 +13,7 @@ class TestStocktakeLayers(ConnTestCase):
         self.conn.execute("INSERT INTO Category(name) VALUES('C')")
         self.conn.execute("INSERT INTO Product(name,category_id) VALUES('P',1)")
         self.conn.execute("INSERT INTO Variant(product_id) VALUES(1)")
-        self.conn.execute("INSERT INTO StockMovement(variant_id,qty,kind) VALUES(1,5,'purchase')")
+        add_stock(self.conn, 1, 5)
         self.conn.commit()
         from lib.stocktake_service import StocktakeFacade
         from lib.auth import AdminSession
@@ -44,13 +44,14 @@ class TestStocktakeLayers(ConnTestCase):
         second = self.bridge.invoke("stocktake.approve", {"session_id": sid})
         self.assertEqual("conflict", second["error"]["code"])
         self.assertEqual(1, self.conn.execute(
-            "SELECT COUNT(*) FROM StockMovement WHERE kind='adjust' AND ref_id=?", (sid,)).fetchone()[0])
+            "SELECT COUNT(*) FROM StockMovement m JOIN StocktakeItem i ON i.id=m.stocktake_item_id "
+            "WHERE m.kind='adjust' AND i.session_id=?", (sid,)).fetchone()[0])
 
     def test_approve_rolls_back_status_and_adjustment(self):
         sid = self.facade.invoke("stocktake.create", {"employee": 1})["session_id"]
         self.facade.invoke("stocktake.scan", {"session_id": sid, "variant_id": 1, "qty": 4})
         self.facade.invoke("stocktake.close", {"session_id": sid})
-        with patch("lib.stocktake_service.StocktakeRepository.add_adjustment", side_effect=RuntimeError("secret")):
+        with patch("lib.stocktake_service.stock_ledger.post", side_effect=RuntimeError("secret")):
             result = self.bridge.invoke("stocktake.approve", {"session_id": sid})
         self.assertEqual("internal_error", result["error"]["code"])
         self.assertNotIn("secret", str(result))

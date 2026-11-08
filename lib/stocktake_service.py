@@ -1,6 +1,6 @@
 import sqlite3
 
-from lib import product_data
+from lib import product_data, stock_ledger
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from lib.product_rules import allow_keys as _allow, date_range, date_sql, is_int as _is_int, require_employee
@@ -56,8 +56,6 @@ class StocktakeRepository(BaseRepository):
         count = self.one("SELECT COUNT(*) AS n FROM StocktakeItem WHERE session_id=? AND needs_recount=1", (sid,))["n"]
         if count:
             raise ConflictError(f"有 {count} 項需重新清點，請確認數量後再送出")
-    def add_adjustment(self, variant_id, qty, sid):
-        self.execute("INSERT INTO StockMovement(variant_id,qty,kind,ref_id,note) VALUES(?,?,'adjust',?,'盤點調整')", (variant_id, qty, sid))
 
 class StocktakeService:
     def __init__(self, repository):
@@ -177,8 +175,8 @@ class StocktakeService:
         self.repo.require_recounted(sid)
         if self.repo.execute("UPDATE StocktakeSession SET status='closed',approved_at=datetime('now','localtime'),ended_at=datetime('now','localtime') WHERE session_id=? AND status='pending'", (sid,)).rowcount == 0:
             raise ConflictError("盤點單不是待核准狀態")
-        for row in self.repo.all("SELECT variant_id,counted_qty-system_qty AS diff FROM StocktakeItem WHERE session_id=?",(sid,)):
-            if row["diff"]: self.repo.add_adjustment(row["variant_id"],row["diff"],sid)
+        for row in self.repo.all("SELECT id FROM StocktakeItem WHERE session_id=? ORDER BY id",(sid,)):
+            stock_ledger.post(self.repo.connection, "adjust", row["id"])  # 差異為 0 不寫
         return {"ok":True}
     def pending_count(self):
         return {"count": self.repo.one("SELECT COUNT(*) AS n FROM StocktakeSession WHERE status='pending'")["n"]}

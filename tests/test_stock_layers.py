@@ -30,8 +30,8 @@ class TestStockLayers(ConnTestCase):
             "stock.receive", {"employee": 1, "items": [{"variant_id": 1, "qty": 5}]}
         )
         second = self.facade.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": 1, "qty": 3}]})
-        self.assertEqual({"items": [{"variant_id": 1, "stock": 5}]}, first)
-        self.assertEqual({"items": [{"variant_id": 1, "stock": 8}]}, second)
+        self.assertEqual({"receipt_id": 1, "items": [{"variant_id": 1, "stock": 5}]}, first)
+        self.assertEqual({"receipt_id": 2, "items": [{"variant_id": 1, "stock": 8}]}, second)
         row = self.conn.execute(
             "SELECT variant_id,qty,kind,note FROM StockMovement ORDER BY move_id"
         ).fetchone()
@@ -58,9 +58,10 @@ class TestStockLayers(ConnTestCase):
             with self.subTest(payload=payload):
                 result = self.bridge.invoke("stock.receive", {"employee": 1, "items": [payload]})
                 self.assertEqual("validation_error", result["error"]["code"])
-        self.assertEqual(
-            0, self.conn.execute("SELECT COUNT(*) FROM StockMovement").fetchone()[0]
-        )
+        for table in ("StockMovement", "ReceiptItem", "Receipt"):
+            self.assertEqual(
+                0, self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], table
+            )
 
     def test_missing_variant_is_not_found_for_receive_and_detail(self):
         for action, payload in (
@@ -75,7 +76,7 @@ class TestStockLayers(ConnTestCase):
         self.conn.execute("UPDATE Variant SET active=0 WHERE variant_id=1")
         self.conn.commit()
         self.assertEqual(
-            {"items": [{"variant_id": 1, "stock": 2}]},
+            {"receipt_id": 1, "items": [{"variant_id": 1, "stock": 2}]},
             self.facade.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": 1, "qty": 2}]}),
         )
 
@@ -85,9 +86,10 @@ class TestStockLayers(ConnTestCase):
                 "stock.receive", {"employee": 1, "items": [{"variant_id": 1, "qty": 4}]}
             )
         self.assertEqual("internal_error", result["error"]["code"])
-        self.assertEqual(
-            0, self.conn.execute("SELECT COUNT(*) FROM StockMovement").fetchone()[0]
-        )
+        for table in ("StockMovement", "ReceiptItem", "Receipt"):
+            self.assertEqual(
+                0, self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], table
+            )
 
     def test_unknown_action_is_rejected_by_whitelist(self):
         result = self.bridge.invoke("stock.delete_all", {})

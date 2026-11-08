@@ -127,13 +127,13 @@ window.PosPages["page-records"] = {
         } });
       if (reason === null) return;
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
-      await this.repairWrite(t, () => API.closeReturnItem(t.return_id, it.variant_id, String(reason).trim()));
+      await this.repairWrite(t, () => API.closeReturnItem(t.return_id, it.id, String(reason).trim()));
     },
     async reopenRepairItem(t, it) {
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
       if (!await PosConfirm.ask(`撤回「${it.name}」的結案？此品項回到等待返新。`)) return;
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
-      await this.repairWrite(t, () => API.reopenReturnItem(t.return_id, it.variant_id));
+      await this.repairWrite(t, () => API.reopenReturnItem(t.return_id, it.id));
     },
     async repairWrite(t, fn) {
       await this.guard(async () => {

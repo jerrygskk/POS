@@ -39,7 +39,7 @@ COPY_TABLES = [  # 欄位與來源相同，原樣複製（保留主鍵）
 CONVERT_TABLES = ["AttributeField"]  # 由來源 AttributeField＋CategoryField 轉換
 SOURCE_ONLY_TABLES = ["CategoryField"]  # 只存在來源，已併入 AttributeField
 SKIP_TABLES = ["Sale", "SaleItem", "StockMovement", "StocktakeSession", "StocktakeItem",
-               "ReturnSession", "ReturnItem"]
+               "ReturnSession", "ReturnItem", "Receipt", "ReceiptItem"]
 # Setting 逐鍵處理：schema_version 由本工具寫入最新版號，密碼依種子預設（不複製來源密碼）。
 SETTING_COPY_KEYS = ["payments", "next_store_barcode"]
 SETTING_SKIP_KEYS = ["schema_version", "admin_password_hash"]

@@ -1,7 +1,7 @@
 import logging
 from unittest.mock import patch
 
-from base import ConnTestCase
+from base import ConnTestCase, add_stock
 from lib.db import get_conn
 from lib.product_rules import format_store_barcode
 from lib.desktop_bridge import DesktopBridge
@@ -121,7 +121,7 @@ class TestProductLayers(ConnTestCase):
         })
         vid = made["variant_ids"][0]
         conn = get_conn(self.db)
-        conn.execute("INSERT INTO StockMovement(variant_id,qty,kind) VALUES(?,?,?)", (vid, 1, "purchase"))
+        add_stock(conn, vid, 1)
         conn.commit(); conn.close()
         self.assertEqual(self.bridge.invoke("variants.delete", {"id": vid})["error"]["code"], "conflict")
         self.assertEqual(self.bridge.invoke("products.delete", {"id": made["product_id"]})["error"]["code"], "conflict")

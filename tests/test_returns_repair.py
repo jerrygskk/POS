@@ -18,7 +18,7 @@ class TestRepair(ReturnsBase):
         self.invoke("returns.close", {"return_id": self.rid})
 
     def disp(self, vid, value):
-        self.invoke("returns.set_disposition", {"return_id": self.rid, "variant_id": vid, "disposition": value})
+        self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, vid), "disposition": value})
 
     def items(self):
         return {i["variant_id"]: i for i in self.invoke("returns.detail", {"return_id": self.rid})["items"]}
@@ -29,7 +29,7 @@ class TestRepair(ReturnsBase):
 
     def receive(self, vid, qty, employee=1):
         return self.invoke("returns.repair_receive", {"return_id": self.rid, "employee": employee,
-                                                      "items": [{"variant_id": vid, "qty": qty}]})
+                                                      "items": [{"item_id": self.return_item_id(self.rid, vid), "qty": qty}]})
 
     def status(self):
         return self.invoke("returns.detail", {"return_id": self.rid})["status"]
@@ -60,7 +60,7 @@ class TestRepair(ReturnsBase):
         self.assertEqual(self.stock(self.v1), 6)
         self.assertEqual(self.items()[self.v1]["repaired_qty"], 1)
         self.assert_application_error("conflict", "returns.repair_receive", {"return_id": self.rid, "employee": 1,
-                                      "items": [{"variant_id": self.v1, "qty": 2}]})
+                                      "items": [{"item_id": self.return_item_id(self.rid, self.v1), "qty": 2}]})
         self.receive(self.v1, 1)
         self.receive(self.v3, 1)
         self.assertEqual(self.receive(self.v2, 1), {"done": True})
@@ -68,36 +68,36 @@ class TestRepair(ReturnsBase):
         self.assertEqual(detail["status"], "closed")
         self.assertIsNotNone(detail["completed_at"])
         self.assert_application_error("conflict", "returns.repair_receive", {"return_id": self.rid, "employee": 1,
-                                      "items": [{"variant_id": self.v1, "qty": 1}]})
+                                      "items": [{"item_id": self.return_item_id(self.rid, self.v1), "qty": 1}]})
 
     def test_close_remaining_then_reopen(self):
         self.start_repair()
         self.receive(self.v1, 1)
-        self.invoke("returns.close_item", {"return_id": self.rid, "variant_id": self.v1, "reason": " 廠商不保固 "})
+        self.invoke("returns.close_item", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "reason": " 廠商不保固 "})
         it = self.items()[self.v1]
         self.assertEqual((it["closed_qty"], it["closed_reason"], it["repaired_qty"]), (1, "廠商不保固", 1))
-        self.assert_application_error("conflict", "returns.close_item", {"return_id": self.rid, "variant_id": self.v1, "reason": "x"})
-        self.invoke("returns.close_item", {"return_id": self.rid, "variant_id": self.v2, "reason": "停產"})
+        self.assert_application_error("conflict", "returns.close_item", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "reason": "x"})
+        self.invoke("returns.close_item", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v2), "reason": "停產"})
         self.receive(self.v3, 1)
         self.assertEqual(self.status(), "closed")
-        self.invoke("returns.reopen_item", {"return_id": self.rid, "variant_id": self.v2})
+        self.invoke("returns.reopen_item", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v2)})
         self.assertEqual(self.status(), "repairing")
         self.assertEqual(self.items()[self.v2]["closed_qty"], 0)
-        self.assert_application_error("conflict", "returns.reopen_item", {"return_id": self.rid, "variant_id": self.v2})
-        self.assert_application_error("validation_error", "returns.close_item", {"return_id": self.rid, "variant_id": self.v2, "reason": "  "})
+        self.assert_application_error("conflict", "returns.reopen_item", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v2)})
+        self.assert_application_error("validation_error", "returns.close_item", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v2), "reason": "  "})
 
     def test_reason_limited_to_30_chars(self):
         rid = self.invoke("returns.create", {"employee": 1})["return_id"]
         self.invoke("returns.scan", {"return_id": rid, "variant_id": self.v1, "qty": 1})
-        self.invoke("returns.set_reason", {"return_id": rid, "variant_id": self.v1, "reason": "字" * 30})
+        self.invoke("returns.set_reason", {"return_id": rid, "item_id": self.return_item_id(rid, self.v1), "reason": "字" * 30})
         self.assert_application_error("validation_error", "returns.set_reason",
-                                      {"return_id": rid, "variant_id": self.v1, "reason": "字" * 31})
+                                      {"return_id": rid, "item_id": self.return_item_id(rid, self.v1), "reason": "字" * 31})
 
     def test_close_and_reopen_require_admin(self):
         self.start_repair()
         self.as_employee()
-        self.assert_application_error("forbidden", "returns.close_item", {"return_id": self.rid, "variant_id": self.v1, "reason": "x"})
-        self.assert_application_error("forbidden", "returns.reopen_item", {"return_id": self.rid, "variant_id": self.v1})
+        self.assert_application_error("forbidden", "returns.close_item", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "reason": "x"})
+        self.assert_application_error("forbidden", "returns.reopen_item", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1)})
         self.receive(self.v1, 1)  # 返新進貨店員可做
 
     def test_history_splits_normal_and_repair(self):

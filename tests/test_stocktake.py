@@ -86,7 +86,7 @@ class TestStocktake(FacadeTestCase):
         try:
             count = conn.execute(
                 "SELECT COUNT(*) AS n FROM StockMovement "
-                "WHERE kind='adjust' AND ref_id=?", (self.sid,)
+                "m JOIN StocktakeItem i ON i.id=m.stocktake_item_id WHERE m.kind='adjust' AND i.session_id=?", (self.sid,)
             ).fetchone()["n"]
         finally:
             conn.close()
@@ -296,7 +296,7 @@ class TestStocktake(FacadeTestCase):
                 self.assertEqual(self.stock(), 4)
         conn = get_conn(self.db)
         try:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM StockMovement WHERE kind='adjust' AND ref_id=?", (self.sid,)).fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM StockMovement m JOIN StocktakeItem i ON i.id=m.stocktake_item_id WHERE m.kind='adjust' AND i.session_id=?", (self.sid,)).fetchone()[0], 1)
         finally:
             conn.close()
 

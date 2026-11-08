@@ -48,6 +48,16 @@ def _template_db():
     return _TEMPLATE_DB
 
 
+def add_stock(conn, variant_id, qty, employee=1):
+    """以一張進貨單直接備庫存(測試準備用,不經服務)。"""
+    rid = conn.execute("INSERT INTO Receipt(employee) VALUES(?)", (employee,)).lastrowid
+    item = conn.execute("INSERT INTO ReceiptItem(receipt_id,variant_id,qty) VALUES(?,?,?)",
+                        (rid, variant_id, qty)).lastrowid
+    conn.execute("INSERT INTO StockMovement(variant_id,qty,kind,receipt_item_id) VALUES(?,?,'purchase',?)",
+                 (variant_id, qty, item))
+    return item
+
+
 def fresh_db(folder):
     db = os.path.join(folder, "pos.db")
     shutil.copyfile(_template_db(), db)
@@ -96,6 +106,11 @@ class FacadeTestCase(unittest.TestCase):
         self.assertFalse(response["ok"])
         self.assertEqual(response["error"]["code"], code)
         return response["error"]
+
+    def return_item_id(self, return_id, variant_id):
+        """退貨單上該款式品項的 ReturnItem.id(退貨品項動作以 id 定位)。"""
+        return next(it["id"] for it in self.invoke("returns.detail", {"return_id": return_id})["items"]
+                    if it["variant_id"] == variant_id)
 
     def create_category(self, name):
         return self.invoke("categories.create", {"name": name})["category_id"]

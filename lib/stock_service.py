@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 
-from lib import product_data
+from lib import product_data, stock_ledger
 from lib.db import stock_map
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import NotFoundError, ValidationError
@@ -40,26 +40,38 @@ class StockRepository(BaseRepository):
         if row is None:
             raise NotFoundError("找不到指定的子產品")
 
-    def add_purchase(self, variant_id, qty, employee, batch=None):
-        # 同一次確認進貨共用進貨單號:記在 ref_id,取該批第一筆的 move_id
-        move_id = self.connection.execute(
-            "INSERT INTO StockMovement(variant_id,qty,kind,employee) VALUES(?,?,'purchase',?)",
-            (variant_id, qty, employee),
-        ).lastrowid
-        batch = batch or move_id
-        self.connection.execute("UPDATE StockMovement SET ref_id=? WHERE move_id=?", (batch, move_id))
-        return batch
+    def create_receipt(self, employee):
+        return self.connection.execute("INSERT INTO Receipt(employee) VALUES(?)", (employee,)).lastrowid
 
-    def purchase_rows(self, filters):
-        suffix, args = date_sql(filters, "m.ts")
+    def add_receipt_item(self, receipt_id, variant_id, qty):
         return self.connection.execute(
-            "SELECT m.move_id,m.variant_id,m.qty,m.ref_id,m.employee,m.ts,p.name FROM StockMovement m "
-            "JOIN Variant v ON m.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id "
-            "WHERE m.kind='purchase'" + suffix + " ORDER BY m.move_id DESC", args).fetchall()
+            "INSERT INTO ReceiptItem(receipt_id,variant_id,qty) VALUES(?,?,?)",
+            (receipt_id, variant_id, qty)).lastrowid
+
+    def receipt_rows(self, filters):
+        suffix, args = date_sql(filters, "r.ts")
+        return self.connection.execute(
+            "SELECT r.receipt_id,r.ts,r.employee,i.variant_id,i.qty,p.name FROM Receipt r "
+            "JOIN ReceiptItem i ON i.receipt_id=r.receipt_id "
+            "JOIN Variant v ON i.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id "
+            "WHERE 1=1" + suffix + " ORDER BY r.receipt_id DESC, i.receipt_item_id", args).fetchall()
 
     def movements(self, variant_id):
+        # 來源以具名欄位回傳;操作員工:返新記在異動本身,其餘取各自單據
         return self.connection.execute(
-            "SELECT * FROM StockMovement WHERE variant_id=? ORDER BY move_id DESC LIMIT 50",
+            "SELECT m.move_id,m.variant_id,m.qty,m.kind,m.note,m.ts,"
+            "m.receipt_item_id,m.sale_item_id,m.stocktake_item_id,m.return_item_id,"
+            "ri.receipt_id,si.sale_id,sti.session_id AS stocktake_id,rti.return_id,"
+            "COALESCE(m.employee,r.employee,s.employee,ss.employee,rs.employee) AS employee "
+            "FROM StockMovement m "
+            "LEFT JOIN ReceiptItem ri ON ri.receipt_item_id=m.receipt_item_id "
+            "LEFT JOIN Receipt r ON r.receipt_id=ri.receipt_id "
+            "LEFT JOIN SaleItem si ON si.item_id=m.sale_item_id LEFT JOIN Sale s ON s.sale_id=si.sale_id "
+            "LEFT JOIN StocktakeItem sti ON sti.id=m.stocktake_item_id "
+            "LEFT JOIN StocktakeSession ss ON ss.session_id=sti.session_id "
+            "LEFT JOIN ReturnItem rti ON rti.id=m.return_item_id "
+            "LEFT JOIN ReturnSession rs ON rs.return_id=rti.return_id "
+            "WHERE m.variant_id=? ORDER BY m.move_id DESC LIMIT 50",
             (variant_id,),
         ).fetchall()
 
@@ -69,27 +81,29 @@ class StockService:
         self.repo = repository
 
     def receive(self, items, employee):
-        batch = None
+        # 一次確認進貨＝一張進貨單;同款式多列各自成一筆明細,數量不合併也不略過
+        conn = self.repo.connection
+        receipt_id = self.repo.create_receipt(employee)
         for item in items:
             self.repo.require_variant(item["variant_id"])
-            batch = self.repo.add_purchase(item["variant_id"], item["qty"], employee, batch)
-        return {"items": [{"variant_id": item["variant_id"],
-                           "stock": product_data.stock_of(self.repo.connection, item["variant_id"])}
+            item_id = self.repo.add_receipt_item(receipt_id, item["variant_id"], item["qty"])
+            stock_ledger.post(conn, "purchase", item_id)
+        return {"receipt_id": receipt_id,
+                "items": [{"variant_id": item["variant_id"],
+                           "stock": product_data.stock_of(conn, item["variant_id"])}
                           for item in items]}
 
     def receipts(self, filters):
-        rows = self.repo.purchase_rows(filters)
+        rows = self.repo.receipt_rows(filters)
         vids = [row["variant_id"] for row in rows]
         attrs = product_data.attrs_by_variant(self.repo.connection, vids)
         display = product_data.display_attrs(self.repo.connection, vids)
         stocks = stock_map(self.repo.connection, vids)
         out = {}
         for row in rows:
-            # 舊進貨沒有單號:同一秒、同一員工視為同一批
-            key = row["ref_id"] if row["ref_id"] is not None else (row["ts"], row["employee"])
-            receipt = out.setdefault(key, {"receipt_id": row["ref_id"], "ts": row["ts"],
-                                           "employee": row["employee"], "items": []})
-            receipt["items"].insert(0, {"variant_id": row["variant_id"], "name": row["name"],
+            receipt = out.setdefault(row["receipt_id"], {"receipt_id": row["receipt_id"], "ts": row["ts"],
+                                                         "employee": row["employee"], "items": []})
+            receipt["items"].append({"variant_id": row["variant_id"], "name": row["name"],
                 "attributes": attrs.get(row["variant_id"], {}), "attr_display": display.get(row["variant_id"], ""),
                 "qty": row["qty"], "stock": stocks.get(row["variant_id"], 0)})
         return list(out.values())

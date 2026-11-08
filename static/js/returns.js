@@ -65,25 +65,25 @@ window.PosPages["page-returns"] = {
     },
     async setQty(it) {
       if (!this.canEdit) { this.showError("退貨單不是進行中，無法修改數量"); return; }
-      await this.write(() => API.setReturnQty(this.current, it.variant_id, it.qty));
+      await this.write(() => API.setReturnQty(this.current, it.id, it.qty));
     },
     async setSale(it) {
       if (!this.canEdit) { this.showError("退貨單不是進行中，無法修改銷售單編號"); return; }
       const text = String(it.sale_id ?? "").trim();
       if (text && !/^[0-9]+$/.test(text)) { this.showError("銷售單編號必須是數字"); await this.guard(() => this.refreshDetail()); return; }
-      await this.write(() => API.setReturnSale(this.current, it.variant_id, text ? Number(text) : null));
+      await this.write(() => API.setReturnSale(this.current, it.id, text ? Number(text) : null));
     },
     async setReason(it) {
       if (!this.canEdit) { this.showError("退貨單不是進行中，無法修改原因"); return; }
-      await this.write(() => API.setReturnReason(this.current, it.variant_id, it.reason || null));
+      await this.write(() => API.setReturnReason(this.current, it.id, it.reason || null));
     },
     async removeItem(it) {
       if (!this.canEdit) { this.showError("退貨單不是進行中，無法移除品項"); return; }
-      await this.write(() => API.removeReturnItem(this.current, it.variant_id));
+      await this.write(() => API.removeReturnItem(this.current, it.id));
     },
     async setDisposition(it) {
       if (!this.canReview) { this.showError("需要管理者權限"); await this.guard(() => this.refreshDetail()); return; }
-      await this.write(() => API.setReturnDisposition(this.current, it.variant_id, it.disposition));
+      await this.write(() => API.setReturnDisposition(this.current, it.id, it.disposition));
     },
     async close() {
       if (!this.canEdit) return;

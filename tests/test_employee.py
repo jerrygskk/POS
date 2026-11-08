@@ -27,7 +27,7 @@ class TestEmployee(FacadeTestCase):
         self.invoke("sales.checkout", {"payment": "現金", "paid": 100, "employee": 3,
             "items": [{"variant_id": self.vid, "qty": 1, "unit_price": 100}]})
         sid = self.invoke("stocktake.create", {"employee": 4})["session_id"]
-        self.assertEqual(self._one("SELECT employee FROM StockMovement WHERE kind='purchase'"), 2)
+        self.assertEqual(self._one("SELECT employee FROM Receipt"), 2)   # 一般進貨員工記在進貨單
         self.assertEqual(self.invoke("sales.list", {})[0]["employee"], 3)
         self.assertEqual(self.invoke("stocktake.detail", {"session_id": sid})["employee"], 4)
         self.assertIn(",3,,現金,", self.invoke("sales.export", {})["content"])  # 員工後為會員欄(一般客人空白)

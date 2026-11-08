@@ -119,12 +119,47 @@ CREATE TABLE IF NOT EXISTS StockMovement(
   variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
   qty INTEGER NOT NULL,           -- 進貨+/銷售-/盤點±/退貨加回+/返新進貨+
   kind TEXT NOT NULL CHECK(kind IN ('purchase','sale','adjust','return','repair')),
-  ref_id INTEGER,                 -- sale_id、session_id 或 return_id
+  -- 來源明細:恰一個非 NULL,且須符合 kind(purchase→進貨明細、sale→銷售明細、
+  -- adjust→盤點明細、return/repair→退貨品項)。複合外鍵保證來源與異動同款式。
+  receipt_item_id INTEGER,
+  sale_item_id INTEGER,
+  stocktake_item_id INTEGER,
+  return_item_id INTEGER,
   note TEXT,
-  employee INTEGER CHECK(employee BETWEEN 1 AND 6),  -- 進貨操作員工代號(銷售看 Sale、盤點看 StocktakeSession)
-  ts TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+  employee INTEGER CHECK(employee BETWEEN 1 AND 6),  -- 只有返新(repair)記操作員工,其他類型看各自單據
+  ts TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  CHECK((receipt_item_id IS NOT NULL) + (sale_item_id IS NOT NULL)
+        + (stocktake_item_id IS NOT NULL) + (return_item_id IS NOT NULL) = 1),
+  CHECK((kind='purchase' AND receipt_item_id IS NOT NULL AND qty > 0)
+     OR (kind='sale' AND sale_item_id IS NOT NULL AND qty < 0)
+     OR (kind='adjust' AND stocktake_item_id IS NOT NULL AND qty <> 0)
+     OR (kind IN ('return','repair') AND return_item_id IS NOT NULL AND qty > 0)),
+  CHECK((kind='repair') = (employee IS NOT NULL)),
+  FOREIGN KEY(receipt_item_id, variant_id) REFERENCES ReceiptItem(receipt_item_id, variant_id),
+  FOREIGN KEY(sale_item_id, variant_id) REFERENCES SaleItem(item_id, variant_id),
+  FOREIGN KEY(stocktake_item_id, variant_id) REFERENCES StocktakeItem(id, variant_id),
+  FOREIGN KEY(return_item_id, variant_id) REFERENCES ReturnItem(id, variant_id)
 );
 CREATE INDEX IF NOT EXISTS idx_move_variant ON StockMovement(variant_id);
+-- 同一明細只能入帳一次;返新(repair)可分批,不套用
+CREATE UNIQUE INDEX IF NOT EXISTS idx_move_receipt_item ON StockMovement(receipt_item_id) WHERE receipt_item_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_move_sale_item ON StockMovement(sale_item_id) WHERE sale_item_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_move_stocktake_item ON StockMovement(stocktake_item_id) WHERE stocktake_item_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_move_return_item ON StockMovement(return_item_id) WHERE kind='return';
+CREATE INDEX IF NOT EXISTS idx_move_repair ON StockMovement(return_item_id) WHERE kind='repair';
+CREATE TABLE IF NOT EXISTS Receipt(             -- 一般進貨單(返新不建進貨單,直接指向退貨品項)
+  receipt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  employee INTEGER NOT NULL CHECK(employee BETWEEN 1 AND 6)
+);
+CREATE TABLE IF NOT EXISTS ReceiptItem(
+  receipt_item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  receipt_id INTEGER NOT NULL REFERENCES Receipt(receipt_id),
+  variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
+  qty INTEGER NOT NULL CHECK(qty > 0),           -- 同款式可多列,各自保留數量
+  UNIQUE(receipt_item_id, variant_id)
+);
+CREATE INDEX IF NOT EXISTS idx_receipt_item_receipt ON ReceiptItem(receipt_id);
 CREATE TABLE IF NOT EXISTS Sale(
   sale_id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -143,7 +178,8 @@ CREATE TABLE IF NOT EXISTS SaleItem(
   variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
   qty INTEGER NOT NULL,
   unit_price INTEGER NOT NULL,    -- 原價(商品售價或未定價時店員輸入)
-  discount INTEGER NOT NULL DEFAULT 0  -- 單品折扣(元)
+  discount INTEGER NOT NULL DEFAULT 0,  -- 單品折扣(元)
+  UNIQUE(item_id, variant_id)
 );
 CREATE TABLE IF NOT EXISTS StocktakeSession(
   session_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,7 +203,8 @@ CREATE TABLE IF NOT EXISTS StocktakeItem(
   counted_qty INTEGER NOT NULL DEFAULT 0,
   needs_recount INTEGER NOT NULL DEFAULT 0 CHECK(needs_recount IN (0,1)),
   note TEXT,                      -- 差異原因(選填)
-  UNIQUE(session_id, variant_id)
+  UNIQUE(session_id, variant_id),
+  UNIQUE(id, variant_id)
 );
 CREATE TABLE IF NOT EXISTS ReturnSession(      -- 退貨單:送審後由管理者決定各品項處理方式
   return_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,7 +230,8 @@ CREATE TABLE IF NOT EXISTS ReturnItem(
   closed_qty INTEGER NOT NULL DEFAULT 0,        -- 返修結案件數(廠商不換不修)，已返新件數看 StockMovement kind=repair
   closed_reason TEXT,
   closed_at TEXT,
-  UNIQUE(return_id, variant_id)
+  UNIQUE(return_id, variant_id),
+  UNIQUE(id, variant_id)
 );
 CREATE TABLE IF NOT EXISTS Setting(
   key TEXT PRIMARY KEY,
@@ -221,6 +259,41 @@ CREATE TABLE IF NOT EXISTS MemberPhone(
   PRIMARY KEY(member_id, phone)  -- 多對多:同一支電話可屬於多位會員
 );
 CREATE INDEX IF NOT EXISTS idx_memberphone_phone ON MemberPhone(phone);
+-- 已入帳明細鎖定:有庫存異動指向的明細,只擋被鎖欄位真的改值(OLD.x IS NOT NEW.x)與刪除。
+-- 返修結案／撤回結案、退貨原因、盤點備註、needs_recount、單據狀態不在鎖定範圍。
+CREATE TRIGGER IF NOT EXISTS trg_receiptitem_lock_update BEFORE UPDATE ON ReceiptItem
+  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE receipt_item_id=OLD.receipt_item_id) AND (OLD.receipt_id IS NOT NEW.receipt_id OR OLD.variant_id IS NOT NEW.variant_id OR OLD.qty IS NOT NEW.qty)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_receiptitem_lock_delete BEFORE DELETE ON ReceiptItem
+  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE receipt_item_id=OLD.receipt_item_id)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_saleitem_lock_update BEFORE UPDATE ON SaleItem
+  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE sale_item_id=OLD.item_id) AND (OLD.sale_id IS NOT NEW.sale_id OR OLD.variant_id IS NOT NEW.variant_id OR OLD.qty IS NOT NEW.qty OR OLD.unit_price IS NOT NEW.unit_price OR OLD.discount IS NOT NEW.discount)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_saleitem_lock_delete BEFORE DELETE ON SaleItem
+  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE sale_item_id=OLD.item_id)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_stocktakeitem_lock_update BEFORE UPDATE ON StocktakeItem
+  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE stocktake_item_id=OLD.id) AND (OLD.session_id IS NOT NEW.session_id OR OLD.variant_id IS NOT NEW.variant_id OR OLD.system_qty IS NOT NEW.system_qty OR OLD.counted_qty IS NOT NEW.counted_qty)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_stocktakeitem_lock_delete BEFORE DELETE ON StocktakeItem
+  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE stocktake_item_id=OLD.id)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_returnitem_lock_update BEFORE UPDATE ON ReturnItem
+  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE return_item_id=OLD.id) AND (OLD.return_id IS NOT NEW.return_id OR OLD.variant_id IS NOT NEW.variant_id OR OLD.qty IS NOT NEW.qty OR OLD.disposition IS NOT NEW.disposition)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_returnitem_lock_delete BEFORE DELETE ON ReturnItem
+  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE return_item_id=OLD.id)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sale_lock_update BEFORE UPDATE ON Sale
+  WHEN EXISTS(SELECT 1 FROM SaleItem si JOIN StockMovement m ON m.sale_item_id=si.item_id WHERE si.sale_id=OLD.sale_id)
+   AND (OLD.order_discount IS NOT NEW.order_discount OR OLD.member_discount IS NOT NEW.member_discount
+        OR OLD.total IS NOT NEW.total OR OLD.paid IS NOT NEW.paid OR OLD.change IS NOT NEW.change)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_update BEFORE UPDATE ON StockMovement
+  BEGIN SELECT RAISE(ABORT, '庫存異動不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_delete BEFORE DELETE ON StockMovement
+  BEGIN SELECT RAISE(ABORT, '庫存異動不可修改或刪除'); END;
 """
 
 # 版號規則:新結構第一版為 BASE_VERSION;MIGRATIONS 為之後的升級步驟,
@@ -228,7 +301,7 @@ CREATE INDEX IF NOT EXISTS idx_memberphone_phone ON MemberPhone(phone);
 # 勿自行 commit/executescript(runner 已包在同一交易裡)。
 # 舊版(v24 以前)的升級步驟已移除:低於 MIN_SUPPORTED_VERSION 的資料庫一律拒絕開啟,
 # 主檔改由 tools/make_standard_db.py 唯讀轉出新母版。
-BASE_VERSION = 25
+BASE_VERSION = 26
 MIGRATIONS = []
 
 # 最新版號 = 新結構第一版 + 升級步驟筆數;全新 DB 建 SCHEMA 即為此版

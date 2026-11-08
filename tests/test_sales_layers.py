@@ -4,6 +4,7 @@ from pathlib import Path
 
 from lib.application_errors import ValidationError
 from lib.db import db_conn, init_db
+from base import add_stock
 from lib.sales_service import SalesFacade
 
 
@@ -19,10 +20,7 @@ class SalesLayersTest(unittest.TestCase):
             pid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             conn.execute("INSERT INTO Variant(product_id,price,active) VALUES(?,500,1)", (pid,))
             self.vid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-            conn.execute(
-                "INSERT INTO StockMovement(variant_id,qty,kind) VALUES(?,20,'purchase')",
-                (self.vid,),
-            )
+            add_stock(conn, self.vid, 20)
             conn.commit()
         self.facade = SalesFacade(self.db)
 

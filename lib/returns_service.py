@@ -1,4 +1,4 @@
-from lib import product_data
+from lib import product_data, stock_ledger
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from lib.product_rules import allow_keys as _allow, date_range, date_sql, is_int as _is_int, require_employee
@@ -17,17 +17,17 @@ def _validate(action, payload):
     allowed = {"returns.create":{"employee"}, "returns.list":set(),
         "returns.history":{"date_from","date_to","kind"}, "returns.detail":{"return_id"},
         "returns.repair_receive":{"return_id","employee","items"},
-        "returns.close_item":{"return_id","variant_id","reason"}, "returns.reopen_item":{"return_id","variant_id"},
-        "returns.scan":{"return_id","variant_id","qty"}, "returns.set_qty":{"return_id","variant_id","qty"},
-        "returns.set_reason":{"return_id","variant_id","reason"},
-        "returns.set_sale":{"return_id","variant_id","sale_id"},
-        "returns.remove_item":{"return_id","variant_id"},
+        "returns.close_item":{"return_id","item_id","reason"}, "returns.reopen_item":{"return_id","item_id"},
+        "returns.scan":{"return_id","variant_id","qty"}, "returns.set_qty":{"return_id","item_id","qty"},
+        "returns.set_reason":{"return_id","item_id","reason"},
+        "returns.set_sale":{"return_id","item_id","sale_id"},
+        "returns.remove_item":{"return_id","item_id"},
         "returns.close":{"return_id"}, "returns.withdraw":{"return_id"},
-        "returns.set_disposition":{"return_id","variant_id","disposition"},
+        "returns.set_disposition":{"return_id","item_id","disposition"},
         "returns.approve":{"return_id"}, "returns.cancel":{"return_id","employee"},
         "returns.pending_count":set()}[action]
     _allow(payload, allowed)
-    for key in ("return_id", "variant_id"):
+    for key in ("return_id", "variant_id", "item_id"):
         if key in allowed and not _is_int(payload.get(key)): raise ValidationError(f"{key} 必須是整數")
     if action in {"returns.scan", "returns.set_qty"} and (not _is_int(payload.get("qty")) or payload["qty"] <= 0):
         raise ValidationError("數量必須是正整數")
@@ -35,10 +35,10 @@ def _validate(action, payload):
         items = payload.get("items")
         if not isinstance(items, list) or not items: raise ValidationError("items 必須是非空清單")
         for it in items:
-            if not isinstance(it, dict) or set(it) != {"variant_id", "qty"}: raise ValidationError("items 格式不正確")
-            if not _is_int(it["variant_id"]): raise ValidationError("variant_id 必須是整數")
+            if not isinstance(it, dict) or set(it) != {"item_id", "qty"}: raise ValidationError("items 格式不正確")
+            if not _is_int(it["item_id"]): raise ValidationError("item_id 必須是整數")
             if not _is_int(it["qty"]) or it["qty"] <= 0: raise ValidationError("數量必須是正整數")
-        if len({it["variant_id"] for it in items}) != len(items): raise ValidationError("品項重複")
+        if len({it["item_id"] for it in items}) != len(items): raise ValidationError("品項重複")
     if action == "returns.close_item":
         if not isinstance(payload.get("reason"), str) or not payload["reason"].strip():
             raise ValidationError("請輸入結案理由")
@@ -72,23 +72,24 @@ class ReturnsRepository(BaseRepository):
     def require_open(self, rid): return self.require(rid, "open", "退貨單不是進行中")
     def require_pending(self, rid): return self.require(rid, "pending", "退貨單不是待核准狀態")
     def repaired(self, rid):
-        return {r["variant_id"]: r["n"] for r in self.all(
-            "SELECT variant_id, SUM(qty) AS n FROM StockMovement WHERE kind='repair' AND ref_id=? GROUP BY variant_id", (rid,))}
+        """{退貨品項 id: 已返新件數}"""
+        ids = [r["id"] for r in self.all("SELECT id FROM ReturnItem WHERE return_id=?", (rid,))]
+        return stock_ledger.repaired_by_item(self.connection, ids)
     def label_codes(self, vids):
         if not vids: return {}
         marks = ",".join("?" * len(vids))
         return {r["variant_id"]: r["code"] for r in self.all(
             "SELECT variant_id,COALESCE(MIN(CASE WHEN source='store' THEN barcode END),"
             f"MIN(CASE WHEN source='factory' THEN barcode END)) code FROM Barcode WHERE variant_id IN ({marks}) GROUP BY variant_id", vids)}
-    def repair_item(self, rid, vid):
-        row = self.one("SELECT * FROM ReturnItem WHERE return_id=? AND variant_id=? AND disposition='repair'", (rid, vid))
+    def repair_item(self, rid, item_id):
+        row = self.one("SELECT * FROM ReturnItem WHERE return_id=? AND id=? AND disposition='repair'", (rid, item_id))
         if row is None: raise NotFoundError("找不到返修品項")
         return row
     # 每個返修品項都返新或結案完,整張單才算完成;撤回結案時退回返修中
     def refresh_completion(self, rid):
         done = self.repaired(rid)
-        left = [r for r in self.all("SELECT variant_id,qty,closed_qty FROM ReturnItem WHERE return_id=? AND disposition='repair'", (rid,))
-                if r["qty"] - r["closed_qty"] - done.get(r["variant_id"], 0) > 0]
+        left = [r for r in self.all("SELECT id,qty,closed_qty FROM ReturnItem WHERE return_id=? AND disposition='repair'", (rid,))
+                if r["qty"] - r["closed_qty"] - done.get(r["id"], 0) > 0]
         if left:
             self.execute("UPDATE ReturnSession SET status='repairing',completed_at=NULL WHERE return_id=?", (rid,))
         else:
@@ -139,19 +140,16 @@ class ReturnsService:
         disp = product_data.display_attrs(self.repo.connection, vids)
         models = product_data.display_models_by_variant(self.repo.connection, vids)
         codes = self.repo.label_codes(vids)
-        done = {}
-        for r in self.repo.all("SELECT ref_id,variant_id,SUM(qty) AS n FROM StockMovement WHERE kind='repair' "
-                               f"AND ref_id IN ({marks}) GROUP BY ref_id,variant_id", rids):
-            done.setdefault(r["ref_id"], {})[r["variant_id"]] = r["n"]
+        done = stock_ledger.repaired_by_item(self.repo.connection, [r["id"] for r in all_rows])
         grouped = {rid: [] for rid in rids}
         for r in all_rows: grouped[r["return_id"]].append(r)
-        return [self._shape(sessions[rid], grouped[rid], attrs, disp, models, done.get(rid, {}), codes) for rid in rids]
+        return [self._shape(sessions[rid], grouped[rid], attrs, disp, models, done, codes) for rid in rids]
     @staticmethod
     def _shape(session, rows, attrs, disp, models, repaired, codes):
-        items = [{"variant_id": r["variant_id"], "name": r["name"], "attributes": attrs.get(r["variant_id"], {}),
+        items = [{"id": r["id"], "variant_id": r["variant_id"], "name": r["name"], "attributes": attrs.get(r["variant_id"], {}),
                   "attr_display": disp.get(r["variant_id"], ""), "models": models.get(r["variant_id"], []), "qty": r["qty"], "sale_id": r["sale_id"], "reason": r["reason"],
                   "disposition": r["disposition"], "closed_qty": r["closed_qty"], "closed_reason": r["closed_reason"],
-                  "closed_at": r["closed_at"], "repaired_qty": repaired.get(r["variant_id"], 0),
+                  "closed_at": r["closed_at"], "repaired_qty": repaired.get(r["id"], 0),
                   "label_barcode": codes.get(r["variant_id"])} for r in rows]
         return {**dict(session), "is_repair": any(r["disposition"] == "repair" for r in rows), "items": items}
     def scan(self, rid, vid, qty):
@@ -162,22 +160,22 @@ class ReturnsService:
         self.repo.execute("INSERT INTO ReturnItem(return_id,variant_id,qty,disposition) VALUES(?,?,?,?) "
                           "ON CONFLICT(return_id,variant_id) DO UPDATE SET qty=qty+excluded.qty", (rid, vid, qty, disp))
         return {"qty": self.repo.one("SELECT qty FROM ReturnItem WHERE return_id=? AND variant_id=?", (rid, vid))["qty"]}
-    def set_qty(self, rid, vid, qty):
+    def set_qty(self, rid, item_id, qty):
         self.repo.require_open(rid)
-        self.repo.update_item("UPDATE ReturnItem SET qty=? WHERE return_id=? AND variant_id=?", (qty, rid, vid))
+        self.repo.update_item("UPDATE ReturnItem SET qty=? WHERE return_id=? AND id=?", (qty, rid, item_id))
         return {"ok": True}
-    def set_sale(self, rid, vid, sale_id):
+    def set_sale(self, rid, item_id, sale_id):
         self.repo.require_open(rid)
         self.repo.require_sale(sale_id)
-        self.repo.update_item("UPDATE ReturnItem SET sale_id=? WHERE return_id=? AND variant_id=?", (sale_id, rid, vid))
+        self.repo.update_item("UPDATE ReturnItem SET sale_id=? WHERE return_id=? AND id=?", (sale_id, rid, item_id))
         return {"ok": True}
-    def set_reason(self, rid, vid, reason):
+    def set_reason(self, rid, item_id, reason):
         self.repo.require_open(rid)
-        self.repo.update_item("UPDATE ReturnItem SET reason=? WHERE return_id=? AND variant_id=?", (_clean(reason), rid, vid))
+        self.repo.update_item("UPDATE ReturnItem SET reason=? WHERE return_id=? AND id=?", (_clean(reason), rid, item_id))
         return {"ok": True}
-    def remove_item(self, rid, vid):
+    def remove_item(self, rid, item_id):
         self.repo.require_open(rid)
-        self.repo.update_item("DELETE FROM ReturnItem WHERE return_id=? AND variant_id=?", (rid, vid))
+        self.repo.update_item("DELETE FROM ReturnItem WHERE return_id=? AND id=?", (rid, item_id))
         return {"ok": True}
     def close(self, rid):
         self.repo.require_open(rid)
@@ -189,14 +187,14 @@ class ReturnsService:
         self.repo.require_pending(rid)
         self.repo.execute("UPDATE ReturnSession SET status='open',submitted_at=NULL WHERE return_id=?", (rid,))
         return {"ok": True}
-    def set_disposition(self, rid, vid, disposition):
+    def set_disposition(self, rid, item_id, disposition):
         # 返修是整張單的模式:改成返修時全部品項一起改返修;從返修改回別的處理方式時全部品項一起改回
         self.repo.require_pending(rid)
-        old = self.repo.one("SELECT disposition FROM ReturnItem WHERE return_id=? AND variant_id=?", (rid, vid))
+        old = self.repo.one("SELECT disposition FROM ReturnItem WHERE return_id=? AND id=?", (rid, item_id))
         if old is None: raise NotFoundError("找不到退貨品項")
         if disposition == "repair" or old["disposition"] == "repair":
             self.repo.execute("UPDATE ReturnItem SET disposition=? WHERE return_id=?", (disposition, rid))
-        self.repo.update_item("UPDATE ReturnItem SET disposition=? WHERE return_id=? AND variant_id=?", (disposition, rid, vid))
+        self.repo.update_item("UPDATE ReturnItem SET disposition=? WHERE return_id=? AND id=?", (disposition, rid, item_id))
         return {"ok": True}
     def approve(self, rid):
         # 只有「加回庫存」的品項寫入庫存流水;不入庫與不同意只留在退貨單上
@@ -208,9 +206,8 @@ class ReturnsService:
             self.repo.execute("UPDATE ReturnSession SET status='repairing',approved_at=datetime('now','localtime') WHERE return_id=?", (rid,))
             return {"ok": True}
         self.repo.execute("UPDATE ReturnSession SET status='closed',approved_at=datetime('now','localtime') WHERE return_id=?", (rid,))
-        for row in self.repo.all("SELECT variant_id,qty FROM ReturnItem WHERE return_id=? AND disposition='restock'", (rid,)):
-            self.repo.execute("INSERT INTO StockMovement(variant_id,qty,kind,ref_id,note,employee) VALUES(?,?,'return',?,'退貨加回',?)",
-                              (row["variant_id"], row["qty"], rid, session["employee"]))
+        for row in self.repo.all("SELECT id FROM ReturnItem WHERE return_id=? AND disposition='restock' ORDER BY id", (rid,)):
+            stock_ledger.post(self.repo.connection, "return", row["id"])
         return {"ok": True}
     def cancel(self, rid, employee, is_admin):
         session = self.repo.session(rid)
@@ -223,29 +220,24 @@ class ReturnsService:
         return {"ok": True}
     def repair_receive(self, rid, employee, items):
         self.repo.require(rid, "repairing", "退貨單不是返修中")
-        done = self.repo.repaired(rid)
         for it in items:
-            row = self.repo.repair_item(rid, it["variant_id"])
-            left = row["qty"] - row["closed_qty"] - done.get(it["variant_id"], 0)
-            if it["qty"] > left: raise ConflictError(f"返新數量超過未處理件數（剩 {left} 件）")
-        for it in items:
-            self.repo.execute("INSERT INTO StockMovement(variant_id,qty,kind,ref_id,note,employee) VALUES(?,?,'repair',?,'返新進貨',?)",
-                              (it["variant_id"], it["qty"], rid, employee))
+            self.repo.repair_item(rid, it["item_id"])  # 須是本單的返修品項
+            stock_ledger.post(self.repo.connection, "repair", it["item_id"], it["qty"], employee)
         return {"done": self.repo.refresh_completion(rid)}
-    def close_item(self, rid, vid, reason):
+    def close_item(self, rid, item_id, reason):
         self.repo.require(rid, "repairing", "退貨單不是返修中")
-        row = self.repo.repair_item(rid, vid)
-        left = row["qty"] - row["closed_qty"] - self.repo.repaired(rid).get(vid, 0)
+        row = self.repo.repair_item(rid, item_id)
+        left = row["qty"] - row["closed_qty"] - self.repo.repaired(rid).get(item_id, 0)
         if left <= 0: raise ConflictError("此品項已處理完畢")
         self.repo.execute("UPDATE ReturnItem SET closed_qty=closed_qty+?,closed_reason=?,closed_at=datetime('now','localtime') "
-                          "WHERE return_id=? AND variant_id=?", (left, reason.strip(), rid, vid))
+                          "WHERE return_id=? AND id=?", (left, reason.strip(), rid, item_id))
         return {"done": self.repo.refresh_completion(rid)}
-    def reopen_item(self, rid, vid):
+    def reopen_item(self, rid, item_id):
         session = self.repo.session(rid)
         if session is None: raise NotFoundError("找不到退貨單")
         if session["status"] not in ("repairing", "closed"): raise ConflictError("退貨單不是返修單")
-        if self.repo.repair_item(rid, vid)["closed_qty"] == 0: raise ConflictError("此品項沒有結案")
-        self.repo.execute("UPDATE ReturnItem SET closed_qty=0,closed_reason=NULL,closed_at=NULL WHERE return_id=? AND variant_id=?", (rid, vid))
+        if self.repo.repair_item(rid, item_id)["closed_qty"] == 0: raise ConflictError("此品項沒有結案")
+        self.repo.execute("UPDATE ReturnItem SET closed_qty=0,closed_reason=NULL,closed_at=NULL WHERE return_id=? AND id=?", (rid, item_id))
         self.repo.refresh_completion(rid)
         return {"ok": True}
     def pending_count(self):
@@ -283,18 +275,18 @@ class ReturnsFacade(BaseFacade):
             return s.history(date_range(p), p["kind"])
         if action == "returns.detail": return s.detail(p["return_id"])
         if action == "returns.scan": return s.scan(p["return_id"], p["variant_id"], p["qty"])
-        if action == "returns.set_qty": return s.set_qty(p["return_id"], p["variant_id"], p["qty"])
-        if action == "returns.set_sale": return s.set_sale(p["return_id"], p["variant_id"], p["sale_id"])
-        if action == "returns.set_reason": return s.set_reason(p["return_id"], p["variant_id"], p["reason"])
-        if action == "returns.remove_item": return s.remove_item(p["return_id"], p["variant_id"])
+        if action == "returns.set_qty": return s.set_qty(p["return_id"], p["item_id"], p["qty"])
+        if action == "returns.set_sale": return s.set_sale(p["return_id"], p["item_id"], p["sale_id"])
+        if action == "returns.set_reason": return s.set_reason(p["return_id"], p["item_id"], p["reason"])
+        if action == "returns.remove_item": return s.remove_item(p["return_id"], p["item_id"])
         if action == "returns.close": return s.close(p["return_id"])
         if action == "returns.withdraw": return s.withdraw(p["return_id"])
         if action == "returns.cancel": return s.cancel(p["return_id"], p["employee"], self._is_admin())
         if action == "returns.repair_receive": return s.repair_receive(p["return_id"], p["employee"], p["items"])
         # 管理者動作在交易內再確認一次身分(確認視窗期間可能已閒置登出)
         if not self._is_admin(): raise ForbiddenError()
-        if action == "returns.set_disposition": return s.set_disposition(p["return_id"], p["variant_id"], p["disposition"])
+        if action == "returns.set_disposition": return s.set_disposition(p["return_id"], p["item_id"], p["disposition"])
         if action == "returns.approve": return s.approve(p["return_id"])
-        if action == "returns.close_item": return s.close_item(p["return_id"], p["variant_id"], p["reason"])
-        if action == "returns.reopen_item": return s.reopen_item(p["return_id"], p["variant_id"])
+        if action == "returns.close_item": return s.close_item(p["return_id"], p["item_id"], p["reason"])
+        if action == "returns.reopen_item": return s.reopen_item(p["return_id"], p["item_id"])
         return s.pending_count()

@@ -44,9 +44,9 @@ class TestReturns(ReturnsBase):
 
     def test_scan_accumulates_and_edits_while_open(self):
         self.fill()
-        self.invoke("returns.set_qty", {"return_id": self.rid, "variant_id": self.v2, "qty": 3})
-        self.invoke("returns.set_reason", {"return_id": self.rid, "variant_id": self.v2, "reason": "  瑕疵 "})
-        self.invoke("returns.remove_item", {"return_id": self.rid, "variant_id": self.v3})
+        self.invoke("returns.set_qty", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v2), "qty": 3})
+        self.invoke("returns.set_reason", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v2), "reason": "  瑕疵 "})
+        self.invoke("returns.remove_item", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v3)})
         items = {i["variant_id"]: i for i in self.invoke("returns.detail", {"return_id": self.rid})["items"]}
         self.assertEqual((items[self.v1]["qty"], items[self.v2]["qty"]), (2, 3))
         self.assertEqual(items[self.v2]["reason"], "瑕疵")
@@ -57,8 +57,8 @@ class TestReturns(ReturnsBase):
         self.fill()
         self.invoke("returns.close", {"return_id": self.rid})
         self.assertEqual(self.stock(self.v1), 5)
-        self.invoke("returns.set_disposition", {"return_id": self.rid, "variant_id": self.v2, "disposition": "discard"})
-        self.invoke("returns.set_disposition", {"return_id": self.rid, "variant_id": self.v3, "disposition": "reject"})
+        self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v2), "disposition": "discard"})
+        self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v3), "disposition": "reject"})
         self.invoke("returns.approve", {"return_id": self.rid})
         self.assertEqual([self.stock(v) for v in (self.v1, self.v2, self.v3)], [7, 5, 5])
         detail = self.invoke("returns.detail", {"return_id": self.rid})
@@ -72,26 +72,26 @@ class TestReturns(ReturnsBase):
         self.fill()
         self.invoke("returns.close", {"return_id": self.rid})
         self.assert_application_error("conflict", "returns.scan", {"return_id": self.rid, "variant_id": self.v1, "qty": 1})
-        self.assert_application_error("conflict", "returns.set_qty", {"return_id": self.rid, "variant_id": self.v1, "qty": 1})
+        self.assert_application_error("conflict", "returns.set_qty", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "qty": 1})
         self.invoke("returns.withdraw", {"return_id": self.rid})
         self.invoke("returns.scan", {"return_id": self.rid, "variant_id": self.v1, "qty": 1})
         self.assert_application_error("conflict", "returns.set_disposition",
-                                      {"return_id": self.rid, "variant_id": self.v1, "disposition": "discard"})
+                                      {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "disposition": "discard"})
 
     def test_empty_return_cannot_submit(self):
         self.assert_application_error("conflict", "returns.close", {"return_id": self.rid})
 
     def test_sale_id_per_item_optional_but_must_exist(self):
         self.fill()
-        self.assert_application_error("not_found", "returns.set_sale", {"return_id": self.rid, "variant_id": self.v1, "sale_id": 999})
+        self.assert_application_error("not_found", "returns.set_sale", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "sale_id": 999})
         sale = self.invoke("sales.checkout", {"payment": self.invoke("payments.list")[0], "paid": 0, "employee": 1,
                                               "items": [{"variant_id": self.v1, "qty": 1, "unit_price": 0}]})
-        self.invoke("returns.set_sale", {"return_id": self.rid, "variant_id": self.v1, "sale_id": sale["sale_id"]})
+        self.invoke("returns.set_sale", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "sale_id": sale["sale_id"]})
         items = {i["variant_id"]: i for i in self.invoke("returns.detail", {"return_id": self.rid})["items"]}
         self.assertEqual((items[self.v1]["sale_id"], items[self.v2]["sale_id"]), (sale["sale_id"], None))
-        self.invoke("returns.set_sale", {"return_id": self.rid, "variant_id": self.v1, "sale_id": None})
+        self.invoke("returns.set_sale", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "sale_id": None})
         self.assertIsNone(self.invoke("returns.detail", {"return_id": self.rid})["items"][0]["sale_id"])
-        self.assert_application_error("validation_error", "returns.set_sale", {"return_id": self.rid, "variant_id": self.v1})
+        self.assert_application_error("validation_error", "returns.set_sale", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1)})
 
     def test_cancel_rules(self):
         self.fill()
@@ -122,7 +122,7 @@ class TestReturns(ReturnsBase):
         self.invoke("returns.close", {"return_id": self.rid})
         self.as_employee()
         for action, payload in (("returns.approve", {"return_id": self.rid}),
-                                ("returns.set_disposition", {"return_id": self.rid, "variant_id": self.v1, "disposition": "discard"}),
+                                ("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "disposition": "discard"}),
                                 ("returns.pending_count", {})):
             with self.subTest(action=action):
                 self.assertEqual(self.invoke_envelope(action, payload)["error"]["code"], "forbidden")
@@ -136,7 +136,7 @@ class TestReturns(ReturnsBase):
         self.assert_application_error("validation_error", "returns.create", {})
         self.assert_application_error("validation_error", "returns.scan", {"return_id": self.rid, "variant_id": self.v1, "qty": 0})
         self.assert_application_error("validation_error", "returns.set_disposition",
-                                      {"return_id": self.rid, "variant_id": self.v1, "disposition": "x"})
+                                      {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "disposition": "x"})
 
     def test_returns_do_not_block_stocktake(self):
         sid = self.invoke("stocktake.create", {"employee": 1})["session_id"]

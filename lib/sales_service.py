@@ -4,7 +4,7 @@ import json
 from datetime import date as calendar_date
 from collections.abc import Mapping
 
-from lib import product_data
+from lib import product_data, stock_ledger
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ValidationError
 from lib.db import stock_map
@@ -110,12 +110,10 @@ class SalesRepository(BaseRepository):
         return self.connection.execute("SELECT 1 FROM Member WHERE member_id=? AND active=1", (member_id,)).fetchone() is not None
 
     def add_item(self, sale_id, item):
-        self.connection.execute(
+        item_id = self.connection.execute(
             "INSERT INTO SaleItem(sale_id,variant_id,qty,unit_price,discount) VALUES(?,?,?,?,?)",
-            (sale_id, item["variant_id"], item["qty"], item["unit_price"], item["discount"]))
-        self.connection.execute(
-            "INSERT INTO StockMovement(variant_id,qty,kind,ref_id) VALUES(?,?,'sale',?)",
-            (item["variant_id"], -item["qty"], sale_id))
+            (sale_id, item["variant_id"], item["qty"], item["unit_price"], item["discount"])).lastrowid
+        stock_ledger.post(self.connection, "sale", item_id)
 
     @staticmethod
     def filter_sql(filters, alias="s"):

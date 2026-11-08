@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>膜型機門市管理系統</title>
-<link rel="stylesheet" href="css/pos.css?v=325">
+<link rel="stylesheet" href="css/pos.css?v=326">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=325" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=326" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -169,15 +169,15 @@
       <th>本次返新</th></tr></thead>
     <tbody>
       <tr v-if="!draft.repair"><td colspan="7" class="hint">請輸入返修中的退貨單號後按「帶入」。</td></tr>
-      <tr v-for="it in repairItems()" :key="it.variant_id">
+      <tr v-for="it in repairItems()" :key="it.id">
         <td>{{ it.name }}<div v-if="it.reason" class="receive-reason">退貨原因：{{ it.reason }}</div></td><td>{{ attrText(it) }}</td>
         <td class="num">{{ it.qty }}</td><td class="num">{{ it.repaired_qty }}</td><td class="num">{{ it.closed_qty }}</td>
         <td class="num">{{ repairLeft(it) }}</td>
-        <td><div class="qty-label"><input ref="repairQtyInputs" type="number" class="w80" min="0" :max="repairLeft(it)" :value="draft.repairQty[it.variant_id] || 0"
+        <td><div class="qty-label"><input ref="repairQtyInputs" type="number" class="w80" min="0" :max="repairLeft(it)" :value="draft.repairQty[it.id] || 0"
                    :disabled="draft.repairBusy || repairLeft(it) === 0" @change="setRepairQty(it, $event)">
-            <button v-if="(draft.repairQty[it.variant_id] || 0) > (draft.repairLabeled[it.variant_id] || 0) && it.label_barcode" class="btn-sm"
-                    :disabled="draft.repairBusy" @click="addRepairLabels(it)">列印 {{ (draft.repairQty[it.variant_id] || 0) - (draft.repairLabeled[it.variant_id] || 0) }} 張</button>
-            <span v-else-if="draft.repairLabeled[it.variant_id]" class="hint">已加入 {{ draft.repairLabeled[it.variant_id] }} 張</span></div></td>
+            <button v-if="(draft.repairQty[it.id] || 0) > (draft.repairLabeled[it.id] || 0) && it.label_barcode" class="btn-sm"
+                    :disabled="draft.repairBusy" @click="addRepairLabels(it)">列印 {{ (draft.repairQty[it.id] || 0) - (draft.repairLabeled[it.id] || 0) }} 張</button>
+            <span v-else-if="draft.repairLabeled[it.id]" class="hint">已加入 {{ draft.repairLabeled[it.id] }} 張</span></div></td>
       </tr>
     </tbody>
   </table>
@@ -317,7 +317,7 @@
     <table class="fixed-table detail-table">
       <thead><tr><th>商品</th><th>適用機型</th><th>屬性</th><th class="col-w102">數量</th><th class="col-w122">銷售單編號</th><th class="col-w200">退貨原因</th>
         <th v-if="detail.status!=='open'" class="col-w160">處理方式</th><th v-if="canEdit" class="cart-col-remove"></th></tr></thead>
-      <tbody><tr v-for="it in detail.items" :key="it.variant_id">
+      <tbody><tr v-for="it in detail.items" :key="it.id">
         <td>{{ it.name }}</td><td>{{ modelsText(it) }}</td><td>{{ attrText(it) }}</td>
         <td><input type="number" v-model.number="it.qty" min="1" class="w80"
                    :disabled="!canEdit" @change="setQty(it)"></td>
@@ -408,7 +408,7 @@
         <colgroup><col class="col-w180"><col><col class="col-w92"></colgroup>
         <thead><tr><th>時間</th><th>員工</th><th></th></tr></thead>
         <tbody>
-          <template v-for="(r, i) in receipts" :key="r.receipt_id ?? 'old-' + i">
+          <template v-for="(r, i) in receipts" :key="r.receipt_id">
             <tr>
               <td>{{ r.ts }}</td><td>{{ r.employee ?? '—' }}</td>
               <td class="records-action"><button class="records-toggle" :class="{on: isOpen(i)}" :aria-expanded="isOpen(i)" @click="toggle(i)">{{ r.items.length }} 項 {{ isOpen(i) ? '▴' : '▾' }}</button></td>
@@ -439,7 +439,7 @@
             </tr>
             <tr v-if="isOpen(t.return_id)"><td colspan="6" class="records-detail-cell">
               <div v-if="returnKind==='repair'" class="repair-cards">
-                <div v-for="it in t.items" :key="it.variant_id" class="repair-card">
+                <div v-for="it in t.items" :key="it.id" class="repair-card">
                   <div class="repair-card-head">
                     <div class="repair-card-title"><div class="repair-card-name">{{ it.name }}</div>
                       <div class="repair-card-spec">{{ repairSpecText(it) }}</div></div>
@@ -961,28 +961,28 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=325"></script>
-<script src="js/api.js?v=325"></script>
-<script src="js/confirm.js?v=325"></script>
-<script src="js/auth.js?v=325"></script>
-<script src="js/pos_shared.js?v=325"></script>
-<script src="js/catalogfields.js?v=325"></script>
-<script src="js/checkout.js?v=325"></script>
-<script src="js/receive.js?v=325"></script>
-<script src="js/stocktake.js?v=325"></script>
-<script src="js/returns.js?v=325"></script>
-<script src="js/records.js?v=325"></script>
-<script src="js/catalog.js?v=325"></script>
-<script src="js/sortable.js?v=325"></script>
-<script src="js/combobox.js?v=325"></script>
-<script src="js/optpicker.js?v=325"></script>
-<script src="js/modelpicker.js?v=325"></script>
-<script src="js/employeepicker.js?v=325"></script>
-<script src="js/membereditor.js?v=325"></script>
-<script src="js/attrfields.js?v=325"></script>
-<script src="js/settings.js?v=325"></script>
-<script src="js/labels.js?v=325"></script>
-<script src="js/app_update.js?v=325"></script>
-<script src="js/app.js?v=325"></script>
+<script src="js/vue.global.prod.js?v=326"></script>
+<script src="js/api.js?v=326"></script>
+<script src="js/confirm.js?v=326"></script>
+<script src="js/auth.js?v=326"></script>
+<script src="js/pos_shared.js?v=326"></script>
+<script src="js/catalogfields.js?v=326"></script>
+<script src="js/checkout.js?v=326"></script>
+<script src="js/receive.js?v=326"></script>
+<script src="js/stocktake.js?v=326"></script>
+<script src="js/returns.js?v=326"></script>
+<script src="js/records.js?v=326"></script>
+<script src="js/catalog.js?v=326"></script>
+<script src="js/sortable.js?v=326"></script>
+<script src="js/combobox.js?v=326"></script>
+<script src="js/optpicker.js?v=326"></script>
+<script src="js/modelpicker.js?v=326"></script>
+<script src="js/employeepicker.js?v=326"></script>
+<script src="js/membereditor.js?v=326"></script>
+<script src="js/attrfields.js?v=326"></script>
+<script src="js/settings.js?v=326"></script>
+<script src="js/labels.js?v=326"></script>
+<script src="js/app_update.js?v=326"></script>
+<script src="js/app.js?v=326"></script>
 </body>
 </html>
