@@ -8,7 +8,7 @@ window.PosComponents["member-editor"] = {
   data() {
     return { form: { member_id: this.member.member_id, name: this.member.name,
                      phones: this.member.phones.length ? [...this.member.phones] : [""] },
-             saving: false };
+             saving: false, warn: "", warnKey: "" };
   },
   template: `<div class="modal-overlay" @click.self="cancel">
     <div class="modal">
@@ -16,13 +16,13 @@ window.PosComponents["member-editor"] = {
       <label>名稱 <input v-model="form.name" :disabled="saving"></label>
       <!-- 第二支起標籤留白:要放空 span 佔住標籤格,空字串不算格子,輸入框會被擠進標籤格 -->
       <label v-for="(phone, i) in form.phones" :key="i"><template v-if="i === 0">電話</template><span v-else></span>
-        <span class="member-phone-row"><input v-model="form.phones[i]" :disabled="saving" inputmode="numeric" placeholder="0912345678">
+        <span class="member-phone-row"><input v-model="form.phones[i]" :disabled="saving" @input="clearWarn" inputmode="numeric" placeholder="0912345678">
           <button v-if="form.phones.length > 1" class="btn-x" title="移除電話" :disabled="saving" @click="removePhoneRow(i)">✕</button></span>
       </label>
       <div class="modal-actions">
         <button class="btn-sm" :disabled="saving" @click="addPhoneRow">新增電話</button>
-        <span class="modal-warn"></span>
-        <button class="primary" :disabled="saving" @click="save">{{ saving ? '儲存中…' : '儲存' }}</button>
+        <span class="modal-warn">{{ warn }}</span>
+        <button class="primary" :disabled="saving" @click="save">{{ saving ? '儲存中…' : (warn ? '仍要儲存' : '儲存') }}</button>
         <button :disabled="saving" @click="cancel">取消</button>
       </div>
     </div>
@@ -30,9 +30,11 @@ window.PosComponents["member-editor"] = {
   methods: {
     // 儲存中一律不動：關窗重開再送會與前一次請求重複建立
     cancel() { if (!this.saving) this.$emit("close", false); },
+    // 電話改了就收回警示,改完要重新比對
+    clearWarn() { this.warn = ""; this.warnKey = ""; },
     addPhoneRow() { if (!this.saving) this.form.phones.push(""); },
     removePhoneRow(i) { if (!this.saving) this.form.phones.splice(i, 1); },
-    // 前端先擋格式;同一支電話已屬別人時允許,但先請店員確認
+    // 前端先擋格式;同一支電話已屬別人時允許,但先在框內顯示警示,再按「仍要儲存」才送出(不疊第二層對話框)
     async save() {
       if (this.saving) return;
       const form = this.form;
@@ -49,9 +51,11 @@ window.PosComponents["member-editor"] = {
       try {
         await this.guard(async () => {
           const owners = await API.memberPhoneOwners({ phones, exclude_member_id: form.member_id });
-          if (owners.length) {
-            const lines = owners.map(o => `${o.phone} ${o.names.join("、")}`).join("\n");
-            if (!await PosConfirm.ask(`此電話已屬於：${lines}\n仍要儲存嗎？`)) return;
+          const key = JSON.stringify(owners);
+          if (owners.length && this.warnKey !== key) {
+            this.warn = "此電話已屬於：" + owners.map(o => `${o.phone} ${o.names.join("、")}`).join("；");
+            this.warnKey = key;
+            return;
           }
           if (form.member_id === null) await API.createMember({ name, phones });
           else await API.updateMember({ member_id: form.member_id, name, phones });

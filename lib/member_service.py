@@ -93,10 +93,11 @@ class MemberRepository(BaseRepository):
             "WHERE m.active=1 AND p.phone LIKE ? GROUP BY m.member_id ORDER BY m.name, m.member_id", (pattern,))
 
     def search(self, query):
-        like = f"%{query}%"
+        escaped = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")  # 名稱裡的 % _ 照字面比對
+        like = f"%{escaped}%"
         return self.all(
-            "SELECT m.member_id, m.name, m.ts FROM Member m WHERE m.active=1 AND (?='' OR m.name LIKE ? OR EXISTS "
-            "(SELECT 1 FROM MemberPhone p WHERE p.member_id=m.member_id AND p.phone LIKE ?)) ORDER BY m.member_id DESC",
+            "SELECT m.member_id, m.name, m.ts FROM Member m WHERE m.active=1 AND (?='' OR m.name LIKE ? ESCAPE '!' OR EXISTS "
+            "(SELECT 1 FROM MemberPhone p WHERE p.member_id=m.member_id AND p.phone LIKE ? ESCAPE '!')) ORDER BY m.member_id DESC",
             (query, like, like))
 
     def phones_of(self, member_ids):

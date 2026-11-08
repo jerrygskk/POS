@@ -37,6 +37,8 @@ def _filters(payload, legacy_date=False):
             raise ValidationError("日期格式不正確")
     # 會員電話:空白＝不篩;否則同收銀查詢,末三碼或完整 10 碼
     values["member_phone"] = phone_pattern(values["member_phone"]) if values["member_phone"].strip() else ""
+    if values["date_from"] and values["date_to"] and values["date_from"] > values["date_to"]:
+        raise ValidationError("起日不可晚於迄日")
     if date and not values["date_from"] and not values["date_to"]:
         values["date_from"] = values["date_to"] = date
     return values
@@ -182,6 +184,8 @@ class SalesService:
             raise ValidationError("折扣後總額不可為負數")
         if body["payment"] != "現金":
             body["paid"] = total  # 非現金不找零,實收即應收
+        elif body["paid"] < total:
+            raise ValidationError("實收金額不足，請確認實收金額")
         sale_id = self.repo.create_sale(body["payment"], body["order_discount"], body["member_discount"], total, body["paid"],
                                        body["employee"], body["member_id"])
         for item in body["items"]:

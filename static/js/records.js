@@ -16,7 +16,7 @@ window.PosPages["page-records"] = {
     return { kinds: [["sales", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"], ["returns", "退貨"], ["members", "資料設定"]], kind: "sales",
              ...defaultRange("sales"), payment: "", payments: [],
              sales: [], summary: null, receipts: [], stocktakes: [], returns: [], returnKind: "normal", expanded: new Set(),
-             memberPhone: "", memberQuery: "", members: [], memberPopup: null };
+             memberPhone: "", memberQuery: "", members: [], memberPopup: null, salesQuery: null };
   },
   computed: {
     isAdmin() { return window.PosAuth.isAdmin; },
@@ -72,8 +72,14 @@ window.PosPages["page-records"] = {
         const range = {date_from: this.dateFrom, date_to: this.dateTo};
         if (this.kind === "sales") {
           const filters = {...range, payment: this.payment || "", member_phone: this.memberPhone.trim()};
-          this.sales = await API.listSales(filters);
-          this.summary = await API.salesSummary(filters);
+          // 查詢失敗先清空,不留上一次結果;成功才記住條件給匯出用
+          // 連續查詢時只讓最新一次更新畫面:列表、合計、匯出條件必須屬於同一次查詢
+          const seq = this._salesSeq = (this._salesSeq || 0) + 1;
+          this.sales = []; this.summary = null; this.salesQuery = null;
+          const sales = await API.listSales(filters);
+          const summary = await API.salesSummary(filters);
+          if (seq !== this._salesSeq) return;
+          this.sales = sales; this.summary = summary; this.salesQuery = filters;
         } else if (this.kind === "members") {
           this.members = await API.listMembers(this.memberQuery.trim());
         } else if (this.kind === "receive") {
@@ -114,7 +120,11 @@ window.PosPages["page-records"] = {
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
       const reason = await PosConfirm.input({ title: "返修品項結案",
         message: `「${it.name}」尚未返新的 ${this.repairLeft(it)} 件將結案，結案後不再等待返新。請輸入結案理由：`,
-        validate: v => (String(v || "").trim() ? "" : "請輸入結案理由") });
+        validate: v => {
+          const text = String(v || "").trim();
+          if (!text) return "請輸入結案理由";
+          return text.length > 30 ? "結案理由最多 30 字" : "";
+        } });
       if (reason === null) return;
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
       await this.repairWrite(t, () => API.closeReturnItem(t.return_id, it.variant_id, String(reason).trim()));
@@ -127,10 +137,12 @@ window.PosPages["page-records"] = {
     },
     async repairWrite(t, fn) {
       await this.guard(async () => {
-        await fn();
-        const keep = new Set(this.expanded);
-        this.returns = await API.returnHistory({date_from: this.dateFrom, date_to: this.dateTo, kind: this.returnKind});
-        this.expanded = keep;
+        try { await fn(); } finally {
+          // 失敗也重載:結案狀態可能已被別人改過,不可留舊畫面
+          const keep = new Set(this.expanded);
+          this.returns = await API.returnHistory({date_from: this.dateFrom, date_to: this.dateTo, kind: this.returnKind});
+          this.expanded = keep;
+        }
       });
     },
     phonesText(m) { return m.phones.join("、"); },
@@ -152,10 +164,8 @@ window.PosPages["page-records"] = {
     },
     async exportCsv() {
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
-      await this.guard(async () => {
-        await API.exportSales({ date_from: this.dateFrom, date_to: this.dateTo,
-          payment: this.payment || "", member_phone: this.memberPhone.trim() });
-      });
+      if (!this.salesQuery) { this.showError("請先查詢成功再匯出"); return; }
+      await this.guard(async () => { await API.exportSales(this.salesQuery); });
     },
   },
 };

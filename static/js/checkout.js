@@ -39,7 +39,7 @@ window.PosPages["page-checkout"] = {
     }, 300);
     document.addEventListener("click", this._refocus);
   },
-  unmounted() { document.removeEventListener("click", this._refocus); },
+  unmounted() { document.removeEventListener("click", this._refocus); clearTimeout(this._doneTimer); },
   methods: {
     itemsText(s) { return s.items.map(i => `${i.name}×${i.qty}`).join("、"); },
     async addItem(r, gen = this.draft.generation) {
@@ -53,6 +53,9 @@ window.PosPages["page-checkout"] = {
         this.showError("結帳期間購物車已變動，請重新加入。");
         return;
       }
+      // 購物車已有同品項就直接加數量:未定價商品不再重問價格(否則新價格會被丟掉)
+      const existing = this.draft.cart.find(i => i.variant_id === r.variant_id);
+      if (existing) { existing.qty += 1; this.searchResults = []; return; }
       let price = r.price;
       if (price === null) {
         const s = await PosConfirm.input({
@@ -177,10 +180,12 @@ window.PosPages["page-checkout"] = {
       if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
       const over = this.draft.cart.find(i => i.sale_price > i.unit_price);
       if (over) { this.showError(`「${over.name}」實售價不可高於原價 ${over.unit_price} 元`); return; }
+      if (!this.paidBlank && this.paid < this.total) { this.showError(`實收金額不足，應收 ${this.total} 元`); return; }
       this.draft.submitting = true;
       this.draft.generation += 1;
       const snapshot = this.draft.cart.map(i => ({ variant_id: i.variant_id, qty: i.qty,
         unit_price: i.unit_price, discount: this.lineDiscount(i) }));
+      let done = false;
       try {
         await this.guard(async () => {
           const r = await API.checkout({
@@ -191,9 +196,15 @@ window.PosPages["page-checkout"] = {
             ? `結帳完成(交易編號 ${r.sale_id})`
             : `結帳完成，找零 ${r.change} 元(交易編號 ${r.sale_id})`;
           this.draft.cart = []; this.draft.orderDiscount = 0; this.draft.memberDiscount = 0; this.draft.member = null; this.paid = null;
-          setTimeout(() => this.doneMsg = "", 5000);
-          this.recent = await API.recentSales();
+          if (this.payments.length) this.payment = this.payments[0];
+          clearTimeout(this._doneTimer);
+          this._doneTimer = setTimeout(() => this.doneMsg = "", 5000);
+          done = true;
         });
+        // 已成交:重抓最近交易失敗不可顯示成結帳錯誤
+        if (done) {
+          try { this.recent = await API.recentSales(); } catch (e) { console.warn("最近交易載入失敗", e); }
+        }
       } finally {
         this.draft.submitting = false;
       }
