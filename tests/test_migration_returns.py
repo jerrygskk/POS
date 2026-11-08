@@ -8,7 +8,7 @@ from lib.db import get_conn, init_db
 
 
 def _old(schema):
-    schema = schema.replace("CHECK(kind IN ('purchase','sale','adjust','return'))",
+    schema = schema.replace("CHECK(kind IN ('purchase','sale','adjust','return','repair'))",
                             "CHECK(kind IN ('purchase','sale','adjust'))")
     schema = schema.replace("  cancelled_at TEXT,\n  employee INTEGER CHECK(employee BETWEEN 1 AND 6),  -- 盤點員工代號\n"
                             "  cancelled_by INTEGER CHECK(cancelled_by BETWEEN 1 AND 6),  -- 作廢員工代號\n"

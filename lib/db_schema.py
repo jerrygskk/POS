@@ -114,8 +114,8 @@ CREATE TABLE IF NOT EXISTS CategoryField(       -- 種類模板:承載排序、�
 CREATE TABLE IF NOT EXISTS StockMovement(
   move_id INTEGER PRIMARY KEY AUTOINCREMENT,
   variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
-  qty INTEGER NOT NULL,           -- 進貨+/銷售-/盤點±/退貨加回+
-  kind TEXT NOT NULL CHECK(kind IN ('purchase','sale','adjust','return')),
+  qty INTEGER NOT NULL,           -- 進貨+/銷售-/盤點±/退貨加回+/返新進貨+
+  kind TEXT NOT NULL CHECK(kind IN ('purchase','sale','adjust','return','repair')),
   ref_id INTEGER,                 -- sale_id、session_id 或 return_id
   note TEXT,
   employee INTEGER CHECK(employee BETWEEN 1 AND 6),  -- 進貨操作員工代號(銷售看 Sale、盤點看 StocktakeSession)
@@ -174,8 +174,9 @@ CREATE TABLE IF NOT EXISTS ReturnSession(      -- 退貨單:送審後由管理�
   cancelled_at TEXT,
   employee INTEGER CHECK(employee BETWEEN 1 AND 6),
   cancelled_by INTEGER CHECK(cancelled_by BETWEEN 1 AND 6),
-  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','pending','closed','cancelled')),
-  refund_amount INTEGER                         -- 退款金額:預留,尚未使用
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','pending','repairing','closed','cancelled')),
+  refund_amount INTEGER,                        -- 退款金額:預留,尚未使用
+  completed_at TEXT                             -- 返修單全部品項返新或結案的時間
 );
 CREATE TABLE IF NOT EXISTS ReturnItem(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -185,7 +186,10 @@ CREATE TABLE IF NOT EXISTS ReturnItem(
   sale_id INTEGER REFERENCES Sale(sale_id),     -- 原銷售單(選填)
   reason TEXT,
   disposition TEXT NOT NULL DEFAULT 'restock'
-    CHECK(disposition IN ('restock','discard','reject')),  -- 加回庫存／退貨不入庫／不同意
+    CHECK(disposition IN ('restock','discard','reject','repair')),  -- 加回庫存／退貨不入庫／不同意／返修不入庫
+  closed_qty INTEGER NOT NULL DEFAULT 0,        -- 返修結案件數(廠商不換不修)，已返新件數看 StockMovement kind=repair
+  closed_reason TEXT,
+  closed_at TEXT,
   UNIQUE(return_id, variant_id)
 );
 CREATE TABLE IF NOT EXISTS Setting(
@@ -601,6 +605,43 @@ def _mig_payment_transfer(conn):
     conn.execute("UPDATE Sale SET payment='轉帳' WHERE payment='刷卡'")
 
 
+def _mig_repair(conn):
+    """返修:退貨品項加「返修不入庫」與結案欄,退貨單加返修中狀態,庫存流水加返新進貨。
+
+    三張表的 CHECK 都變了,只能重建;ReturnItem 參照 ReturnSession,先暫存子表再重建父表。
+    ⚠️ 兩組表各自判斷:更舊的庫經 _mig_returns 時 StockMovement 已用現行 DDL 重建(含 repair),
+    退貨兩張表則是 executescript(SCHEMA) 新建,同樣可能已是新格式。
+    """
+    table_sql = lambda name: conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()[0]
+    sequences = dict(conn.execute("SELECT name,seq FROM sqlite_sequence WHERE name IN "
+                                  "('StockMovement','ReturnSession','ReturnItem')"))
+    if "'repair'" not in table_sql("StockMovement"):
+        conn.execute("CREATE TABLE StockMovement_mig(" + _schema_ddl("StockMovement"))
+        conn.execute("INSERT INTO StockMovement_mig(move_id,variant_id,qty,kind,ref_id,note,employee,ts) "
+                     "SELECT move_id,variant_id,qty,kind,ref_id,note,employee,ts FROM StockMovement")
+        conn.execute("DROP TABLE StockMovement")
+        conn.execute("ALTER TABLE StockMovement_mig RENAME TO StockMovement")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_move_variant ON StockMovement(variant_id)")
+    if "'repair'" in table_sql("ReturnItem"):
+        return
+    conn.execute("CREATE TABLE ReturnItem_mig AS SELECT * FROM ReturnItem")
+    conn.execute("DROP TABLE ReturnItem")
+    conn.execute("CREATE TABLE ReturnSession_mig(" + _schema_ddl("ReturnSession"))
+    conn.execute("INSERT INTO ReturnSession_mig(return_id,started_at,submitted_at,approved_at,cancelled_at,employee,"
+                 "cancelled_by,status,refund_amount) SELECT return_id,started_at,submitted_at,approved_at,cancelled_at,"
+                 "employee,cancelled_by,status,refund_amount FROM ReturnSession")
+    conn.execute("DROP TABLE ReturnSession")
+    conn.execute("ALTER TABLE ReturnSession_mig RENAME TO ReturnSession")
+    conn.execute("CREATE TABLE ReturnItem(" + _schema_ddl("ReturnItem"))
+    conn.execute("INSERT INTO ReturnItem(id,return_id,variant_id,qty,sale_id,reason,disposition) "
+                 "SELECT id,return_id,variant_id,qty,sale_id,reason,disposition FROM ReturnItem_mig")
+    conn.execute("DROP TABLE ReturnItem_mig")
+    for name, previous in sequences.items():
+        conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name=?", (previous, name))
+        conn.execute("INSERT INTO sqlite_sequence(name,seq) SELECT ?,? "
+                     "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name=?)", (name, previous, name))
+
+
 def _schema_ddl(table):
     """取現行 SCHEMA 裡該表括號內的定義(含結尾右括號),避免 migration 另抄一份。"""
     return SCHEMA.split(f"CREATE TABLE IF NOT EXISTS {table}(", 1)[1].split(";", 1)[0]
@@ -629,6 +670,7 @@ MIGRATIONS = [
     (BASE_VERSION + 20, _mig_member_discount),
     (BASE_VERSION + 21, _mig_member),
     (BASE_VERSION + 22, _mig_payment_transfer),
+    (BASE_VERSION + 23, _mig_repair),
 ]
 
 # 最新版號 = 初版 + 遷移筆數;全新 DB 建 SCHEMA 即為此版

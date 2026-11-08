@@ -104,7 +104,8 @@ class TestReturns(ReturnsBase):
         self.assertEqual((detail["status"], detail["cancelled_by"]), ("cancelled", 3))
         self.assertEqual(self.stock(self.v1), 5)
         self.assert_application_error("conflict", "returns.cancel", {"return_id": self.rid, "employee": 3})
-        self.assertEqual(self.invoke("returns.history", {})[0]["status"], "cancelled")
+        # 紀錄查詢不列作廢單
+        self.assertNotIn(self.rid, [r["return_id"] for r in self.invoke("returns.history", {})])
         # 進行中員工可作廢;已核准不可作廢
         self.as_employee()
         rid = self.invoke("returns.create", {"employee": 1})["return_id"]

@@ -170,7 +170,7 @@ ACTION_CONTRACTS = {
     "stocktake.cancel": schema([I("session_id", required=True), I("employee", required=True, constraint="1..6")]),
     "returns.create": schema([I("employee", required=True, constraint="1..6")]),
     "returns.list": schema([]),
-    "returns.history": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject")]),
+    "returns.history": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("kind", default="normal", constraint="normal|repair", blank="reject")]),
     "returns.detail": schema([I("return_id", required=True)]),
     "returns.scan": schema([I("return_id", required=True), I("variant_id", required=True), I("qty", required=True, constraint=">0")]),
     "returns.set_qty": schema([I("return_id", required=True), I("variant_id", required=True), I("qty", required=True, constraint=">0")]),
@@ -179,10 +179,13 @@ ACTION_CONTRACTS = {
     "returns.remove_item": schema([I("return_id", required=True), I("variant_id", required=True)]),
     "returns.close": schema([I("return_id", required=True)]),
     "returns.withdraw": schema([I("return_id", required=True)]),
-    "returns.set_disposition": schema([I("return_id", required=True), I("variant_id", required=True), S("disposition", required=True, constraint="restock|discard|reject", blank="reject")]),
+    "returns.set_disposition": schema([I("return_id", required=True), I("variant_id", required=True), S("disposition", required=True, constraint="restock|discard|reject|repair", blank="reject")]),
     "returns.approve": schema([I("return_id", required=True)]),
     "returns.cancel": schema([I("return_id", required=True), I("employee", required=True, constraint="1..6")]),
     "returns.pending_count": schema([]),
+    "returns.repair_receive": schema([I("return_id", required=True), I("employee", required=True, constraint="1..6"), field("items", "list[RepairItem]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), I("items[].qty", required=True, constraint=">0")]),
+    "returns.close_item": schema([I("return_id", required=True), I("variant_id", required=True), S("reason", required=True, blank="reject")]),
+    "returns.reopen_item": schema([I("return_id", required=True), I("variant_id", required=True)]),
     "payments.list": schema([]),
     "sales.recent": schema([]),
     "sales.checkout": schema([S("payment", required=True, constraint="must be present in Setting.payments", blank="reject"), I("order_discount", default=0, constraint=">=0"), I("member_discount", default=0, constraint=">=0"), I("paid", default=0, constraint=">=0"), I("employee", required=True, constraint="1..6"), I("member_id", nullable=True), field("items", "list[ItemIn]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].variant_id", required=True), I("items[].qty", required=True, constraint=">0"), I("items[].unit_price", required=True, constraint=">=0"), I("items[].discount", default=0, constraint="0..qty*unit_price")]),
@@ -245,7 +248,8 @@ TARGET_BY_ACTION = {
     **{action:"lib.returns_service.ReturnsFacade._prepare_payload -> _validate" for action in (
         "returns.create","returns.list","returns.history","returns.detail","returns.scan",
         "returns.set_qty","returns.set_sale","returns.set_reason","returns.remove_item","returns.close","returns.withdraw",
-        "returns.set_disposition","returns.approve","returns.cancel","returns.pending_count")},
+        "returns.set_disposition","returns.approve","returns.cancel","returns.pending_count",
+        "returns.repair_receive","returns.close_item","returns.reopen_item")},
     "payments.list":"lib.sales_service.SalesFacade._prepare_payload -> _strict_mapping",
     "sales.recent":"lib.sales_service.SalesFacade._prepare_payload -> _strict_mapping",
     "sales.checkout":"lib.sales_service.SalesFacade._prepare_payload -> _checkout_payload",
@@ -409,6 +413,7 @@ EXPECTED_DEFAULTS = {
         ("variants.update","fields"), ("variants.update_details","fields"),
         ("variants.update_editor","fields"),
     }, {}),
+    ("returns.history","kind"): "normal",
     ("variants.batch_create","drafts[].active"): 1,
     ("variants.batch_precheck","drafts[].active"): 1,
 }
@@ -516,6 +521,12 @@ class ActionContractTests(FacadeTestCase):
         self.invoke("stocktake.scan", {"session_id":self.session_id, "variant_id":self.variant_id, "qty":1})
         self.return_id = self.invoke("returns.create", {"employee": 1})["return_id"]
         self.invoke("returns.scan", {"return_id":self.return_id, "variant_id":self.variant_id, "qty":1})
+        # 返修中的退貨單:數量給大,讓返新與結案的合法樣本可重複執行
+        self.repair_id = self.invoke("returns.create", {"employee": 1})["return_id"]
+        self.invoke("returns.scan", {"return_id":self.repair_id, "variant_id":self.variant_id, "qty":500})
+        self.invoke("returns.close", {"return_id":self.repair_id})
+        self.invoke("returns.set_disposition", {"return_id":self.repair_id, "variant_id":self.variant_id, "disposition":"repair"})
+        self.invoke("returns.approve", {"return_id":self.repair_id})
         self.delete_category_id = self.create_category("待刪種類")
         self.delete_brand_id = self.invoke("brands.create", {"name":"待刪廠牌"})["brand_id"]
         self.delete_phone_brand_id = self.create_phone_brand("待刪手機牌")
@@ -545,13 +556,16 @@ class ActionContractTests(FacadeTestCase):
             "stocktake.create":{"employee":1}, "stocktake.list":{}, "stocktake.detail":{"session_id":self.session_id}, "stocktake.scan":{"session_id":self.session_id,"variant_id":self.variant_id,"qty":1}, "stocktake.set_counted":{"session_id":self.session_id,"variant_id":self.variant_id,"counted_qty":1}, "stocktake.remove_item":{"session_id":self.session_id,"variant_id":self.variant_id}, "stocktake.close":{"session_id":self.session_id},
             "stocktake.withdraw":{"session_id":self.session_id}, "stocktake.return":{"session_id":self.session_id,"variant_ids":[self.variant_id]}, "stocktake.approve":{"session_id":self.session_id}, "stocktake.pending_count":{},
             "stocktake.set_note":{"session_id":self.session_id,"variant_id":self.variant_id,"note":"x"}, "stocktake.cancel":{"session_id":self.session_id,"employee":1},
-            "returns.create":{"employee":1}, "returns.list":{}, "returns.history":{}, "returns.detail":{"return_id":self.return_id},
+            "returns.create":{"employee":1}, "returns.list":{}, "returns.history":{"kind":"normal"}, "returns.detail":{"return_id":self.return_id},
             "returns.scan":{"return_id":self.return_id,"variant_id":self.variant_id,"qty":1}, "returns.set_qty":{"return_id":self.return_id,"variant_id":self.variant_id,"qty":1},
             "returns.set_sale":{"return_id":self.return_id,"variant_id":self.variant_id,"sale_id":None},
             "returns.set_reason":{"return_id":self.return_id,"variant_id":self.variant_id,"reason":None}, "returns.remove_item":{"return_id":self.return_id,"variant_id":self.variant_id},
             "returns.close":{"return_id":self.return_id}, "returns.withdraw":{"return_id":self.return_id},
             "returns.set_disposition":{"return_id":self.return_id,"variant_id":self.variant_id,"disposition":"discard"},
             "returns.approve":{"return_id":self.return_id}, "returns.cancel":{"return_id":self.return_id,"employee":1}, "returns.pending_count":{},
+            "returns.repair_receive":{"return_id":self.repair_id,"employee":1,"items":[{"variant_id":self.variant_id,"qty":1}]},
+            "returns.close_item":{"return_id":self.repair_id,"variant_id":self.variant_id,"reason":"廠商不保固"},
+            "returns.reopen_item":{"return_id":self.repair_id,"variant_id":self.variant_id},
             "payments.list":{}, "sales.recent":{}, "sales.checkout":{"payment":"現金","paid":100,"employee":1,"items":[{"variant_id":self.variant_id,"qty":1,"unit_price":100}]}, "sales.list":{}, "sales.summary":{}, "sales.export_save":{}, "printing.barcode":{"variant_id":self.variant_id,"barcode":"contract-1","copies":1},
             "printing.preview":{"variant_id":self.variant_id,"barcode":"contract-1"},
             "printing.check":{"items":[{"variant_id":self.variant_id,"barcode":"contract-1"}]},
@@ -582,7 +596,7 @@ class ActionContractTests(FacadeTestCase):
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
                              self.facade.stocktake.ACTIONS, self.facade.returns.ACTIONS,
                              self.facade.printing.ACTIONS, self.facade.members.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 107)
+        self.assertEqual(len(ACTION_CONTRACTS), 110)
         self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS | AUTH_ACTIONS | DESKTOP_UPDATE_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
@@ -746,6 +760,8 @@ class ActionContractTests(FacadeTestCase):
                 self.invoke("stocktake.approve", {"session_id": self.session_id})
         if action in {"returns.withdraw", "returns.set_disposition", "returns.approve"}:
             self.invoke("returns.close", {"return_id": self.return_id})
+        if action == "returns.reopen_item":
+            self.invoke("returns.close_item", {"return_id": self.repair_id, "variant_id": self.variant_id, "reason": "x"})
         if contract["valid_error"] == "validation_error":
             with self.assertRaisesRegex(ValidationError, "尚未支援"):
                 self.invoke(action, self.valid_payload(action))
@@ -836,7 +852,7 @@ class ActionContractTests(FacadeTestCase):
                     for action,contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items()
                     for path,spec in contract["fields"].items()
                     if spec["default"] != "missing"}
-        self.assertEqual(len(declared), 105)
+        self.assertEqual(len(declared), 106)
         self.assertEqual(declared, EXPECTED_DEFAULTS)
         executed = {}
         for (action,path), expected in EXPECTED_DEFAULTS.items():
@@ -876,7 +892,7 @@ class ActionContractTests(FacadeTestCase):
         self.assertNotIn("skipped", executed.values())
         self.assertEqual(
             {strategy: list(executed.values()).count(strategy) for strategy in set(executed.values())},
-            {"materialized_by_validator":22, "exact_validator_omission":83},
+            {"materialized_by_validator":23, "exact_validator_omission":83},
         )
 
         field_id = self.invoke("fields.create", {"name":"預設型態"})["field_id"]

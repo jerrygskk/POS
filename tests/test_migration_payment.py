@@ -12,7 +12,7 @@ class PaymentTransferMigrationTests(ConnTestCase):
                           (json.dumps(["現金", "刷卡", "行動支付"], ensure_ascii=False),))
         self.conn.execute("INSERT INTO Sale(sale_id,payment,total,paid) VALUES(5,'刷卡',70,70)")
         self.conn.execute("INSERT INTO Sale(sale_id,payment,total,paid) VALUES(6,'現金',30,50)")
-        self.conn.execute("UPDATE Setting SET value=? WHERE key='schema_version'", (str(db_schema.SCHEMA_VERSION - 1),))
+        self.conn.execute("UPDATE Setting SET value=? WHERE key='schema_version'", (str(db_schema.BASE_VERSION + 21),))
         self.conn.commit(); self.conn.close()
 
         init_db(self.db)

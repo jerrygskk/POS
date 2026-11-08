@@ -40,6 +40,8 @@
 - **SQL-2**: **交易中設 `PRAGMA foreign_keys` 沒效果** → 該 PRAGMA 在交易內是 no-op。migration 一旦 OFF，同交易後續（含 seed）FK 都是關的；要保護不能「seed 前開回 ON」，改在 commit 前跑 `PRAGMA foreign_key_check` 驗證，有違規就 rollback。
 - **SQL-3**: **偶發 `database is locked` 直接報 500** → 另一條連線（如自動備份 `.backup()`）與寫入撞上，SQLite 預設不等待。`get_conn` 統一設 `PRAGMA busy_timeout=3000` 讓它自行重試；連線一律走 `get_conn` 單一來源，要加 PRAGMA 集中改一處。
 
+- **SQL-4**: **migration 報 `incomplete input`，資料表定義被切斷** → `_schema_ddl` 依半形分號從 `SCHEMA` 切出各表定義，schema 字串內的註解寫了半形「;」就會從中間斷開。註解改用全形標點。
+
 #### TEST：測試環境
 
 - **TEST-1**：**Codex 沙盒內大量測試在 `init_db` 報 `unable to open database file`，暫存目錄清理也出現 WinError 5** → 沙盒預設的 `AC\Temp` 可能無法供 SQLite 建檔。先用獨立暫存目錄確認 SQLite 可建立及刪除，再只在該次測試程序把 `TEMP`／`TMP` 指向專案內已建立、被忽略的 `.tmp_*/temp`，重跑完整測試；不要改正式資料庫路徑或放寬程式權限。此處理僅適用單元測試，真實 pywebview 仍須依 AGENTS.md 在沙盒外走查。
