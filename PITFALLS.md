@@ -45,6 +45,7 @@
 #### TEST：測試環境
 
 - **TEST-1**：**Codex 沙盒內大量測試在 `init_db` 報 `unable to open database file`，暫存目錄清理也出現 WinError 5** → 沙盒預設的 `AC\Temp` 可能無法供 SQLite 建檔。先用獨立暫存目錄確認 SQLite 可建立及刪除，再只在該次測試程序把 `TEMP`／`TMP` 指向專案內已建立、被忽略的 `.tmp_*/temp`，重跑完整測試；不要改正式資料庫路徑或放寬程式權限。此處理僅適用單元測試，真實 pywebview 仍須依 AGENTS.md 在沙盒外走查。
+- **TEST-2**：**Node 畫面測試在舊程式上也「通過」，修正其實沒被驗到** → 測試裡 `await` 一個永遠不會完成的承諾（例如連點測試的第二下在舊程式會卡在等待中），Node 事件迴圈清空就以結束碼 0 離開，後面的 assert 根本沒跑。連點類測試的第二下不要 `await`，改呼叫後 `await tick()`；會等待外部承諾的測試開頭設 `process.exitCode=1`、最後一行才設回 0（例：`test_receive_ui.py` 返新標籤、`test_records_member_ui.py` 會員儲存）。新增測試後拿舊程式跑一次，確認真的會失敗。
 
 #### PKG：打包（PyInstaller onefile）
 
