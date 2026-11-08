@@ -159,15 +159,19 @@ window.PosPages["page-receive"] = {
       this.draft.repairQty[it.variant_id] = n;
       event.target.value = n;
     },
+    // 加入期間鎖住整個返新畫面，連點才不會用同一個待加張數重複加入
     async addRepairLabels(it) {
+      if (this.draft.repairBusy) return;
       const n = (this.draft.repairQty[it.variant_id] || 0) - (this.draft.repairLabeled[it.variant_id] || 0);
-      if (n <= 0 || this.draft.repairBusy) return;
+      if (n <= 0) return;
+      this.draft.repairBusy = true;
       try {
         const added = await window.PosLabelQueueAdd(it.variant_id, it.label_barcode, n);
         if (added.result === "added" || added.result === "merged")
           this.draft.repairLabeled[it.variant_id] = (this.draft.repairLabeled[it.variant_id] || 0) + n;
         else this.showError("無法加入列印清單，請至標籤列印頁確認。");
       } catch (e) { this.showError(e.message); }
+      finally { this.draft.repairBusy = false; }
     },
     async confirmRepair() {
       if (this.draft.repairBusy || !this.draft.repair) return;

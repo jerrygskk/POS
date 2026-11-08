@@ -21,8 +21,11 @@ window.PosPages["page-returns"] = {
   async mounted() { await this.guard(() => this.reload()); },
   methods: {
     async reload() { this.sessions = await API.listReturns(); },
+    // 等待期間若已換到別張單，舊單的明細不得蓋掉新畫面
     async refreshDetail() {
-      this.detail = await API.returnDetail(this.current);
+      const rid = this.current;
+      const detail = await API.returnDetail(rid);
+      if (this.current === rid) this.detail = detail;
     },
     async openNew() {
       if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }
@@ -44,14 +47,19 @@ window.PosPages["page-returns"] = {
       catch (e) { this.showError(e.message); }
       await this.guard(() => this.refreshDetail());
     },
+    // 查詢與寫入都要等待，期間可能換到別張單：寫入用開始時的單號，回來後換單就不動新畫面
     async onScan() {
       if (!this.canEdit) return;
+      const rid = this.current;
       await this.guard(async () => {
         const query = await window.PosScan(this.scanCode);
+        if (this.current !== rid) return;
         if (!query) { this.scanCode = ""; return; }
         if (!this.canEdit) return;
-        await API.returnScan(this.current, query.data.variant_id, 1);
+        await API.returnScan(rid, query.data.variant_id, 1);
+        if (this.current !== rid) return;
         await this.refreshDetail();
+        if (this.current !== rid) return;
         this.scanCode = "";
       });
     },

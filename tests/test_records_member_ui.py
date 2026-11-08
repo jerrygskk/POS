@@ -62,6 +62,29 @@ const before=listed;await s.memberEditorClosed(true);assert.equal(s.memberPopup,
 ed.app.unmount();view.app.unmount();
 ''')
 
+    def test_save_locks_editor_until_finished(self):
+        self.run_js(r'''
+process.exitCode=1;let creates=0,wait=null;
+API.memberPhoneOwners=async()=>[];
+API.createMember=()=>{creates++;return wait.promise;};
+const def=context.window.PosComponents["member-editor"];let closed=[];
+const ed=mount(def,def.template,{},{member:{member_id:null,name:"",phones:[]},onClose:v=>closed.push(v)});
+const e=ed.state;e.form.name="王小明";e.form.phones=["0912000111"];
+const defer=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return{promise,resolve,reject}};
+wait=defer();const first=e.save();await tick();e.save();await tick();
+assert.equal(creates,1);assert.equal(e.saving,true);await tick();
+assert.equal(button(ed.dom,"儲存中…").props.disabled,true);assert.equal(button(ed.dom,"取消").props.disabled,true);
+e.cancel();e.addPhoneRow();e.removePhoneRow(0);
+assert.deepEqual(closed,[]);assert.deepEqual([...e.form.phones],["0912000111"]);
+wait.reject(new Error("寫入失敗"));await first;
+assert.equal(e.saving,false);assert.ok(errors.includes("寫入失敗"));assert.deepEqual(closed,[]);
+wait=defer();const retry=e.save();await tick();wait.resolve({member_id:9});await retry;
+assert.equal(creates,2);assert.deepEqual(closed,[true]);assert.equal(e.saving,false);
+API.memberPhoneOwners=async()=>[{phone:"0912000111",names:["王太太"]}];
+context.PosConfirm.ask=async()=>false;await e.save();assert.equal(e.saving,false);assert.equal(creates,2);
+ed.app.unmount();process.exitCode=0;
+''')
+
     def test_admin_delete_rechecks_after_confirm(self):
         self.run_js(r'''
 const m={member_id:1,name:"王小明",phones:["0912000111"],ts:""};

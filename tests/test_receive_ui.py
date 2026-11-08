@@ -165,6 +165,22 @@ d.resolve(true);await second;assert.equal(payloads.length,0);
 assert.equal(errors.pop(),"進貨清單已變動，請重新確認進貨。");assert.equal(s.draft.locked,false);
 ''')
 
+    def test_repair_labels_lock_repair_screen_while_adding(self):
+        self._run(r'''
+process.exitCode=1;const s=mk();s.draft.mode="repair";s.$refs.repairInput={focus(){}};
+s.draft.repair={return_id:5,status:"repairing",is_repair:true,items:[]};s.draft.repairQty={7:2};s.draft.repairLabeled={};
+const it={variant_id:7,label_barcode:"TL7"},d=deferred();let asks=0;confirm.ask=async()=>{asks++;return true};
+context.window.PosLabelQueueAdd=(...args)=>{labelCalls.push(args);return d.promise};
+const first=s.addRepairLabels(it);s.addRepairLabels(it);await tick();
+assert.deepEqual(labelCalls,[[7,"TL7",2]]);assert.equal(s.draft.repairBusy,true);
+const event={target:{value:9}};s.setRepairQty(it,event);assert.equal(event.target.value,2);assert.equal(s.draft.repairQty[7],2);
+s.setMode("normal");assert.equal(s.draft.mode,"repair");
+await s.confirmRepair();assert.equal(asks,0);
+d.resolve({result:"added"});await first;
+assert.equal(s.draft.repairLabeled[7],2);assert.equal(s.draft.repairBusy,false);
+await s.addRepairLabels(it);assert.equal(labelCalls.length,1);process.exitCode=0;
+''')
+
     def test_state_survives_new_component_instance(self):
         self._run(r'''
 const first=mk();await scan(first,1);const second=mk();

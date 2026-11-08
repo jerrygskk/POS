@@ -96,6 +96,14 @@ for(const set of cases){
   assert.equal(f.filter(x=>x==="ask").length,1);
 }''')
 
+    def test_repair_draft_counts_as_busy(self):
+        self._run('''const{deps}=make({});
+deps.receive={rows:[],locked:false,repair:null,repairBusy:false,repairQty:{1:0}};
+assert.equal(await U.isIdle(deps),true);
+deps.receive.repair={return_id:5};assert.equal(await U.isIdle(deps),false);deps.receive.repair=null;
+deps.receive.repairBusy=true;assert.equal(await U.isIdle(deps),false);deps.receive.repairBusy=false;
+deps.receive.repairQty={1:0,2:3};assert.equal(await U.isIdle(deps),false);''')
+
     def test_status_error_retries_then_fails(self):
         self._run('''let r=make({"desktop.update.check":[NEW],"desktop.update.start":[{}],
 "desktop.update.status":[new Error("a"),new Error("b"),{state:"failed",got:0,total:0}]});

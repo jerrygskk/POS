@@ -11,6 +11,7 @@ window.PosAppUpdate = {
     if (c && (c.cart.length || c.submitting)) return false;
     if (l && (l.rows.length || l.printing)) return false;
     if (r && (r.rows.length || r.locked)) return false;
+    if (r && (r.repair || r.repairBusy || Object.values(r.repairQty || {}).some(n => n > 0))) return false;
     try {
       return !(await deps.api.invoke("desktop.update.busy")).busy;  // 規格設定子視窗開著
     } catch (e) {
