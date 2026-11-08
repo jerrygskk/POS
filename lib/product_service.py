@@ -352,6 +352,13 @@ class ProductService:
             if self._same_category_name_exists(category_id, fields["name"], exclude_pid=pid):
                 raise ConflictError("此種類已有同名產品")
         _update_by_id(self.repo.connection, "Product", "product_id", pid, fields)
+        if fields.get("category_id") is not None and fields["category_id"] != row["category_id"]:
+            # 規格欄隸屬種類:已填原種類規格的產品改種類會留下不相容的值,擋下而不自動清掉
+            ids = [r[0] for r in self.repo.all("SELECT variant_id FROM Variant WHERE product_id=?", (pid,))]
+            try:
+                product_data.check_variant_attributes(self.repo.connection, ids)
+            except ValidationError:
+                raise ConflictError("此產品的子產品已填有原種類的規格，無法變更種類") from None
         return {"ok": True}
 
     def update_variant(self, vid, fields, model_ids=None):
@@ -409,8 +416,8 @@ class ProductService:
 
     def _feature_field_id(self, category_id):
         for r in self.repo.all(
-                "SELECT f.field_id,f.name FROM CategoryField cf JOIN AttributeField f "
-                "ON f.field_id=cf.field_id WHERE cf.category_id=? ORDER BY f.field_id",
+                "SELECT f.field_id,f.name FROM AttributeField f "
+                "WHERE f.category_id=? ORDER BY f.field_id",
                 (category_id,)):
             if normalize_key(r["name"]) == product_data.FEATURE_FIELD_KEY:
                 return r["field_id"]

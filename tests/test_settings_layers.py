@@ -88,7 +88,7 @@ class SettingsLayersTests(unittest.TestCase):
         model_id = self.facade.invoke(
             "models.create", {"phone_brand_id": phone_brand_id, "device_type_id": 1, "name": "型號"}
         )["model_id"]
-        field_id = self.facade.invoke("fields.create", {"name": "欄位"})["field_id"]
+        field_id = self.facade.invoke("fields.create", {"name": "欄位", "category_id": self.facade.invoke("categories.create", {"name": "欄位種類"})["category_id"]})["field_id"]
         self.facade.invoke("options.create", {"field_id": field_id, "value": "選項"})
         option_id = self.facade.invoke("options.list", {"field_id": field_id})[0]["option_id"]
 
@@ -137,7 +137,8 @@ class SettingsLayersTests(unittest.TestCase):
 
     def test_field_name_and_type_update_is_atomic(self):
         field_id = self.facade.invoke(
-            "fields.create", {"name": "原欄位", "field_type": "select"}
+            "fields.create", {"name": "原欄位", "field_type": "select",
+                              "category_id": self.facade.invoke("categories.create", {"name": "原種類"})["category_id"]}
         )["field_id"]
         self.facade.invoke("fields.update", {
             "id": field_id,
@@ -248,13 +249,13 @@ class SettingsLayersTests(unittest.TestCase):
             product = conn.execute("INSERT INTO Product(name,category_id) VALUES('膜',?)", (cid,)).lastrowid
             variant = conn.execute("INSERT INTO Variant(product_id) VALUES(?)", (product,)).lastrowid
             conn.execute("INSERT INTO VariantAttribute(variant_id,field_id,option_id) VALUES(?,?,?)", (variant, fid, oid))
-            conn.execute("UPDATE CategoryField SET default_option_id=? WHERE field_id=? AND category_id=?", (oid, fid, cid))
+            conn.execute("UPDATE AttributeField SET default_option_id=? WHERE field_id=? AND category_id=?", (oid, fid, cid))
             conn.commit()
         out = self.facade.invoke("options.delete", {"id": oid})
         self.assertFalse(out["deleted"])
         with db_conn(self.db) as conn:
             self.assertEqual(0, conn.execute("SELECT active FROM AttributeOption WHERE option_id=?", (oid,)).fetchone()[0])
-            self.assertIsNone(conn.execute("SELECT default_option_id FROM CategoryField WHERE field_id=?", (fid,)).fetchone()[0])
+            self.assertIsNone(conn.execute("SELECT default_option_id FROM AttributeField WHERE field_id=?", (fid,)).fetchone()[0])
 
     def test_settings_frontend_uses_bridge_transport_with_bounded_wait(self):
         source = (Path(__file__).parents[1] / "static/js/api.js").read_text(encoding="utf-8")

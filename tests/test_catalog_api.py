@@ -127,15 +127,12 @@ class TestCatalogApi(FacadeTestCase):
         cid = self.create_category("case"); pbid = self._add_phone_brand("iPhone"); mid = self.create_model(pbid, "15"); fid = self.create_field("size", cid); self.invoke("options.create", {"field_id": fid, "value": "one"})
         oid = self.invoke("options.list", {"field_id": fid})[0]["option_id"]; self.invoke("options.set_models", {"id": oid, "model_ids": [mid]}); self.assert_application_error("conflict", "models.delete", {"id": mid})
 
-    def test_category_fields_merge(self):
+    def test_category_fields_only_lists_own_active_fields(self):
         cid = self.create_category("glass"); fid = self.create_field("size", cid); self.invoke("options.create", {"field_id": fid, "value": "large"})
-        common = self.invoke("fields.create", {"name": "顏色", "field_type": "select"})["field_id"]   # 種子不再建共用欄,測共用行為時自己建
-        other = self.create_category("case"); self.invoke("categories.set_common_fields", {"id": other, "field_ids": [common]}); self.invoke("categories.set_common_fields", {"id": cid, "field_ids": [common]})
-        fields = self.invoke("categories.fields", {"id": cid}); own = next(field for field in fields if field["field_id"] == fid); shared = next(field for field in fields if field["field_id"] == common)
-        self.assertEqual([option["value"] for option in own["options"]], ["large"]); self.assertFalse(own["shared"]); self.assertTrue(shared["shared"])
-
-    def test_category_common_fields_unknown_field_raises_validation_error(self):
-        cid = self.create_category("validation"); self.assert_application_error("validation_error", "categories.set_common_fields", {"id": cid, "field_ids": [999999]})
+        other = self.create_category("case"); self.create_field("顏色", other)
+        off = self.create_field("停用欄", cid); self.invoke("categories.set_field", {"category_id": cid, "field_id": off, "fields": {"active": 0}})
+        fields = self.invoke("categories.fields", {"id": cid})
+        self.assertEqual([f["field_id"] for f in fields], [fid]); self.assertEqual([o["value"] for o in fields[0]["options"]], ["large"]); self.assertNotIn("shared", fields[0])
 
     def test_variant_model_filter(self):
         cid = self.create_category("case"); ip = self._add_phone_brand("iPhone"); m15 = self.create_model(ip, "15"); m16 = self.create_model(ip, "16")

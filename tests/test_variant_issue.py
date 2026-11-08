@@ -99,13 +99,11 @@ class VariantIssueTests(ConnTestCase):
         c = self.conn
         self.cid = c.execute("INSERT INTO Category(name) VALUES(?)", ("測試種類",)).lastrowid
         self.color_fid = c.execute(
-            "INSERT INTO AttributeField(name,field_type) VALUES('顏色','select')").lastrowid
-        c.execute("INSERT INTO CategoryField(category_id,field_id,sort,required,active) "
-                  "VALUES(?,?,1,1,1)", (self.cid, self.color_fid))
+            "INSERT INTO AttributeField(category_id,name,field_type,sort,required) "
+            "VALUES(?,'顏色','select',1,1)", (self.cid,)).lastrowid
         self.len_fid = c.execute(
-            "INSERT INTO AttributeField(name,field_type) VALUES('長度','select')").lastrowid
-        c.execute("INSERT INTO CategoryField(category_id,field_id,sort,required,active) "
-                  "VALUES(?,?,2,0,1)", (self.cid, self.len_fid))
+            "INSERT INTO AttributeField(category_id,name,field_type,sort,required) "
+            "VALUES(?,'長度','select',2,0)", (self.cid,)).lastrowid
         self.red = c.execute("INSERT INTO AttributeOption(field_id,value,sort) VALUES(?,?,1)",
                              (self.color_fid, "紅")).lastrowid
         self.blue = c.execute("INSERT INTO AttributeOption(field_id,value,sort) VALUES(?,?,2)",
@@ -132,10 +130,10 @@ class VariantIssueTests(ConnTestCase):
         conn = self._fresh()
         try:
             text_fid = conn.execute(
-                "INSERT INTO AttributeField(name,field_type) VALUES('備註規格','text')"
+                "INSERT INTO AttributeField(category_id,name,field_type) VALUES(?,'備註規格','text')", (self.cid,)
             ).lastrowid
             blank_fid = conn.execute(
-                "INSERT INTO AttributeField(name,field_type) VALUES('空白規格','text')"
+                "INSERT INTO AttributeField(category_id,name,field_type) VALUES(?,'空白規格','text')", (self.cid,)
             ).lastrowid
             vid = conn.execute("INSERT INTO Variant(product_id) VALUES(?)", (self.pid,)).lastrowid
             conn.execute(

@@ -1,5 +1,6 @@
 import traceback
-from lib.db import DatabaseTooNewError, init_db, read_schema_version
+from lib.db import (DatabaseTooNewError, DatabaseTooOldError, check_supported_version, init_db,
+                    read_schema_version)
 from lib.db_schema import SCHEMA_VERSION
 from lib.backup import backup_before_upgrade, run_auto_backup
 from lib.desktop_application import DesktopApplication
@@ -28,8 +29,8 @@ def prepare_runtime(paths):
         except Exception as exc:
             try_log_runtime_error(paths, "資料庫初始化失敗", exc)
             raise
-        if version is not None and version > SCHEMA_VERSION:
-            raise DatabaseTooNewError(f"資料庫版本 {version} 比程式支援的 {SCHEMA_VERSION} 新")
+        # 過新／過舊都要在升級前備份之前擋下:被拒絕的資料庫不留下任何新檔
+        check_supported_version(version)
         if version is not None and version < SCHEMA_VERSION:
             try:
                 backup_before_upgrade(paths.db_path, paths.backup_dir, version, SCHEMA_VERSION)
@@ -68,6 +69,9 @@ def main(application_factory=None, error_dialog=show_error_dialog):
         raise SystemExit(1)
     except DatabaseTooNewError:
         error_dialog("POS 無法啟動", "資料庫版本比程式新，請更新程式後再開啟。")
+        raise SystemExit(1)
+    except DatabaseTooOldError:
+        error_dialog("POS 無法啟動", "資料庫版本過舊，本程式已不支援，請改用新版標準資料庫。")
         raise SystemExit(1)
     except Exception as exc:
         # prepare_runtime 已寫入 error.log，這裡只給使用者看得懂的簡短原因

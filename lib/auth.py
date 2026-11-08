@@ -23,7 +23,7 @@ ADMIN_ACTIONS = frozenset({
     "models.create", "models.update", "models.delete", "models.sort",
     "fields.create", "fields.update",
     "options.create", "options.update", "options.delete", "options.set_models", "options.cleanup",
-    "categories.set_common_fields", "categories.set_field", "categories.delete_field",
+    "categories.set_field", "categories.delete_field",
     "products.create", "products.update", "products.delete",
     "variants.create", "variants.update", "variants.set_models", "variants.update_details",
     "variants.update_editor", "variants.delete", "variants.batch_create", "variants.activate", "variants.issues",

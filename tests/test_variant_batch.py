@@ -12,19 +12,16 @@ class VariantBatchTests(ConnTestCase):
         self.cid = c.execute("INSERT INTO Category(name) VALUES(?)", ("測試種類",)).lastrowid
         # 正式規格:顏色(select,必填)
         self.color_fid = c.execute(
-            "INSERT INTO AttributeField(name,field_type) VALUES('顏色','select')").lastrowid
-        c.execute("INSERT INTO CategoryField(category_id,field_id,sort,required,active) "
-                  "VALUES(?,?,1,1,1)", (self.cid, self.color_fid))
+            "INSERT INTO AttributeField(category_id,name,field_type,sort,required) "
+            "VALUES(?,'顏色','select',1,1)", (self.cid,)).lastrowid
         # 正式規格:長度(select,選填)
         self.len_fid = c.execute(
-            "INSERT INTO AttributeField(name,field_type) VALUES('長度','select')").lastrowid
-        c.execute("INSERT INTO CategoryField(category_id,field_id,sort,required,active) "
-                  "VALUES(?,?,2,0,1)", (self.cid, self.len_fid))
+            "INSERT INTO AttributeField(category_id,name,field_type,sort,required) "
+            "VALUES(?,'長度','select',2,0)", (self.cid,)).lastrowid
         # 特性詞條(tags,固定欄)
         self.tag_fid = c.execute(
-            "INSERT INTO AttributeField(name,field_type) VALUES('特性詞條','tags')").lastrowid
-        c.execute("INSERT INTO CategoryField(category_id,field_id,sort,required,active) "
-                  "VALUES(?,?,3,0,1)", (self.cid, self.tag_fid))
+            "INSERT INTO AttributeField(category_id,name,field_type,sort,required) "
+            "VALUES(?,'特性詞條','tags',3,0)", (self.cid,)).lastrowid
         # 既有選項
         self.red = c.execute("INSERT INTO AttributeOption(field_id,value,sort) VALUES(?,?,1)",
                              (self.color_fid, "紅")).lastrowid

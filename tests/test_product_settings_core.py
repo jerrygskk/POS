@@ -56,7 +56,7 @@ class TestTemplateFields(FacadeTestCase):
             "fields": {"sort": 3, "required": 1, "default_option_id": self.oid},
         }), {"ok": True})
         with get_conn(self.db) as conn:
-            row = conn.execute("SELECT sort,required,default_option_id,active FROM CategoryField WHERE category_id=? AND field_id=?", (self.cid, self.fid)).fetchone()
+            row = conn.execute("SELECT sort,required,default_option_id,active FROM AttributeField WHERE category_id=? AND field_id=?", (self.cid, self.fid)).fetchone()
         self.assertEqual(tuple(row), (3, 1, self.oid, 1))
         field = next(item for item in self.invoke("categories.fields", {"id": self.cid})
                      if item["field_id"] == self.fid)
@@ -155,9 +155,10 @@ class TestTemplateFields(FacadeTestCase):
                 (vid, other_vid),
             )], [0, 0])
 
-    def test_delete_shared_required_field_clears_only_this_category_issues(self):
+    def test_delete_required_field_leaves_other_category_same_name_issues(self):
         note_fid = self.create_field("note", self.cid, field_type="text")
         other_cid = self.create_category("other")
+        other_note = self.create_field("note", other_cid, field_type="text")
         self.invoke("products.create", {
             "name": "product", "category_id": self.cid,
             "variants": [{"attributes": {"size": "full"}, "barcodes": []}],
@@ -166,19 +167,18 @@ class TestTemplateFields(FacadeTestCase):
             "name": "other", "category_id": other_cid,
             "variants": [{"attributes": {}, "barcodes": []}],
         })["variant_ids"][0]
-        for cid in (self.cid, other_cid):
+        for cid, fid in ((self.cid, note_fid), (other_cid, other_note)):
             self.invoke("categories.set_field", {
-                "category_id": cid, "field_id": note_fid, "fields": {"required": 1},
+                "category_id": cid, "field_id": fid, "fields": {"required": 1},
             })
         self.assertEqual(self.invoke("variants.issues", {})["by_type"], {"missing_required": 2})
         result = self.invoke("categories.delete_field", {
             "category_id": self.cid, "field_id": note_fid,
         })
-        self.assertTrue(result["ok"])
-        self.assertFalse(result["field_deleted"])
+        self.assertTrue(result["field_deleted"])
         with get_conn(self.db) as conn:
             rows = conn.execute(
-                "SELECT variant_id FROM VariantIssue WHERE field_id=?", (note_fid,),
+                "SELECT variant_id FROM VariantIssue WHERE field_id=?", (other_note,),
             ).fetchall()
             self.assertEqual([row[0] for row in rows], [other])
             self.assertEqual([row[0] for row in conn.execute("SELECT active FROM Variant")], [1, 1])
@@ -188,7 +188,7 @@ class TestTemplateFields(FacadeTestCase):
                                               "fields": {"default_option_id": self.oid}})
         self.invoke("options.update", {"id": self.oid, "fields": {"active": 0}})
         with get_conn(self.db) as conn:
-            default_id = conn.execute("SELECT default_option_id FROM CategoryField WHERE category_id=? AND field_id=?", (self.cid, self.fid)).fetchone()[0]
+            default_id = conn.execute("SELECT default_option_id FROM AttributeField WHERE category_id=? AND field_id=?", (self.cid, self.fid)).fetchone()[0]
         self.assertIsNone(default_id)
 
 
@@ -326,21 +326,20 @@ class TestDeleteEmptyCategoryCascade(FacadeTestCase):
         category_id = self.create_category("template")
         specific_field_id = self.create_field("size", category_id)
         self.create_options(specific_field_id, ("full",))
-        common_field_id = self.invoke("fields.create", {"name": "顏色", "field_type": "select"})["field_id"]
+        oid = self.invoke("options.list", {"field_id": specific_field_id})[0]["option_id"]
+        self.invoke("categories.set_field", {"category_id": category_id, "field_id": specific_field_id,
+                                             "fields": {"default_option_id": oid}})
         other_category_id = self.create_category("other")
-        self.invoke("categories.set_common_fields", {"id": other_category_id, "field_ids": [common_field_id]})
-        self.invoke("categories.set_common_fields", {"id": category_id, "field_ids": [common_field_id]})
+        other_field_id = self.create_field("size", other_category_id)
         brand_id = self.invoke("brands.create", {"name": "HODA"})["brand_id"]
         self.invoke("brands.set_categories", {"id": brand_id, "category_ids": [category_id]})
 
         self.assertEqual(self.invoke("categories.delete", {"id": category_id}), {"ok": True})
         with get_conn(self.db) as conn:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM CategoryField WHERE category_id=?", (category_id,)).fetchone()[0], 0)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM BrandCategory WHERE category_id=?", (category_id,)).fetchone()[0], 0)
             self.assertIsNone(conn.execute("SELECT 1 FROM AttributeField WHERE field_id=?", (specific_field_id,)).fetchone())
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM AttributeOption WHERE field_id=?", (specific_field_id,)).fetchone()[0], 0)
-            self.assertIsNotNone(conn.execute("SELECT 1 FROM AttributeField WHERE field_id=?", (common_field_id,)).fetchone())
-            self.assertIsNotNone(conn.execute("SELECT 1 FROM CategoryField WHERE category_id=? AND field_id=?", (other_category_id, common_field_id)).fetchone())
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM AttributeField WHERE field_id=?", (other_field_id,)).fetchone())
             self.assertIsNotNone(conn.execute("SELECT 1 FROM Brand WHERE brand_id=?", (brand_id,)).fetchone())
 
 
@@ -359,15 +358,6 @@ class TestFeatureFieldPerCategory(FacadeTestCase):
         names = [item["name"] for item in self.invoke("categories.fields", {"id": category_id})]
         self.assertNotIn("特性詞條", names)
 
-    def test_set_common_fields_can_unbind_feature_field(self):
-        category_id = self.create_category("template")
-        feature_id = self.create_field("特性詞條", category_id, field_type="tags")
-        other_category_id = self.create_category("other")
-        self.invoke("categories.set_field", {"category_id": other_category_id,
-                                             "field_id": feature_id, "fields": {"active": 1}})
-        self.invoke("categories.set_common_fields", {"id": category_id, "field_ids": []})
-        names = [item["name"] for item in self.invoke("categories.fields", {"id": category_id})]
-        self.assertNotIn("特性詞條", names)
 
     def test_each_category_owns_its_feature_field(self):
         cat_a = self.create_category("a")

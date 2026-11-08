@@ -9,7 +9,7 @@ C 規則重複判定(批內互查＋對 DB)→ 建新選項(等於停用選項�
 from lib.application_errors import NotFoundError, ValidationError
 from lib.db import next_sort
 from lib.normalize import normalize_display, normalize_key
-from lib.product_data import FEATURE_FIELD_KEY, variant_signature
+from lib.product_data import FEATURE_FIELD_KEY, check_variant_attributes, variant_signature
 from lib.product_rules import has_store_barcode_prefix, next_store_barcode, ensure_store_codes_for_shared
 
 
@@ -43,12 +43,11 @@ class VariantBatchService:
         return row["category_id"]
 
     def _writable_fields(self, category_id):
-        """該種類可輸入的模板欄位(cf.active=1 且 f.active=1)。回 {正規化欄名: row}。"""
+        """該種類可輸入的模板欄位(f.active=1)。回 {正規化欄名: row}。"""
         out = {}
         for r in self.conn.execute(
-                "SELECT f.field_id, f.name, f.field_type, cf.required "
-                "FROM CategoryField cf JOIN AttributeField f ON f.field_id=cf.field_id "
-                "WHERE cf.category_id=? AND cf.active=1 AND f.active=1",
+                "SELECT f.field_id, f.name, f.field_type, f.required "
+                "FROM AttributeField f WHERE f.category_id=? AND f.active=1",
                 (category_id,)):
             out[normalize_key(r["name"])] = r
         return out
@@ -56,9 +55,8 @@ class VariantBatchService:
     def _feature_field_id(self, category_id):
         """本種類的特性詞條欄。每個種類各自一份同名欄,不可跨種類取用。"""
         for row in self.conn.execute(
-                "SELECT f.field_id, f.name FROM CategoryField cf "
-                "JOIN AttributeField f ON f.field_id=cf.field_id "
-                "WHERE cf.category_id=? AND cf.active=1 AND f.active=1 ORDER BY f.field_id",
+                "SELECT f.field_id, f.name FROM AttributeField f "
+                "WHERE f.category_id=? AND f.active=1 ORDER BY f.field_id",
                 (category_id,)):
             if normalize_key(row["name"]) == FEATURE_FIELD_KEY:
                 return row["field_id"]
@@ -139,7 +137,7 @@ class VariantBatchService:
                 attrs_out.append((fid, "option", oid))
                 if not is_feature:
                     sig.add((fid, "o", oid))
-        # 必填檢查(cf.required=1 的可輸入欄)——軟性:容錯建立以 missing_required 記錄
+        # 必填檢查(required=1 的可輸入欄)——軟性:容錯建立以 missing_required 記錄
         for f in writable.values():
             if f["required"] and f["field_id"] not in provided:
                 errors.append(_err("missing_required", f"「{f['name']}」未填",
@@ -321,6 +319,7 @@ class VariantBatchService:
             results.append({"draft_id": r["draft_id"], "variant_id": vid,
                             "barcodes": codes})
 
+        check_variant_attributes(self.conn, [r["variant_id"] for r in results])
         self._ensure_shared_codes(resolved, results)
         return {"product_id": product_id, "results": results,
                 "created_option_ids": sorted(ctx["created"])}
@@ -392,6 +391,7 @@ class VariantBatchService:
                 self.conn.execute("UPDATE Variant SET active=0 WHERE variant_id=?", (vid,))
             results.append({"draft_id": r["draft_id"], "variant_id": vid,
                             "issue_count": len(issues), "barcodes": codes})
+        check_variant_attributes(self.conn, [r["variant_id"] for r in results])
         self._ensure_shared_codes(resolved, results)
         return {"product_id": product_id, "results": results,
                 "created_option_ids": sorted(ctx["created"])}

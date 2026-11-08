@@ -51,24 +51,3 @@ class TestEmployee(FacadeTestCase):
         self.assertEqual(self._one("SELECT COUNT(*) FROM StocktakeSession"), 0)
 
 
-class TestEmployeeMigration(FacadeTestCase):
-    def test_upgrade_adds_employee_and_drops_stocktake_operator(self):
-        conn = sqlite3.connect(self.db)
-        for table in ("Sale", "StockMovement", "StocktakeSession"):
-            conn.execute(f"ALTER TABLE {table} DROP COLUMN employee")
-        conn.execute("ALTER TABLE StocktakeSession ADD COLUMN operator TEXT")
-        conn.execute("UPDATE Setting SET value=? WHERE key='schema_version'",
-                     ("15",))
-        conn.commit()
-        conn.close()
-        init_db(self.db)
-        conn = sqlite3.connect(self.db)
-        try:
-            for table in ("Sale", "StockMovement", "StocktakeSession"):
-                cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
-                self.assertIn("employee", cols)
-                self.assertNotIn("operator", cols)
-            with self.assertRaises(sqlite3.IntegrityError):
-                conn.execute("INSERT INTO StocktakeSession(employee) VALUES(7)")
-        finally:
-            conn.close()

@@ -9,7 +9,7 @@ from lib.desktop_bridge import DesktopBridge
 
 EXPECTED_ADMIN_ACTIONS = frozenset({
     "categories.create", "categories.update", "categories.delete", "categories.sort",
-    "categories.set_common_fields", "categories.set_field", "categories.delete_field",
+    "categories.set_field", "categories.delete_field",
     "brands.create", "brands.update", "brands.delete", "brands.sort", "brands.set_categories",
     "phone_brands.create", "phone_brands.update", "phone_brands.delete", "phone_brands.sort",
     "device_types.create", "device_types.update", "device_types.delete", "device_types.sort",

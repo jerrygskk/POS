@@ -6,7 +6,7 @@ from unittest.mock import patch
 import main
 from lib import db_schema
 from lib.backup import run_auto_backup
-from lib.db import DatabaseTooNewError, get_conn, init_db, read_schema_version
+from lib.db import DatabaseTooNewError, DatabaseTooOldError, get_conn, init_db, read_schema_version
 from lib.runtime_paths import RuntimePaths
 
 
@@ -99,20 +99,23 @@ class StartupTest(unittest.TestCase):
         self.assertEqual(messages, [("自動備份失敗", "disk full")])
 
 
-OLD = db_schema.SCHEMA_VERSION - 1
-NEW = db_schema.SCHEMA_VERSION
+OLD = db_schema.MIN_SUPPORTED_VERSION
+NEW = OLD + 1
 
 
 class UpgradeBackupTest(unittest.TestCase):
-    """升級資料庫格式前先備份;版號以 SCHEMA_VERSION 推算,升級步驟換成空動作,不受日後 migration 影響。"""
+    """升級資料庫格式前先備份。目前沒有真實升級步驟,以一個空的假步驟模擬「最低支援版→最新版」,
+    驗證升級機制與升級前備份本身仍可用,不受日後真實 migration 影響。"""
 
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
         self.paths = RuntimePaths.from_root(self.root)
-        noop = [(target, lambda conn: None) for target, _ in db_schema.MIGRATIONS]
-        patcher = patch.object(db_schema, "MIGRATIONS", noop)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for target, attr, value in ((db_schema, "MIGRATIONS", [(NEW, lambda conn: None)]),
+                                    (db_schema, "SCHEMA_VERSION", NEW),
+                                    (main, "SCHEMA_VERSION", NEW)):
+            patcher = patch.object(target, attr, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def make_db(self, paths, version):
         init_db(paths.db_path)
@@ -136,12 +139,23 @@ class UpgradeBackupTest(unittest.TestCase):
         self.assertEqual(read_schema_version(files[0]), OLD)
         self.assertEqual(read_schema_version(self.paths.db_path), NEW)
 
-    def test_upgrade_backup_for_db_without_version_row(self):
+    def assert_rejected_untouched(self, error):
+        before = self.paths.db_path.read_bytes()
+        mtime = self.paths.db_path.stat().st_mtime_ns
+        with self.assertRaises(error):
+            main.prepare_runtime(self.paths)
+        self.assertEqual(self.paths.db_path.read_bytes(), before)
+        self.assertEqual(self.paths.db_path.stat().st_mtime_ns, mtime)
+        self.assertEqual(self.upgrade_backups(self.paths), [])
+        self.assertEqual(sorted(p.name for p in self.root.iterdir() if p.suffix == ".db"), ["pos.db"])
+
+    def test_db_without_version_row_is_rejected_before_any_write(self):
         self.make_db(self.paths, None)
-        main.prepare_runtime(self.paths)
-        files = self.upgrade_backups(self.paths)
-        self.assertEqual(len(files), 1)
-        self.assertTrue(files[0].name.endswith(f"_v{db_schema.BASE_VERSION}-v{NEW}.db"))
+        self.assert_rejected_untouched(DatabaseTooOldError)
+
+    def test_db_below_min_supported_is_rejected_before_any_write(self):
+        self.make_db(self.paths, OLD - 1)
+        self.assert_rejected_untouched(DatabaseTooOldError)
 
     def test_bad_version_value_is_logged(self):
         self.make_db(self.paths, "abc")
@@ -176,9 +190,7 @@ class UpgradeBackupTest(unittest.TestCase):
 
     def test_newer_db_stops_without_backup(self):
         self.make_db(self.paths, NEW + 1)
-        with self.assertRaises(DatabaseTooNewError):
-            main.prepare_runtime(self.paths)
-        self.assertEqual(self.upgrade_backups(self.paths), [])
+        self.assert_rejected_untouched(DatabaseTooNewError)
 
     def test_upgrade_backup_failure_stops_before_migration(self):
         self.make_db(self.paths, OLD)

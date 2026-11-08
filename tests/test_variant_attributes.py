@@ -6,10 +6,7 @@ class TestVariantAttributes(FacadeTestCase):
     def setUp(self):
         super().setUp()
         self.make_category_with_field("規格", options=("亮面", "霧面"))
-        # 種子不再建共用欄(規格欄一律各種類自建),測共用欄行為時自己建一個
-        desc = self.invoke("fields.create",
-                           {"name": "商品描述", "field_type": "text"})["field_id"]
-        self.invoke("categories.set_common_fields", {"id": self.cid, "field_ids": [desc]})
+        self.create_field("商品描述", self.cid, "text")
 
     def _opt_id(self, value):
         return next(o["option_id"] for o in self.invoke("options.list", {"field_id": self.fid}) if o["value"] == value)

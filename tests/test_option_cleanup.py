@@ -17,18 +17,16 @@ class OptionCleanupTests(ConnTestCase):
         c = self.conn
         self.cid = c.execute("INSERT INTO Category(name) VALUES('種類')").lastrowid
         self.fid = c.execute(
-            "INSERT INTO AttributeField(name,field_type) VALUES('顏色','select')").lastrowid
-        c.execute("INSERT INTO CategoryField(category_id,field_id,sort,active) "
-                  "VALUES(?,?,1,1)", (self.cid, self.fid))
+            "INSERT INTO AttributeField(category_id,name,field_type,sort) "
+            "VALUES(?,'顏色','select',1)", (self.cid,)).lastrowid
         self.red = c.execute("INSERT INTO AttributeOption(field_id,value,sort) "
                              "VALUES(?,?,1)", (self.fid, "紅")).lastrowid
         self.blue = c.execute("INSERT INTO AttributeOption(field_id,value,sort) "
                               "VALUES(?,?,2)", (self.fid, "藍")).lastrowid
         # 長度欄:僅供區分同色子產品(避免 C 規則簽章重複)
         self.len_fid = c.execute(
-            "INSERT INTO AttributeField(name,field_type) VALUES('長度','select')").lastrowid
-        c.execute("INSERT INTO CategoryField(category_id,field_id,sort,active) "
-                  "VALUES(?,?,2,1)", (self.cid, self.len_fid))
+            "INSERT INTO AttributeField(category_id,name,field_type,sort) "
+            "VALUES(?,'長度','select',2)", (self.cid,)).lastrowid
         for v in ("1m", "2m"):
             c.execute("INSERT INTO AttributeOption(field_id,value,sort) VALUES(?,?,0)",
                       (self.len_fid, v))

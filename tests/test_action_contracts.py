@@ -51,7 +51,6 @@ RETIRED_PYDANTIC_SOURCES = {
     "categories.create": {p:"api.catalog.CategoryNew" for p in ("name","sort","model_mode")},
     "categories.update": {"id":"api.catalog.patch_item.item_id", **{p:"api.catalog.CategoryPatch" for p in ("fields","fields.name","fields.sort","fields.active","fields.model_mode")}},
     "categories.delete": {"id":"api.catalog.delete_item.item_id"}, "categories.sort": {"ids":"api.catalog.SortIds"}, "categories.fields": {"id":"api.catalog.category_fields.cid"},
-    "categories.set_common_fields": {"id":"api.catalog.common_fields.cid", "field_ids":"api.catalog.FieldIdList"},
     "categories.set_field": {"category_id":"api.catalog.set_category_field.cid", "field_id":"api.catalog.set_category_field.fid", **{p:"api.catalog.CategoryFieldPatch" for p in ("fields","fields.sort","fields.required","fields.default_option_id","fields.active")}},
     "brands.list": {"all":"api.catalog.list_brands.all", "category_id":"api.catalog.list_brands.category_id"}, "brands.create": {p:"api.catalog.BrandNew" for p in ("name","sort")},
     "brands.update": {"id":"api.catalog.patch_brand.item_id", **{p:"api.catalog.BrandPatch" for p in ("fields","fields.name","fields.sort","fields.active")}}, "brands.delete": {"id":"api.catalog.delete_brand.item_id"}, "brands.sort": {"ids":"api.catalog.SortIds"}, "brands.set_categories": {"id":"api.catalog.set_brand_categories.bid", "category_ids":"api.catalog.IdList"},
@@ -61,7 +60,7 @@ RETIRED_PYDANTIC_SOURCES = {
     "device_types.update": {"id":"api.catalog.patch_item.item_id", **{p:"api.catalog.DeviceTypePatch" for p in ("fields","fields.name","fields.sort","fields.active")}}, "device_types.delete": {"id":"api.catalog.delete_item.item_id"}, "device_types.sort": {"ids":"api.catalog.SortIds"},
     "models.list": {"all":"api.catalog.list_models.all", "phone_brand_id":"api.catalog.list_models.phone_brand_id"}, "models.create": {p:"api.catalog.ModelNew" for p in ("phone_brand_id","device_type_id","name","alias","sort")},
     "models.update": {"id":"api.catalog.patch_model.mid", **{p:"api.catalog.ModelPatch" for p in ("fields","fields.phone_brand_id","fields.device_type_id","fields.name","fields.alias","fields.sort","fields.active")}}, "models.delete": {"id":"api.catalog.delete_model.mid"}, "models.sort": {"ids":"api.catalog.SortIds"},
-    "fields.list": {p:f"api.attributes.fields.{p}" for p in ("category_id","common")}, "fields.create": {p:"api.attributes.FieldNew" for p in ("name","category_id","field_type","default_option_id")},
+    "fields.list": {p:f"api.attributes.fields.{p}" for p in ("category_id",)}, "fields.create": {p:"api.attributes.FieldNew" for p in ("name","category_id","field_type")},
     "fields.update": {"id":"api.attributes.patch_field.fid", **{p:"api.attributes.FieldPatch" for p in ("fields","fields.name","fields.sort","fields.active","fields.field_type","fields.default_option_id")}},
     "options.list": {p:f"api.attributes.options.{p}" for p in ("field_id","all","model_ids")}, "options.create": {p:"api.attributes.OptionNew" for p in ("field_id","value","reactivate")},
     "options.update": {"id":"api.attributes.patch_option.oid", **{p:"api.attributes.OptionPatch" for p in ("fields","fields.value","fields.sort","fields.active")}}, "options.delete": {"id":"api.attributes.delete_option.oid"}, "options.models": {"id":"api.attributes.option_models.oid"}, "options.set_models": {"id":"api.attributes.set_option_models.oid", "model_ids":"api.attributes.OptionModelList"},
@@ -92,7 +91,6 @@ ACTION_CONTRACTS = {
     "categories.delete": schema([I("id", required=True)]),
     "categories.sort": schema([LI("ids", required=True)]),
     "categories.fields": schema([I("id", required=True)]),
-    "categories.set_common_fields": schema([I("id", required=True), LI("field_ids", required=True)]),
     "categories.set_field": schema([I("category_id", required=True), I("field_id", required=True), M("fields", required=True), I("fields.sort"), BI("fields.required"), I("fields.default_option_id", nullable=True, default=None), BI("fields.active")]),
     "categories.delete_field": schema([I("category_id", required=True), I("field_id", required=True)], notes=("把規格欄從此種類移除並清掉此種類的值;欄位零引用時連欄位一起刪。",)),
 
@@ -120,8 +118,8 @@ ACTION_CONTRACTS = {
     "models.delete": schema([I("id", required=True)]),
     "models.sort": schema([LI("ids", required=True)]),
 
-    "fields.list": schema([I("category_id", nullable=True, default=None), BI("common", default=0)]),
-    "fields.create": schema([S("name", required=True, blank="accept"), I("category_id", nullable=True, default=None), S("field_type", default="select", constraint="select|text|multi|tags"), I("default_option_id", nullable=True, default=None, constraint="must be None on create")]),
+    "fields.list": schema([I("category_id", nullable=True, default=None)]),
+    "fields.create": schema([S("name", required=True, blank="accept"), I("category_id", required=True), S("field_type", default="select", constraint="select|text|multi|tags")]),
     "fields.update": schema([I("id", required=True), M("fields", required=True), S("fields.name", blank="accept"), I("fields.sort"), BI("fields.active"), S("fields.field_type", constraint="select|text|multi|tags"), I("fields.default_option_id", nullable=True, default=None)]),
     "options.list": schema([I("field_id", required=True), BI("all", default=0), LI("model_ids", default=[])]),
     "options.create": schema([I("field_id", required=True), S("value", required=True, blank="accept"), B("reactivate", default=False)]),
@@ -213,7 +211,7 @@ INTERNAL_ACTION_CONTRACTS = {
 }
 
 SETTINGS_CONTRACT_ACTIONS = {
-    "categories.list","categories.create","categories.update","categories.delete","categories.sort","categories.fields","categories.set_common_fields","categories.set_field","categories.delete_field",
+    "categories.list","categories.create","categories.update","categories.delete","categories.sort","categories.fields","categories.set_field","categories.delete_field",
     "brands.list","brands.create","brands.update","brands.delete","brands.sort","brands.set_categories",
     "phone_brands.list","phone_brands.create","phone_brands.update","phone_brands.delete","phone_brands.sort",
     "device_types.list","device_types.create","device_types.update","device_types.delete","device_types.sort",
@@ -330,7 +328,7 @@ EXPECTED_DEFAULTS = {
     **dict.fromkeys({
         ("categories.list","all"), ("brands.list","all"),
         ("phone_brands.list","all"), ("device_types.list","all"), ("models.list","all"),
-        ("fields.list","common"), ("options.list","all"),
+        ("options.list","all"),
         ("sales.checkout","order_discount"),
         ("sales.checkout","member_discount"),
         ("sales.checkout","paid"),
@@ -348,8 +346,7 @@ EXPECTED_DEFAULTS = {
         ("models.list","phone_brand_id"), ("models.create","alias"),
         ("models.create","sort"),
         ("models.update","fields.alias"),
-        ("fields.list","category_id"), ("fields.create","category_id"),
-        ("fields.create","default_option_id"),
+        ("fields.list","category_id"),
         ("fields.update","fields.default_option_id"),
         ("options.cleanup","field_id"), ("products.create","brand_id"),
         ("products.create","brand_name"), ("products.create","note"),
@@ -543,12 +540,12 @@ class ActionContractTests(FacadeTestCase):
 
     def valid_payload(self, action):
         values = {
-            "categories.list": {}, "categories.create": {"name":"新增種類"}, "categories.update":{"id":self.category_id,"fields":{}}, "categories.delete":{"id":self.delete_category_id}, "categories.sort":{"ids":[]}, "categories.fields":{"id":self.category_id}, "categories.set_common_fields":{"id":self.category_id,"field_ids":[]}, "categories.set_field":{"category_id":self.category_id,"field_id":self.field_id,"fields":{}}, "categories.delete_field":{"category_id":self.category_id,"field_id":self.field_id},
+            "categories.list": {}, "categories.create": {"name":"新增種類"}, "categories.update":{"id":self.category_id,"fields":{}}, "categories.delete":{"id":self.delete_category_id}, "categories.sort":{"ids":[]}, "categories.fields":{"id":self.category_id}, "categories.set_field":{"category_id":self.category_id,"field_id":self.field_id,"fields":{}}, "categories.delete_field":{"category_id":self.category_id,"field_id":self.field_id},
             "brands.list":{}, "brands.create":{"name":"新增廠牌"}, "brands.update":{"id":self.brand_id,"fields":{}}, "brands.delete":{"id":self.delete_brand_id}, "brands.sort":{"ids":[]}, "brands.set_categories":{"id":self.brand_id,"category_ids":[]},
             "phone_brands.list":{}, "phone_brands.create":{"name":"新增手機牌"}, "phone_brands.update":{"id":self.phone_brand_id,"fields":{}}, "phone_brands.delete":{"id":self.delete_phone_brand_id}, "phone_brands.sort":{"ids":[]},
             "device_types.list":{}, "device_types.create":{"name":"新增類型"}, "device_types.update":{"id":self.device_type_id,"fields":{}}, "device_types.delete":{"id":self.delete_device_type_id}, "device_types.sort":{"ids":[]},
             "models.list":{}, "models.create":{"phone_brand_id":self.phone_brand_id,"device_type_id":self.device_type_id,"name":"新增型號"}, "models.update":{"id":self.model_id,"fields":{}}, "models.delete":{"id":self.delete_model_id}, "models.sort":{"ids":[]},
-            "fields.list":{}, "fields.create":{"name":"尺寸"}, "fields.update":{"id":self.field_id,"fields":{}}, "options.list":{"field_id":self.field_id}, "options.create":{"field_id":self.field_id,"value":"白"}, "options.update":{"id":self.option_id,"fields":{}}, "options.delete":{"id":self.delete_option_id}, "options.models":{"id":self.option_id}, "options.set_models":{"id":self.option_id,"model_ids":[]}, "options.cleanup":{},
+            "fields.list":{}, "fields.create":{"name":"尺寸","category_id":self.category_id}, "fields.update":{"id":self.field_id,"fields":{}}, "options.list":{"field_id":self.field_id}, "options.create":{"field_id":self.field_id,"value":"白"}, "options.update":{"id":self.option_id,"fields":{}}, "options.delete":{"id":self.delete_option_id}, "options.models":{"id":self.option_id}, "options.set_models":{"id":self.option_id,"model_ids":[]}, "options.cleanup":{},
             "products.create":{"name":"新增商品","category_id":self.category_id,"variants":[{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"new-code","source":"store"}]}]}, "products.list":{}, "products.update":{"id":self.product_id,"fields":{}}, "products.delete":{"id":self.delete_product_id}, "catalog.list":{},
             "variants.create":{"product_id":self.product_id,"fields":{"attributes":{},"price":100,"model_ids":[],"barcodes":[{"barcode":"variant-new","source":"store"}]}}, "variants.update":{"id":self.variant_id,"fields":{}}, "variants.set_models":{"id":self.variant_id,"model_ids":[]}, "variants.update_details":{"id":self.variant_id,"fields":{},"model_ids":[]}, "variants.update_editor":{"id":self.variant_id,"fields":{},"model_ids":[],"deleted_barcodes":[],"factory_barcodes":[],"store_barcode_count":0}, "variants.delete":{"id":self.delete_variant_id}, "variants.batch_create":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"batch-new","source":"store"}]}]}, "variants.field_usage":{"category_id":self.category_id,"field_id":self.field_id}, "variants.model_usage":{"category_id":self.category_id}, "variants.activate":{"id":self.variant_id}, "variants.issues":{},
             "variants.batch_precheck":{"product_id":self.product_id,"drafts":[{"draft_id":"d1","attributes":{"顏色":"白"},"price":100,"active":1,"model_ids":[],"barcodes":[{"barcode":"precheck-new","source":"store"}]}]},
@@ -597,7 +594,7 @@ class ActionContractTests(FacadeTestCase):
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
                              self.facade.stocktake.ACTIONS, self.facade.returns.ACTIONS,
                              self.facade.printing.ACTIONS, self.facade.members.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 110)
+        self.assertEqual(len(ACTION_CONTRACTS), 109)
         self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS | AUTH_ACTIONS | DESKTOP_UPDATE_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
@@ -853,7 +850,7 @@ class ActionContractTests(FacadeTestCase):
                     for action,contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items()
                     for path,spec in contract["fields"].items()
                     if spec["default"] != "missing"}
-        self.assertEqual(len(declared), 106)
+        self.assertEqual(len(declared), 103)
         self.assertEqual(declared, EXPECTED_DEFAULTS)
         executed = {}
         for (action,path), expected in EXPECTED_DEFAULTS.items():
@@ -893,10 +890,10 @@ class ActionContractTests(FacadeTestCase):
         self.assertNotIn("skipped", executed.values())
         self.assertEqual(
             {strategy: list(executed.values()).count(strategy) for strategy in set(executed.values())},
-            {"materialized_by_validator":23, "exact_validator_omission":83},
+            {"materialized_by_validator":23, "exact_validator_omission":80},
         )
 
-        field_id = self.invoke("fields.create", {"name":"預設型態"})["field_id"]
+        field_id = self.invoke("fields.create", {"name":"預設型態","category_id":self.category_id})["field_id"]
         field_row = next(row for row in self.invoke("fields.list", {})
                          if row["field_id"] == field_id)
         self.assertEqual(field_row["field_type"], "select")

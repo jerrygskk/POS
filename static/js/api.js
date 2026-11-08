@@ -17,7 +17,7 @@ const API = {
   async invoke(action, payload) {
     const allowed = new Set([
       "auth.status", "auth.login", "auth.logout", "auth.touch", "auth.change_password",
-      "categories.list", "categories.create", "categories.update", "categories.delete", "categories.sort", "categories.fields", "categories.set_common_fields", "categories.set_field", "categories.delete_field",
+      "categories.list", "categories.create", "categories.update", "categories.delete", "categories.sort", "categories.fields", "categories.set_field", "categories.delete_field",
       "brands.list", "brands.create", "brands.update", "brands.delete", "brands.sort", "brands.set_categories",
       "phone_brands.list", "phone_brands.create", "phone_brands.update", "phone_brands.delete", "phone_brands.sort",
       "device_types.list", "device_types.create", "device_types.update", "device_types.delete", "device_types.sort",
@@ -81,7 +81,6 @@ const API = {
   listCategories: p => API.invoke("categories.list", p), createCategory: p => API.invoke("categories.create", p),
   updateCategory: (id, fields) => API.invoke("categories.update", {id, fields}), deleteCategory: id => API.invoke("categories.delete", {id}),
   sortCategories: ids => API.invoke("categories.sort", {ids}), categoryFields: id => API.invoke("categories.fields", {id}),
-  setCategoryCommonFields: (id, field_ids) => API.invoke("categories.set_common_fields", {id, field_ids}),
   setCategoryField: (category_id, field_id, fields) => API.invoke("categories.set_field", {category_id, field_id, fields}),
   deleteCategoryField: (category_id, field_id) => API.invoke("categories.delete_field", {category_id, field_id}),
   listBrands: p => API.invoke("brands.list", p), createBrand: p => API.invoke("brands.create", p), updateBrand: (id, fields) => API.invoke("brands.update", {id, fields}), deleteBrand: id => API.invoke("brands.delete", {id}), sortBrands: ids => API.invoke("brands.sort", {ids}), setBrandCategories: (id, category_ids) => API.invoke("brands.set_categories", {id, category_ids}),

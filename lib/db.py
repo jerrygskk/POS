@@ -53,59 +53,82 @@ class DatabaseTooNewError(RuntimeError):
     """資料庫版號比程式認得的新：舊程式寫入可能破壞新版資料，必須在寫入前停下。"""
 
 
+class DatabaseTooOldError(RuntimeError):
+    """資料庫版號低於 MIN_SUPPORTED_VERSION(含讀不到版號)：程式已不保留那麼舊的升級步驟。"""
+
+
+UNKNOWN_VERSION = 0  # 有資料表卻讀不到版號:視為低於最低支援版本
+
+
 def _get_schema_version(conn):
+    """讀版號;沒有 Setting 表或沒有版號列一律回 UNKNOWN_VERSION(不再當成初版補寫)。"""
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='Setting'").fetchone() is None:
+        return UNKNOWN_VERSION
     row = conn.execute(
         "SELECT value FROM Setting WHERE key='schema_version'").fetchone()
     if row is None:
-        return db_schema.BASE_VERSION  # 舊版 DB 無版號=初版
+        return UNKNOWN_VERSION
     return int(row["value"])
 
-def read_schema_version(db_path):
-    """唯讀讀出既有資料庫的版號;沒有 Setting 表(全新空檔)回 None。
 
-    語意同 _get_schema_version。網址用 as_uri() 產生:自己拼 file:{path} 時,
-    路徑含 #、?、% 會被當成網址符號而開到別的檔案。
+def read_schema_version(db_path):
+    """唯讀讀出既有資料庫的版號;檔案不存在或沒有任何資料表(全新空檔)回 None。
+
+    網址用 as_uri() 產生:自己拼 file:{path} 時,路徑含 #、?、% 會被當成網址符號而開到別的檔案。
     """
+    if not os.path.isfile(db_path):
+        return None
     conn = sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
-        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='Setting'").fetchone() is None:
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table'").fetchone() is None:
             return None
         return _get_schema_version(conn)
     finally:
         conn.close()
+
+
+def check_supported_version(version):
+    """版號超出程式能處理的範圍就拒絕;呼叫端須在任何寫入(含升級前備份)之前呼叫。"""
+    if version is None:
+        return
+    if version > db_schema.SCHEMA_VERSION:
+        raise DatabaseTooNewError(
+            f"資料庫版本 {version} 比程式支援的 {db_schema.SCHEMA_VERSION} 新")
+    if version < db_schema.MIN_SUPPORTED_VERSION:
+        shown = "未知" if version == UNKNOWN_VERSION else str(version)
+        raise DatabaseTooOldError(
+            f"資料庫版本 {shown} 過舊，程式最低支援 {db_schema.MIN_SUPPORTED_VERSION}，請改用新版標準資料庫")
+
 
 def _set_schema_version(conn, version):
     conn.execute(
         "INSERT OR REPLACE INTO Setting(key,value) VALUES('schema_version',?)",
         (str(version),))
 
-def _run_migrations(conn):
-    current = _get_schema_version(conn)
+
+def _run_migrations(conn, current):
     for target, fn in db_schema.MIGRATIONS:
         if current < target:
             fn(conn)
             current = target
-    _set_schema_version(conn, current)  # 補寫舊版 DB 缺的版號
+    _set_schema_version(conn, current)
+
 
 def init_db(db_path, require_existing=False):
     if require_existing and not os.path.isfile(db_path):
         raise FileNotFoundError(f"找不到正式資料庫：{db_path}")
+    # 先以唯讀連線判斷版號:過舊／過新在開寫入連線之前就拒絕,檔案一個位元組都不動
+    version = read_schema_version(db_path)
+    check_supported_version(version)
+    is_new = version is None
     conn = get_conn(db_path)
-    is_new = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='Setting'"
-    ).fetchone() is None
     try:
-        if not is_new:
-            version = _get_schema_version(conn)
-            if version > db_schema.SCHEMA_VERSION:
-                raise DatabaseTooNewError(
-                    f"資料庫版本 {version} 比程式支援的 {db_schema.SCHEMA_VERSION} 新")
         conn.executescript(SCHEMA)  # 建缺少的表(IF NOT EXISTS)
         if is_new:
             _set_schema_version(conn, db_schema.SCHEMA_VERSION)
-        else:
-            _run_migrations(conn)
+        elif version < db_schema.SCHEMA_VERSION:
+            _run_migrations(conn, version)
         db_seed.seed(conn, fresh=is_new)
         violations = conn.execute("PRAGMA foreign_key_check").fetchall()
         if violations:

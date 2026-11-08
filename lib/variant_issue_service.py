@@ -33,9 +33,8 @@ class VariantIssueService:
     def _feature_id(self, category_id):
         """本種類的特性詞條欄(每個種類各自一份同名欄)。"""
         for row in self.conn.execute(
-                "SELECT f.field_id, f.name FROM CategoryField cf "
-                "JOIN AttributeField f ON f.field_id=cf.field_id "
-                "WHERE cf.category_id=? AND cf.active=1 AND f.active=1 ORDER BY f.field_id",
+                "SELECT f.field_id, f.name FROM AttributeField f "
+                "WHERE f.category_id=? AND f.active=1 ORDER BY f.field_id",
                 (category_id,)):
             if normalize_key(row["name"]) == FEATURE_FIELD_KEY:
                 return row["field_id"]
@@ -44,9 +43,8 @@ class VariantIssueService:
     def _required_fields(self, category_id):
         """該種類啟用中的必填模板欄位:{field_id: name}。"""
         return {r["field_id"]: r["name"] for r in self.conn.execute(
-            "SELECT f.field_id, f.name FROM CategoryField cf "
-            "JOIN AttributeField f ON f.field_id=cf.field_id "
-            "WHERE cf.category_id=? AND cf.active=1 AND f.active=1 AND cf.required=1",
+            "SELECT f.field_id, f.name FROM AttributeField f "
+            "WHERE f.category_id=? AND f.active=1 AND f.required=1",
             (category_id,))}
 
     def _provided_fields(self, variant_id):

@@ -12,7 +12,7 @@ SELECT v.variant_id, IFNULL(c.name, '') AS category, IFNULL(b.name, '') AS brand
     SELECT IFNULL(o.value, va.text_value) AS val
     FROM VariantAttribute va
     LEFT JOIN AttributeOption o ON o.option_id = va.option_id
-    LEFT JOIN CategoryField cf ON cf.category_id = p.category_id AND cf.field_id = va.field_id
+    LEFT JOIN AttributeField cf ON cf.field_id = va.field_id
     WHERE va.variant_id = v.variant_id
     ORDER BY IFNULL(cf.sort, 9999), va.field_id, IFNULL(o.sort, 0))), '') AS spec,
   IFNULL((SELECT group_concat(IFNULL(NULLIF(m.alias, ''), m.name), ', ')

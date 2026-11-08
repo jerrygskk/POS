@@ -96,11 +96,11 @@ window.PosPages["page-settings"] = {
       if (!this.selectedCat) return [];
       const feat = this.tplFields.find(f => this.isFeature(f)) ||
         { field_id: FEATURE_ROW_ID, name: "特性詞條", field_type: "tags",
-          required: 0, cf_active: 0, default_option_id: null, sort: -1 };
+          required: 0, active: 0, default_option_id: null, sort: -1 };
       const on = this.selectedCat.model_mode === "required";
       return [
         { field_id: MODEL_ROW_ID, name: "適用機型", field_type: "model",
-          required: on, cf_active: on, default_option_id: null, sort: -1 },
+          required: on, active: on, default_option_id: null, sort: -1 },
         feat,
       ];
     },
@@ -111,7 +111,7 @@ window.PosPages["page-settings"] = {
     },
     // 收合時的摘要:固定列＋自訂規格中啟用的,照清單順序
     activeSpecRows() {
-      return [...this.fixedRows, ...this.customRows].filter(f => f.cf_active);
+      return [...this.fixedRows, ...this.customRows].filter(f => f.active);
     },
   },
   async mounted() {
@@ -277,7 +277,7 @@ window.PosPages["page-settings"] = {
       }
       await this.deleteTemplateField(f);
     },
-    // 紅色 ✕:把規格欄從此種類移除,並清掉此種類商品填過的值(欄位本身若沒人再用才一起刪)
+    // 紅色 ✕:把規格欄從此種類移除,連同商品填過的值、選項一起刪除(規格欄隸屬本種類)
     async deleteTemplateField(f) {
       const used = f.cat_usage_count || 0;
       const feature = this.isFeature(f);
@@ -315,7 +315,7 @@ window.PosPages["page-settings"] = {
         await this.loadCategoryDetail();
       });
     },
-    // 列上改名:欄位為全域共用,改名會同步套用到所有使用此欄的種類
+    // 列上改名:規格欄隸屬本種類,同種類不可同名(後端以正規化比對)
     async saveFieldName(f) {
       const name = (f.name || "").trim();
       const current = (this._fieldNameSnap || {})[f.field_id];
@@ -336,7 +336,7 @@ window.PosPages["page-settings"] = {
       await this.catGuard(() => API.setCategoryField(
         this.selCatId, f.field_id, { active: active ? 1 : 0 }));
     },
-    // 拖拉排序儲存:CategoryField.sort 自 1 起逐欄寫回(固定列不參與)
+    // 拖拉排序儲存:AttributeField.sort 自 1 起逐欄寫回(固定列不參與)
     async saveFieldSort(ids) {
       await this.catGuard(async () => {
         let sort = 1;

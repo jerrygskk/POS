@@ -114,31 +114,3 @@ class TestRepair(ReturnsBase):
                          {"kind": "repair", "date_from": "2000-01-01", "date_to": "2000-01-02"})], [self.rid])
 
 
-class RepairMigrationTests(ConnTestCase):
-    def test_v23_upgrade_keeps_returns_and_movements(self):
-        self.conn.close()
-        Path(self.db).unlink()
-        conn = sqlite3.connect(self.db)
-        schema = db_schema.SCHEMA.replace(",'repair')", ")").replace(",'repairing'", "")
-        start = schema.index("  closed_qty INTEGER")
-        schema = schema[:start] + schema[schema.index("  UNIQUE(return_id, variant_id)"):]
-        conn.executescript(schema)
-        self.assertNotIn("repair", conn.execute("SELECT sql FROM sqlite_master WHERE name='ReturnItem'").fetchone()[0])
-        conn.execute("INSERT INTO Setting(key,value) VALUES('schema_version',?)", (str(db_schema.SCHEMA_VERSION - 1),))
-        conn.execute("INSERT INTO Category(category_id,name) VALUES(1,'c')")
-        conn.execute("INSERT INTO Product(product_id,name,category_id) VALUES(1,'p',1)")
-        conn.execute("INSERT INTO Variant(variant_id,product_id) VALUES(1,1)")
-        conn.execute("INSERT INTO StockMovement(variant_id,qty,kind) VALUES(1,5,'purchase')")
-        conn.execute("INSERT INTO ReturnSession(return_id,status) VALUES(7,'closed')")
-        conn.execute("INSERT INTO ReturnItem(return_id,variant_id,qty,disposition) VALUES(7,1,2,'discard')")
-        conn.commit(); conn.close()
-
-        init_db(self.db)
-        self.conn = get_conn(self.db)
-        self.assertEqual(self.conn.execute("SELECT value FROM Setting WHERE key='schema_version'").fetchone()[0],
-                         str(db_schema.SCHEMA_VERSION))
-        self.assertEqual([tuple(r) for r in self.conn.execute("SELECT qty,disposition,closed_qty FROM ReturnItem")], [(2, "discard", 0)])
-        self.assertEqual(self.conn.execute("SELECT SUM(qty) FROM StockMovement").fetchone()[0], 5)
-        self.conn.execute("INSERT INTO StockMovement(variant_id,qty,kind) VALUES(1,1,'repair')")
-        self.conn.execute("UPDATE ReturnSession SET status='repairing' WHERE return_id=7")
-        self.assertEqual(list(self.conn.execute("PRAGMA foreign_key_check")), [])

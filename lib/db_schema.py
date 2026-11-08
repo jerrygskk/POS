@@ -60,13 +60,17 @@ CREATE TABLE IF NOT EXISTS VariantAttribute(    -- 取代 Variant.attributes JSO
   field_id INTEGER NOT NULL REFERENCES AttributeField(field_id),
   option_id INTEGER REFERENCES AttributeOption(option_id),  -- select/multi/tags 欄用
   text_value TEXT,                                          -- text 欄用
-  -- multi/tags 允許同 (variant_id, field_id) 多筆;select/text 由應用層維持單筆。
+  -- multi/tags 允許同 (variant_id, field_id) 多筆;select 單值、欄型別與值型別對應、
+  -- 規格欄種類＝商品種類,由 product_data.check_variant_attributes 檢查。
   -- 唯一索引擋同欄重覆選同一選項(兼作 multi/tags 去重)。
   -- option_id 與 text_value 恰一非 NULL(XOR)
-  CHECK((option_id IS NULL) <> (text_value IS NULL))
+  CHECK((option_id IS NULL) <> (text_value IS NULL)),
+  FOREIGN KEY(option_id, field_id) REFERENCES AttributeOption(option_id, field_id)  -- 選項必屬於該欄
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_va_unique
   ON VariantAttribute(variant_id, field_id, option_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_va_text_unique
+  ON VariantAttribute(variant_id, field_id) WHERE text_value IS NOT NULL;
 CREATE TABLE IF NOT EXISTS OptionModel(         -- 選項限定型號(特別色)
   option_id INTEGER NOT NULL REFERENCES AttributeOption(option_id),
   model_id INTEGER NOT NULL REFERENCES PhoneModel(model_id),
@@ -81,35 +85,34 @@ CREATE TABLE IF NOT EXISTS Barcode(               -- 原廠碼可多個子產品
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_barcode_store ON Barcode(barcode) WHERE source='store';
 CREATE INDEX IF NOT EXISTS idx_barcode_variant ON Barcode(variant_id);
-CREATE TABLE IF NOT EXISTS AttributeField(       -- 全域欄位主檔;種類關係屬性移至 CategoryField
+CREATE TABLE IF NOT EXISTS AttributeField(       -- 規格欄:每欄隸屬一個種類,不跨種類共用
   field_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category_id INTEGER NOT NULL REFERENCES Category(category_id),
   name TEXT NOT NULL,
   field_type TEXT NOT NULL DEFAULT 'select'
     CHECK(field_type IN ('select','text','multi','tags')),
-  active INTEGER NOT NULL DEFAULT 1
-  -- 正規化同名去重由應用層處理(SQLite UNIQUE 不套用正規化)
+  sort INTEGER NOT NULL DEFAULT 0,
+  required INTEGER NOT NULL DEFAULT 0 CHECK(required IN (0,1)),
+  default_option_id INTEGER,                       -- 建檔預設帶入,只限 select
+  active INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(category_id, name),                       -- 正規化同名(全半形、大小寫)由應用層再擋
+  CHECK(default_option_id IS NULL OR field_type='select'),
+  FOREIGN KEY(default_option_id, field_id) REFERENCES AttributeOption(option_id, field_id)
 );
+CREATE INDEX IF NOT EXISTS idx_field_category ON AttributeField(category_id);
 CREATE TABLE IF NOT EXISTS AttributeOption(
   option_id INTEGER PRIMARY KEY AUTOINCREMENT,
   field_id INTEGER NOT NULL REFERENCES AttributeField(field_id),
   value TEXT NOT NULL,
   sort INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
-  UNIQUE(field_id, value)
+  UNIQUE(field_id, value),
+  UNIQUE(option_id, field_id)                      -- 供規格值與預設選項的複合外鍵
 );
 CREATE TABLE IF NOT EXISTS VariantModel(
   variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
   model_id INTEGER NOT NULL REFERENCES PhoneModel(model_id),
   PRIMARY KEY(variant_id, model_id)
-);
-CREATE TABLE IF NOT EXISTS CategoryField(       -- 種類模板:承載排序、必要性、預設值與模板層級啟用
-  category_id INTEGER NOT NULL REFERENCES Category(category_id),
-  field_id INTEGER NOT NULL REFERENCES AttributeField(field_id),
-  sort INTEGER NOT NULL DEFAULT 0,
-  required INTEGER NOT NULL DEFAULT 0,
-  default_option_id INTEGER REFERENCES AttributeOption(option_id),  -- 建檔預設帶入
-  active INTEGER NOT NULL DEFAULT 1,               -- 模板層級啟用,不動 AttributeField.active
-  PRIMARY KEY(category_id, field_id)
 );
 CREATE TABLE IF NOT EXISTS StockMovement(
   move_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -220,458 +223,15 @@ CREATE TABLE IF NOT EXISTS MemberPhone(
 CREATE INDEX IF NOT EXISTS idx_memberphone_phone ON MemberPhone(phone);
 """
 
-# 初版 schema 版號:讀不到 schema_version 的既有 DB 一律視為此版
-BASE_VERSION = 1
-
-# 遷移清單:[(目標版號, callable(conn)), ...],第 N 筆將 DB 由 (N) 升至 (N+1)。
-# 目標版號須連續遞增(BASE_VERSION+1, +2, ...)。callable 只用 conn.execute,
+# 版號規則:新結構第一版為 BASE_VERSION;MIGRATIONS 為之後的升級步驟,
+# 第 N 筆將 DB 由 BASE_VERSION+N-1 升至 BASE_VERSION+N。callable 只用 conn.execute,
 # 勿自行 commit/executescript(runner 已包在同一交易裡)。
+# 舊版(v24 以前)的升級步驟已移除:低於 MIN_SUPPORTED_VERSION 的資料庫一律拒絕開啟,
+# 主檔改由 tools/make_standard_db.py 唯讀轉出新母版。
+BASE_VERSION = 25
+MIGRATIONS = []
 
-import json
-
-from lib.legacy_migrations import (
-    _mig_attributefield_global,
-    _mig_backfill_brand_category,
-    _mig_category_model_mode,
-    _mig_categoryfield_template,
-    _mig_drop_brand_active,
-    _mig_drop_product_default_price,
-    _mig_field_multi,
-    _mig_model_alias,
-    _mig_model_series,
-    _mig_phone_brand,
-    _mig_variant_attributes,
-    _mig_variant_issue,
-)
-
-def _mig_split_style_field(conn):
-    """把全域共用的「款式」欄依種類拆成各自一份,選項不互通。
-
-    原本「顏色」「款式」同為全域欄(新種類預設模板),但款式的詞彙各種類完全不同
-    (手機殼「磁吸支架(附掛環扣)」vs AppleWatch玻璃「3D全玻璃」),共用會讓建檔候選
-    混進別種類的款式。特性詞條先前已因同樣理由改為各種類一份,款式當時漏改。
-
-    搬移規則:每個掛過此欄的種類各建一份同名 select 欄,只複製「該種類真的用過」
-    的選項值(兩個種類都用過的值兩邊各一份),VariantAttribute 改指新選項;
-    沒有任何種類用過的選項(款式A~C 種子)丟掉,原全域欄清空後刪除。
-    """
-    rows = conn.execute(
-        "SELECT f.field_id FROM AttributeField f WHERE f.name='款式' "
-        "AND f.field_type='select' AND (SELECT COUNT(*) FROM CategoryField cf "
-        "WHERE cf.field_id=f.field_id) > 1").fetchall()
-    for row in rows:
-        old_fid = row[0]
-        cats = [r[0] for r in conn.execute(
-            "SELECT category_id FROM CategoryField WHERE field_id=? ORDER BY category_id",
-            (old_fid,))]
-        for cid in cats:
-            new_fid = conn.execute(
-                "INSERT INTO AttributeField(name,field_type) VALUES('款式','select')"
-            ).lastrowid
-            used = conn.execute(
-                "SELECT DISTINCT o.option_id, o.value, o.sort, o.active "
-                "FROM AttributeOption o JOIN VariantAttribute va ON va.option_id=o.option_id "
-                "JOIN Variant v ON v.variant_id=va.variant_id "
-                "JOIN Product p ON p.product_id=v.product_id "
-                "WHERE o.field_id=? AND p.category_id=? ORDER BY o.sort, o.option_id",
-                (old_fid, cid)).fetchall()
-            copies = {}
-            for opt_id, value, sort, active in used:
-                copy_id = conn.execute(
-                    "INSERT INTO AttributeOption(field_id,value,sort,active) "
-                    "VALUES(?,?,?,?)", (new_fid, value, sort, active)).lastrowid
-                conn.execute(
-                    "UPDATE VariantAttribute SET field_id=?, option_id=? "
-                    "WHERE option_id=? AND variant_id IN ("
-                    "  SELECT v.variant_id FROM Variant v JOIN Product p "
-                    "  ON p.product_id=v.product_id WHERE p.category_id=?)",
-                    (new_fid, copy_id, opt_id, cid))
-                # 限定型號(特別色)跟著複製,否則新選項會從「限定」變成「通用」
-                conn.execute(
-                    "INSERT INTO OptionModel(option_id,model_id) "
-                    "SELECT ?, model_id FROM OptionModel WHERE option_id=?",
-                    (copy_id, opt_id))
-                copies[opt_id] = copy_id
-            row_sort, required, active, default_id = conn.execute(
-                "SELECT sort, required, active, default_option_id FROM CategoryField "
-                "WHERE category_id=? AND field_id=?", (cid, old_fid)).fetchone()
-            conn.execute(
-                "INSERT INTO CategoryField(category_id,field_id,sort,required,active,"
-                "default_option_id) VALUES(?,?,?,?,?,?)",
-                (cid, new_fid, row_sort, required, active, copies.get(default_id)))
-        conn.execute("DELETE FROM CategoryField WHERE field_id=?", (old_fid,))
-        conn.execute(
-            "DELETE FROM OptionModel WHERE option_id IN "
-            "(SELECT option_id FROM AttributeOption WHERE field_id=?)", (old_fid,))
-        conn.execute("DELETE FROM AttributeOption WHERE field_id=?", (old_fid,))
-        conn.execute("DELETE FROM AttributeField WHERE field_id=?", (old_fid,))
-    # 沒掛任何種類、也沒人填過值的全域款式欄(全新資料庫的種子)一併清掉:
-    # 款式改為建立種類時各自新建,不再留一份共用主檔。
-    conn.execute(
-        "DELETE FROM AttributeOption WHERE field_id IN ("
-        "  SELECT f.field_id FROM AttributeField f WHERE f.name='款式' "
-        "  AND NOT EXISTS(SELECT 1 FROM CategoryField cf WHERE cf.field_id=f.field_id) "
-        "  AND NOT EXISTS(SELECT 1 FROM VariantAttribute va WHERE va.field_id=f.field_id))")
-    conn.execute(
-        "DELETE FROM AttributeField WHERE name='款式' "
-        "AND NOT EXISTS(SELECT 1 FROM CategoryField cf WHERE cf.field_id=AttributeField.field_id) "
-        "AND NOT EXISTS(SELECT 1 FROM VariantAttribute va WHERE va.field_id=AttributeField.field_id) "
-        "AND NOT EXISTS(SELECT 1 FROM AttributeOption o WHERE o.field_id=AttributeField.field_id)")
-
-
-def _mig_split_shared_fields(conn):
-    """把所有跨種類共用的規格欄依種類拆成各自一份(款式之外的其餘欄)。
-
-    v14 先拆了款式;實務上「顏色」也一樣會混:手機殼的天峰藍不該出現在傳輸線的
-    候選裡。與其教店員分辨哪些欄共用,不如一律不共用——設定頁就不必解釋這件事。
-    搬移規則同 v14:每個種類各建一份同名同型別的欄,只複製該種類用過的選項
-    (含限定型號與模板預設值),text 欄直接改指新欄;沒人用過的選項丟掉,原欄刪除。
-    """
-    shared = conn.execute(
-        "SELECT f.field_id, f.name, f.field_type, f.active FROM AttributeField f "
-        "WHERE (SELECT COUNT(*) FROM CategoryField cf WHERE cf.field_id=f.field_id) > 1"
-    ).fetchall()
-    for old_fid, name, field_type, active in shared:
-        _split_field_by_category(conn, old_fid, name, field_type, active)
-    # 沒掛任何種類、也沒人填過值的全域欄(種子的商品描述之類)一併清掉:
-    # 欄位一律由種類自己建,不再留共用主檔。
-    conn.execute(
-        "DELETE FROM AttributeOption WHERE field_id IN ("
-        "  SELECT f.field_id FROM AttributeField f "
-        "  WHERE NOT EXISTS(SELECT 1 FROM CategoryField cf WHERE cf.field_id=f.field_id) "
-        "  AND NOT EXISTS(SELECT 1 FROM VariantAttribute va WHERE va.field_id=f.field_id))")
-    conn.execute(
-        "DELETE FROM AttributeField WHERE "
-        "NOT EXISTS(SELECT 1 FROM CategoryField cf WHERE cf.field_id=AttributeField.field_id) "
-        "AND NOT EXISTS(SELECT 1 FROM VariantAttribute va "
-        "               WHERE va.field_id=AttributeField.field_id) "
-        "AND NOT EXISTS(SELECT 1 FROM AttributeOption o "
-        "               WHERE o.field_id=AttributeField.field_id)")
-
-
-def _split_field_by_category(conn, old_fid, name, field_type, active=1):
-    """把一個跨種類共用的欄拆成每個種類各一份,並刪掉原欄。"""
-    cats = [r[0] for r in conn.execute(
-        "SELECT category_id FROM CategoryField WHERE field_id=? ORDER BY category_id",
-        (old_fid,))]
-    for cid in cats:
-        new_fid = conn.execute(
-            "INSERT INTO AttributeField(name,field_type,active) VALUES(?,?,?)",
-            (name, field_type, active)).lastrowid
-        copies = {}
-        used = conn.execute(
-            "SELECT DISTINCT o.option_id, o.value, o.sort, o.active "
-            "FROM AttributeOption o JOIN VariantAttribute va ON va.option_id=o.option_id "
-            "JOIN Variant v ON v.variant_id=va.variant_id "
-            "JOIN Product p ON p.product_id=v.product_id "
-            "WHERE o.field_id=? AND p.category_id=? ORDER BY o.sort, o.option_id",
-            (old_fid, cid)).fetchall()
-        for opt_id, value, sort, opt_active in used:
-            copy_id = conn.execute(
-                "INSERT INTO AttributeOption(field_id,value,sort,active) VALUES(?,?,?,?)",
-                (new_fid, value, sort, opt_active)).lastrowid
-            conn.execute(
-                "UPDATE VariantAttribute SET field_id=?, option_id=? "
-                "WHERE option_id=? AND variant_id IN ("
-                "  SELECT v.variant_id FROM Variant v JOIN Product p "
-                "  ON p.product_id=v.product_id WHERE p.category_id=?)",
-                (new_fid, copy_id, opt_id, cid))
-            # 限定型號(特別色)跟著複製,否則新選項會從「限定」變成「通用」
-            conn.execute(
-                "INSERT INTO OptionModel(option_id,model_id) "
-                "SELECT ?, model_id FROM OptionModel WHERE option_id=?",
-                (copy_id, opt_id))
-            copies[opt_id] = copy_id
-        # text 欄沒有選項,值直接改指新欄
-        conn.execute(
-            "UPDATE VariantAttribute SET field_id=? WHERE field_id=? AND option_id IS NULL "
-            "AND variant_id IN (SELECT v.variant_id FROM Variant v JOIN Product p "
-            "ON p.product_id=v.product_id WHERE p.category_id=?)",
-            (new_fid, old_fid, cid))
-        row_sort, required, cf_active, default_id = conn.execute(
-            "SELECT sort, required, active, default_option_id FROM CategoryField "
-            "WHERE category_id=? AND field_id=?", (cid, old_fid)).fetchone()
-        conn.execute(
-            "INSERT INTO CategoryField(category_id,field_id,sort,required,active,"
-            "default_option_id) VALUES(?,?,?,?,?,?)",
-            (cid, new_fid, row_sort, required, cf_active, copies.get(default_id)))
-    conn.execute("DELETE FROM CategoryField WHERE field_id=?", (old_fid,))
-    conn.execute(
-        "DELETE FROM OptionModel WHERE option_id IN "
-        "(SELECT option_id FROM AttributeOption WHERE field_id=?)", (old_fid,))
-    conn.execute("DELETE FROM AttributeOption WHERE field_id=?", (old_fid,))
-    conn.execute("DELETE FROM AttributeField WHERE field_id=?", (old_fid,))
-
-
-def _mig_employee(conn):
-    """結帳、進貨、盤點記錄操作員工代號(1~6)。
-
-    盤點單原本的自由文字「盤點人」改為員工代號:正式啟用前沒有真實盤點資料,直接移除舊欄。
-    """
-    # 缺的表會先以最新 DDL 建好(已含 employee),故逐表檢查欄位再補
-    for table in ("Sale", "StockMovement", "StocktakeSession"):
-        cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
-        if "employee" not in cols:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN "
-                         "employee INTEGER CHECK(employee BETWEEN 1 AND 6)")
-        if table == "StocktakeSession" and "operator" in cols:
-            conn.execute("ALTER TABLE StocktakeSession DROP COLUMN operator")
-
-
-def _mig_shared_factory_barcode(conn):
-    """原廠碼可共用；轉換舊異常但保留原停用狀態。"""
-    from lib.product_rules import has_store_barcode_prefix, ensure_store_codes_for_shared
-    primary = [r[1] for r in sorted(conn.execute("PRAGMA table_info(Barcode)"),
-                                    key=lambda r: r[5]) if r[5] > 0]
-    if primary == ["barcode"]:
-        conn.execute("CREATE TABLE Barcode_v17("
-                     "barcode TEXT NOT NULL,"
-                     "variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),"
-                     "source TEXT NOT NULL CHECK(source IN ('factory','store')),"
-                     "created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),"
-                     "PRIMARY KEY(barcode, variant_id))")
-        conn.execute("INSERT INTO Barcode_v17(barcode,variant_id,source,created_at) "
-                     "SELECT barcode,variant_id,source,created_at FROM Barcode")
-        conn.execute("DROP TABLE Barcode")
-        conn.execute("ALTER TABLE Barcode_v17 RENAME TO Barcode")
-    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_barcode_store "
-                 "ON Barcode(barcode) WHERE source='store'")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_barcode_variant ON Barcode(variant_id)")
-    for vid, code in conn.execute("SELECT variant_id, source_value FROM VariantIssue "
-                                  "WHERE issue_type='duplicate_barcode'").fetchall():
-        if not code or has_store_barcode_prefix(code):
-            continue
-        if conn.execute("SELECT 1 FROM Barcode WHERE barcode=? AND source='store'",
-                        (code,)).fetchone():
-            continue
-        conn.execute("INSERT OR IGNORE INTO Barcode(barcode,variant_id,source) "
-                     "VALUES(?,?,'factory')", (code, vid))
-    conn.execute("DELETE FROM VariantIssue WHERE issue_type='duplicate_barcode'")
-    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' "
-                       "AND name='VariantIssue'").fetchone()[0]
-    if "'duplicate_barcode'" in sql:
-        conn.execute("CREATE TABLE VariantIssue_v17("
-                     "issue_id INTEGER PRIMARY KEY,"
-                     "variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),"
-                     "issue_type TEXT NOT NULL CHECK(issue_type IN ('missing_required','duplicate_signature')),"
-                     "field_id INTEGER REFERENCES AttributeField(field_id),"
-                     "source_value TEXT,"
-                     "related_variant_id INTEGER REFERENCES Variant(variant_id))")
-        conn.execute("INSERT INTO VariantIssue_v17 "
-                     "SELECT issue_id,variant_id,issue_type,field_id,source_value,related_variant_id "
-                     "FROM VariantIssue")
-        conn.execute("DROP TABLE VariantIssue")
-        conn.execute("ALTER TABLE VariantIssue_v17 RENAME TO VariantIssue")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_variant_issue_variant ON VariantIssue(variant_id)")
-    for row in conn.execute("SELECT barcode FROM Barcode WHERE source='factory' "
-                            "GROUP BY barcode HAVING COUNT(DISTINCT variant_id)>1").fetchall():
-        ensure_store_codes_for_shared(conn, row[0])
-
-
-def _mig_stocktake_approval(conn):
-    """外鍵全程開啟，原子重建盤點父子表並保留原流水號。"""
-    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' "
-                       "AND name='StocktakeSession'").fetchone()[0]
-    if "'pending'" in sql:
-        return
-    if not conn.in_transaction:
-        conn.execute("BEGIN")
-    sequences = dict(conn.execute("SELECT name,seq FROM sqlite_sequence "
-                                  "WHERE name IN ('StocktakeSession','StocktakeItem')"))
-    conn.execute("CREATE TABLE StocktakeItem_mig AS SELECT * FROM StocktakeItem")
-    conn.execute("DROP TABLE StocktakeItem")
-    # 從現行 SCHEMA 取得完整約束，避免 migration 另維護一份新表 DDL。
-    session_ddl = SCHEMA.split("CREATE TABLE IF NOT EXISTS StocktakeSession(", 1)[1].split(";", 1)[0]
-    conn.execute("CREATE TABLE StocktakeSession_mig(" + session_ddl)
-    conn.execute("INSERT INTO StocktakeSession_mig(session_id,started_at,ended_at,employee,status,note) "
-                 "SELECT session_id,started_at,ended_at,employee,status,note FROM StocktakeSession")
-    conn.execute("DROP TABLE StocktakeSession")
-    conn.execute("ALTER TABLE StocktakeSession_mig RENAME TO StocktakeSession")
-    item_ddl = SCHEMA.split("CREATE TABLE IF NOT EXISTS StocktakeItem(", 1)[1].split(";", 1)[0]
-    conn.execute("CREATE TABLE StocktakeItem(" + item_ddl)
-    conn.execute("INSERT INTO StocktakeItem(id,session_id,variant_id,system_qty,counted_qty) "
-                 "SELECT id,session_id,variant_id,system_qty,counted_qty FROM StocktakeItem_mig")
-    conn.execute("DROP TABLE StocktakeItem_mig")
-    for name, previous in sequences.items():
-        conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name=?", (previous, name))
-        conn.execute("INSERT INTO sqlite_sequence(name,seq) SELECT ?,? "
-                     "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name=?)", (name, previous, name))
-    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stocktake_one_active "
-                 "ON StocktakeSession((status IN ('open','pending'))) WHERE status IN ('open','pending')")
-
-
-def _mig_device_type(conn):
-    """型號加裝置類型、移除系列;既有型號一律歸「手機」。
-
-    外鍵全程開啟(交易內關不掉,見 PITFALLS SQL-2):先把參照型號的
-    VariantModel／OptionModel 暫存後拆掉,重建 PhoneModel,再依現行 SCHEMA
-    重建兩張子表並搬回。任何一步失敗由 init_db 整串回復。
-    """
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(PhoneModel)")}
-    if "device_type_id" in cols:
-        return
-    if not conn.in_transaction:
-        conn.execute("BEGIN")
-    # executescript(SCHEMA) 在 migration 前已建出空表,這裡只補缺
-    conn.execute("CREATE TABLE IF NOT EXISTS DeviceType(" + _schema_ddl("DeviceType"))
-    conn.execute("INSERT INTO DeviceType(name,sort) SELECT '手機',1 "
-                 "WHERE NOT EXISTS (SELECT 1 FROM DeviceType WHERE name='手機')")
-    phone_id = conn.execute("SELECT device_type_id FROM DeviceType WHERE name='手機'").fetchone()[0]
-    previous = conn.execute("SELECT seq FROM sqlite_sequence WHERE name='PhoneModel'").fetchone()
-    for child in ("VariantModel", "OptionModel"):
-        conn.execute(f"CREATE TABLE {child}_mig AS SELECT * FROM {child}")
-        conn.execute(f"DROP TABLE {child}")
-    conn.execute("CREATE TABLE PhoneModel_mig(" + _schema_ddl("PhoneModel"))
-    conn.execute("INSERT INTO PhoneModel_mig(model_id,phone_brand_id,device_type_id,name,alias,sort,active) "
-                 "SELECT model_id,phone_brand_id,?,name,alias,sort,active FROM PhoneModel", (phone_id,))
-    conn.execute("DROP TABLE PhoneModel")
-    conn.execute("ALTER TABLE PhoneModel_mig RENAME TO PhoneModel")
-    conn.execute("CREATE TABLE VariantModel(" + _schema_ddl("VariantModel"))
-    conn.execute("INSERT INTO VariantModel(variant_id,model_id) SELECT variant_id,model_id FROM VariantModel_mig")
-    conn.execute("CREATE TABLE OptionModel(" + _schema_ddl("OptionModel"))
-    conn.execute("INSERT INTO OptionModel(option_id,model_id) SELECT option_id,model_id FROM OptionModel_mig")
-    conn.execute("DROP TABLE VariantModel_mig")
-    conn.execute("DROP TABLE OptionModel_mig")
-    if previous is not None:
-        conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='PhoneModel'", (previous[0],))
-        conn.execute("INSERT INTO sqlite_sequence(name,seq) SELECT 'PhoneModel',? "
-                     "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name='PhoneModel')", (previous[0],))
-
-
-def _mig_returns(conn):
-    """退貨:庫存流水加 return 種類;盤點加作廢狀態與品項備註。
-
-    退貨兩張新表由 executescript(SCHEMA) 建好;這裡只重建 CHECK 改變的三張表。
-    盤點子表先暫存拆掉再重建父表(外鍵全程開啟,見 _mig_stocktake_approval)。
-    """
-    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' "
-                       "AND name='StockMovement'").fetchone()[0]
-    if "'return'" in sql:
-        return
-    if not conn.in_transaction:
-        conn.execute("BEGIN")
-    sequences = dict(conn.execute("SELECT name,seq FROM sqlite_sequence WHERE name IN "
-                                  "('StockMovement','StocktakeSession','StocktakeItem')"))
-    conn.execute("CREATE TABLE StockMovement_mig(" + _schema_ddl("StockMovement"))
-    conn.execute("INSERT INTO StockMovement_mig(move_id,variant_id,qty,kind,ref_id,note,employee,ts) "
-                 "SELECT move_id,variant_id,qty,kind,ref_id,note,employee,ts FROM StockMovement")
-    conn.execute("DROP TABLE StockMovement")
-    conn.execute("ALTER TABLE StockMovement_mig RENAME TO StockMovement")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_move_variant ON StockMovement(variant_id)")
-    conn.execute("CREATE TABLE StocktakeItem_mig AS SELECT * FROM StocktakeItem")
-    conn.execute("DROP TABLE StocktakeItem")
-    conn.execute("CREATE TABLE StocktakeSession_mig(" + _schema_ddl("StocktakeSession"))
-    conn.execute("INSERT INTO StocktakeSession_mig(session_id,started_at,ended_at,submitted_at,approved_at,employee,status,note) "
-                 "SELECT session_id,started_at,ended_at,submitted_at,approved_at,employee,status,note FROM StocktakeSession")
-    conn.execute("DROP TABLE StocktakeSession")
-    conn.execute("ALTER TABLE StocktakeSession_mig RENAME TO StocktakeSession")
-    conn.execute("CREATE TABLE StocktakeItem(" + _schema_ddl("StocktakeItem"))
-    conn.execute("INSERT INTO StocktakeItem(id,session_id,variant_id,system_qty,counted_qty,needs_recount) "
-                 "SELECT id,session_id,variant_id,system_qty,counted_qty,needs_recount FROM StocktakeItem_mig")
-    conn.execute("DROP TABLE StocktakeItem_mig")
-    for name, previous in sequences.items():
-        conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name=?", (previous, name))
-        conn.execute("INSERT INTO sqlite_sequence(name,seq) SELECT ?,? "
-                     "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name=?)", (name, previous, name))
-    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stocktake_one_active "
-                 "ON StocktakeSession((status IN ('open','pending'))) WHERE status IN ('open','pending')")
-
-
-def _mig_member_discount(conn):
-    """銷售單加會員折扣;舊單為 0。"""
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(Sale)")}
-    if "member_discount" not in cols:
-        conn.execute("ALTER TABLE Sale ADD COLUMN member_discount INTEGER NOT NULL DEFAULT 0")
-
-
-def _mig_member(conn):
-    """會員名單與銷售單會員;舊單 member_id 為 NULL。"""
-    conn.execute("CREATE TABLE IF NOT EXISTS Member(" + _schema_ddl("Member"))
-    conn.execute("CREATE TABLE IF NOT EXISTS MemberPhone(" + _schema_ddl("MemberPhone"))
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_memberphone_phone ON MemberPhone(phone)")
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(Sale)")}
-    if "member_id" not in cols:
-        conn.execute("ALTER TABLE Sale ADD COLUMN member_id INTEGER REFERENCES Member(member_id)")
-
-
-def _mig_payment_transfer(conn):
-    """付款方式「刷卡」改為「轉帳」:設定清單與舊銷售單一併改名。"""
-    row = conn.execute("SELECT value FROM Setting WHERE key='payments'").fetchone()
-    if row:
-        names = json.loads(row[0])
-        names = [("轉帳" if n == "刷卡" else n) for n in names]
-        names = list(dict.fromkeys(names))
-        conn.execute("UPDATE Setting SET value=? WHERE key='payments'", (json.dumps(names, ensure_ascii=False),))
-    conn.execute("UPDATE Sale SET payment='轉帳' WHERE payment='刷卡'")
-
-
-def _mig_repair(conn):
-    """返修:退貨品項加「返修不入庫」與結案欄,退貨單加返修中狀態,庫存流水加返新進貨。
-
-    三張表的 CHECK 都變了,只能重建;ReturnItem 參照 ReturnSession,先暫存子表再重建父表。
-    ⚠️ 兩組表各自判斷:更舊的庫經 _mig_returns 時 StockMovement 已用現行 DDL 重建(含 repair),
-    退貨兩張表則是 executescript(SCHEMA) 新建,同樣可能已是新格式。
-    """
-    table_sql = lambda name: conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()[0]
-    sequences = dict(conn.execute("SELECT name,seq FROM sqlite_sequence WHERE name IN "
-                                  "('StockMovement','ReturnSession','ReturnItem')"))
-    if "'repair'" not in table_sql("StockMovement"):
-        conn.execute("CREATE TABLE StockMovement_mig(" + _schema_ddl("StockMovement"))
-        conn.execute("INSERT INTO StockMovement_mig(move_id,variant_id,qty,kind,ref_id,note,employee,ts) "
-                     "SELECT move_id,variant_id,qty,kind,ref_id,note,employee,ts FROM StockMovement")
-        conn.execute("DROP TABLE StockMovement")
-        conn.execute("ALTER TABLE StockMovement_mig RENAME TO StockMovement")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_move_variant ON StockMovement(variant_id)")
-    if "'repair'" in table_sql("ReturnItem"):
-        return
-    conn.execute("CREATE TABLE ReturnItem_mig AS SELECT * FROM ReturnItem")
-    conn.execute("DROP TABLE ReturnItem")
-    conn.execute("CREATE TABLE ReturnSession_mig(" + _schema_ddl("ReturnSession"))
-    conn.execute("INSERT INTO ReturnSession_mig(return_id,started_at,submitted_at,approved_at,cancelled_at,employee,"
-                 "cancelled_by,status,refund_amount) SELECT return_id,started_at,submitted_at,approved_at,cancelled_at,"
-                 "employee,cancelled_by,status,refund_amount FROM ReturnSession")
-    conn.execute("DROP TABLE ReturnSession")
-    conn.execute("ALTER TABLE ReturnSession_mig RENAME TO ReturnSession")
-    conn.execute("CREATE TABLE ReturnItem(" + _schema_ddl("ReturnItem"))
-    conn.execute("INSERT INTO ReturnItem(id,return_id,variant_id,qty,sale_id,reason,disposition) "
-                 "SELECT id,return_id,variant_id,qty,sale_id,reason,disposition FROM ReturnItem_mig")
-    conn.execute("DROP TABLE ReturnItem_mig")
-    for name, previous in sequences.items():
-        conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name=?", (previous, name))
-        conn.execute("INSERT INTO sqlite_sequence(name,seq) SELECT ?,? "
-                     "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name=?)", (name, previous, name))
-
-
-def _schema_ddl(table):
-    """取現行 SCHEMA 裡該表括號內的定義(含結尾右括號),避免 migration 另抄一份。"""
-    return SCHEMA.split(f"CREATE TABLE IF NOT EXISTS {table}(", 1)[1].split(";", 1)[0]
-
-
-MIGRATIONS = [
-    (BASE_VERSION + 1, _mig_phone_brand),
-    (BASE_VERSION + 2, _mig_variant_attributes),
-    (BASE_VERSION + 3, _mig_field_multi),
-    (BASE_VERSION + 4, _mig_model_alias),
-    (BASE_VERSION + 5, _mig_model_series),
-    (BASE_VERSION + 6, _mig_category_model_mode),
-    (BASE_VERSION + 7, _mig_categoryfield_template),
-    (BASE_VERSION + 8, _mig_attributefield_global),
-    (BASE_VERSION + 9, _mig_drop_product_default_price),
-    (BASE_VERSION + 10, _mig_drop_brand_active),
-    (BASE_VERSION + 11, _mig_backfill_brand_category),
-    (BASE_VERSION + 12, _mig_variant_issue),
-    (BASE_VERSION + 13, _mig_split_style_field),
-    (BASE_VERSION + 14, _mig_split_shared_fields),
-    (BASE_VERSION + 15, _mig_employee),
-    (BASE_VERSION + 16, _mig_shared_factory_barcode),
-    (BASE_VERSION + 17, _mig_stocktake_approval),
-    (BASE_VERSION + 18, _mig_device_type),
-    (BASE_VERSION + 19, _mig_returns),
-    (BASE_VERSION + 20, _mig_member_discount),
-    (BASE_VERSION + 21, _mig_member),
-    (BASE_VERSION + 22, _mig_payment_transfer),
-    (BASE_VERSION + 23, _mig_repair),
-]
-
-# 最新版號 = 初版 + 遷移筆數;全新 DB 建 SCHEMA 即為此版
+# 最新版號 = 新結構第一版 + 升級步驟筆數;全新 DB 建 SCHEMA 即為此版
 SCHEMA_VERSION = BASE_VERSION + len(MIGRATIONS)
+# 程式能升級的最低版號;更舊的資料庫在任何寫入前拒絕
+MIN_SUPPORTED_VERSION = BASE_VERSION

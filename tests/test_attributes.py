@@ -15,14 +15,30 @@ class TestAttributes(FacadeTestCase):
 
     def test_category_specific_field(self):
         cid = self.create_category("鋼化玻璃")
+        other = self.create_category("手機殼")
         self.create_field("版型", cid)
-        # ?category_id 只回該種類專屬欄
+        self.create_field("款式", other)
+        # ?category_id 只回該種類的欄
         got = self.invoke("fields.list", {"category_id": cid})
-        self.assertEqual([f["name"] for f in got], ["版型"])
-        # ?common=1 只回共用欄(category_id NULL)
-        common = self.invoke("fields.list", {"common": 1})
-        self.assertTrue(all(f["category_id"] is None for f in common))
-        self.assertNotIn("版型", [f["name"] for f in common])
+        self.assertEqual([(f["name"], f["category_id"]) for f in got], [("版型", cid)])
+        # 全部清單每一欄都帶所屬種類
+        listed = {f["name"]: f["category_id"] for f in self.invoke("fields.list")}
+        self.assertEqual(listed, {"版型": cid, "款式": other})
+
+    def test_create_field_requires_category(self):
+        self.assert_application_error("validation_error", "fields.create", {"name": "版型"})
+        self.assert_application_error("not_found", "fields.create", {"name": "版型", "category_id": 999999})
+
+    def test_same_category_normalized_duplicate_name_rejected(self):
+        """同種類欄名以正規化比對(全半形、大小寫、空白),型別不同也算重複;不同種類同名合法。"""
+        cid = self.create_category("充電線")
+        fid = self.create_field("Size", cid)
+        self.assert_application_error("conflict", "fields.create",
+                                      {"name": "ｓｉｚｅ ", "category_id": cid, "field_type": "text"})
+        other = self.create_field("長度", cid)
+        self.assert_application_error("conflict", "fields.update", {"id": other, "fields": {"name": "SIZE"}})
+        self.invoke("fields.update", {"id": fid, "fields": {"name": "size"}})   # 改自己的大小寫可以
+        self.create_field("Size", self.create_category("行動電源"))
 
     def test_options_by_field(self):
         fid = self.create_field("版型")
@@ -134,7 +150,7 @@ class TestAttributes(FacadeTestCase):
                 "SELECT COUNT(*) FROM VariantAttribute WHERE option_id=?", (oid,)
             ).fetchone()[0], 2)
             self.assertIsNone(conn.execute(
-                "SELECT default_option_id FROM CategoryField WHERE field_id=?", (fid,)
+                "SELECT default_option_id FROM AttributeField WHERE field_id=?", (fid,)
             ).fetchone()[0])
             self.assertEqual(conn.execute(
                 "SELECT COUNT(*) FROM OptionModel WHERE option_id=?", (oid,)
@@ -151,7 +167,7 @@ class TestAttributes(FacadeTestCase):
         self.assertEqual(self.invoke("options.list", {"field_id": fid, "all": 1}), [])
         with get_conn(self.db) as conn:
             self.assertIsNone(conn.execute(
-                "SELECT default_option_id FROM CategoryField WHERE field_id=?", (fid,)
+                "SELECT default_option_id FROM AttributeField WHERE field_id=?", (fid,)
             ).fetchone()[0])
             self.assertIsNone(conn.execute(
                 "SELECT option_id FROM AttributeOption WHERE option_id=?", (oid,)
@@ -161,18 +177,33 @@ class TestAttributes(FacadeTestCase):
         self.assert_application_error("not_found", "options.create", {"field_id": 999999, "value": "不存在"})
 
     def test_invalid_field_type_rejected_on_add_and_patch(self):
-        self.assert_application_error("validation_error", "fields.create", {"name": "壞欄", "field_type": "number"})
+        self.assert_application_error("validation_error", "fields.create", {"name": "壞欄", "field_type": "number", "category_id": self.create_category("型別測試")})
         fid = self.create_field("版型")
         self.assert_application_error("validation_error", "fields.update", {"id": fid, "fields": {"field_type": "number"}})
 
     def test_default_option_must_be_created_with_field_and_belong_to_field(self):
-        fid = self.create_field("版型一")
-        other_fid = self.create_field("版型二")
+        cid = self.create_category("預設測試")
+        fid = self.create_field("版型一", cid)
+        other_fid = self.create_field("版型二", cid)
         other_oid = self._opt(other_fid, "亮面")
+        multi = self.create_field("配件", cid, "multi")
+        multi_oid = self._opt(multi, "掛繩")
 
-        self.assert_application_error("validation_error", "fields.create", {"name": "不應有預設", "default_option_id": other_oid})
-        self.assert_application_error("validation_error", "categories.set_field", {"category_id": self.create_category("預設測試"), "field_id": fid, "fields": {"default_option_id": 999999}})
-        self.assert_application_error("validation_error", "categories.set_field", {"category_id": self.create_category("預設測試二"), "field_id": fid, "fields": {"default_option_id": other_oid}})
+        self.assert_application_error("validation_error", "fields.create", {"name": "不應有預設", "category_id": cid, "default_option_id": other_oid})
+        self.assert_application_error("validation_error", "categories.set_field", {"category_id": cid, "field_id": fid, "fields": {"default_option_id": 999999}})
+        self.assert_application_error("validation_error", "categories.set_field", {"category_id": cid, "field_id": fid, "fields": {"default_option_id": other_oid}})
+        self.assert_application_error("validation_error", "categories.set_field", {"category_id": cid, "field_id": multi, "fields": {"default_option_id": multi_oid}})
+        # 別的種類的欄位不能從這個種類設定
+        self.assert_application_error("not_found", "categories.set_field", {"category_id": self.create_category("別的種類"), "field_id": fid, "fields": {"required": 1}})
+
+    def test_changing_type_away_from_select_clears_default(self):
+        cid = self.create_category("型態切換")
+        fid = self.create_field("版型", cid)
+        oid = self._opt(fid, "滿版")
+        self.invoke("categories.set_field", {"category_id": cid, "field_id": fid, "fields": {"default_option_id": oid}})
+        self.invoke("fields.update", {"id": fid, "fields": {"field_type": "multi"}})
+        row = next(f for f in self.invoke("fields.list", {"category_id": cid}) if f["field_id"] == fid)
+        self.assertEqual((row["field_type"], row["default_option_id"]), ("multi", None))
 
     def test_default_option_can_be_cleared(self):
         """建檔預設帶入值改回「(無)」要真的清掉,不是被當成未帶參數略過。"""
@@ -244,14 +275,14 @@ class TestFieldUsageLeadScope(FacadeTestCase):
 
 
 class TestDeleteCategoryField(FacadeTestCase):
-    """設定頁模板列紅色 ✕:從此種類移除規格欄並清掉此種類的值。"""
+    """設定頁規格列紅色 ✕:刪除本種類的規格欄,連同填過的值與選項。"""
 
     def setUp(self):
         super().setUp()
         self.make_category_with_field("版型", "select", ("皮套", "透明"))
         self.other = self.create_category("鏡頭貼")
-        self.invoke("categories.set_field",
-                    {"category_id": self.other, "field_id": self.fid, "fields": {}})
+        self.other_fid = self.create_field("版型", self.other)   # 別的種類同名欄,各自一份
+        self.create_options(self.other_fid, ("皮套",))
         self.create_product({"版型": "皮套"}, name="皮套", barcode="D1")
 
     def counts(self, category_id, field_id):
@@ -261,37 +292,38 @@ class TestDeleteCategoryField(FacadeTestCase):
 
     def test_usage_count_is_reported_per_category(self):
         self.assertEqual(self.counts(self.cid, self.fid), 1)
-        self.assertEqual(self.counts(self.other, self.fid), 0)
+        self.assertEqual(self.counts(self.other, self.other_fid), 0)
 
-    def test_remove_clears_only_this_category_values_and_keeps_field(self):
+    def test_delete_removes_field_values_and_options_only_in_this_category(self):
         result = self.invoke("categories.delete_field",
                              {"category_id": self.cid, "field_id": self.fid})
         self.assertEqual(result["removed_variant_count"], 1)
-        self.assertFalse(result["field_deleted"])
-        self.assertIsNone(self.counts(self.cid, self.fid))       # 掛勾已解除
-        self.assertEqual(self.counts(self.other, self.fid), 0)   # 其他種類不受影響
-        variants = self.invoke("catalog.list", {})[0]["variants"]
-        self.assertEqual(variants[0]["attributes"], {})           # 此種類的值已清掉
-
-    def test_field_itself_is_deleted_once_nobody_uses_it(self):
-        self.invoke("categories.delete_field", {"category_id": self.cid, "field_id": self.fid})
-        result = self.invoke("categories.delete_field",
-                             {"category_id": self.other, "field_id": self.fid})
         self.assertTrue(result["field_deleted"])
-        self.assertNotIn("版型", [f["name"] for f in self.invoke("fields.list", {})])
+        self.assertIsNone(self.counts(self.cid, self.fid))
         self.assertEqual(self.invoke("options.list", {"field_id": self.fid, "all": 1}), [])
+        variants = self.invoke("catalog.list", {})[0]["variants"]
+        self.assertEqual(variants[0]["attributes"], {})
+        # 別的種類同名欄不受影響
+        self.assertEqual(self.counts(self.other, self.other_fid), 0)
+        self.assertEqual([o["value"] for o in self.invoke("options.list", {"field_id": self.other_fid})], ["皮套"])
 
-    def test_feature_field_removable_and_unlinked_field_rejected(self):
-        """特性詞條每個種類各自一份,可從本種類移除;
-        未掛在本種類的欄位仍回 not_found。"""
+    def test_delete_clears_default_before_removing_options(self):
+        oid = next(o["option_id"] for o in self.invoke("options.list", {"field_id": self.fid})
+                   if o["value"] == "透明")
+        self.invoke("categories.set_field", {"category_id": self.cid, "field_id": self.fid,
+                                             "fields": {"default_option_id": oid}})
+        self.assertTrue(self.invoke("categories.delete_field",
+                                    {"category_id": self.cid, "field_id": self.fid})["field_deleted"])
+
+    def test_feature_field_removable_and_other_category_field_rejected(self):
+        """特性詞條每個種類各自一份,可從本種類移除;別的種類的欄位回 not_found。"""
         feature = self.create_field("特性詞條", self.cid, "tags")
         result = self.invoke("categories.delete_field",
                              {"category_id": self.cid, "field_id": feature})
         self.assertTrue(result["field_deleted"])
-        spare = self.create_field("備註", None, "text")
         self.assert_application_error(
             "not_found", "categories.delete_field",
-            {"category_id": self.other, "field_id": spare})
+            {"category_id": self.cid, "field_id": self.other_fid})
 
 
 class TestPinnedOptionOrder(unittest.TestCase):

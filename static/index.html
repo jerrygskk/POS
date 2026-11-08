@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>膜型機門市管理系統</title>
-<link rel="stylesheet" href="css/pos.css?v=324">
+<link rel="stylesheet" href="css/pos.css?v=325">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=324" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=325" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -703,11 +703,11 @@
       <div class="maint-row fixed-row" v-for="f in fixedRows" :key="f.field_id">
         <span class="fixed-name name">{{ f.name }}</span>
         <button class="switch" type="button" role="switch"
-                :class="{on: !!f.cf_active}" :aria-checked="!!f.cf_active"
+                :class="{on: !!f.active}" :aria-checked="!!f.active"
                 @click.stop="toggleFixedRow(f)"><span class="knob"></span></button>
-        <span class="switch-label">{{ f.cf_active ? '啟用' : '停用' }}</span>
+        <span class="switch-label">{{ f.active ? '啟用' : '停用' }}</span>
       </div>
-      <sortable-list :items="customRows" item-key="field_id" active-key="cf_active"
+      <sortable-list :items="customRows" item-key="field_id" active-key="active"
                      :auto-save="true" @save="saveFieldSort">
         <template #row="{ item: f }">
           <input class="name" v-model="f.name"
@@ -726,9 +726,9 @@
             {{ f.required ? '必填' : '選填' }}</button>
           <button class="btn-x" title="刪除規格" @click.stop="deleteTemplateField(f)">✕</button>
           <button class="switch" type="button" role="switch"
-                  :class="{on: !!f.cf_active}" :aria-checked="!!f.cf_active"
-                  @click.stop="setFieldActive(f, !f.cf_active)"><span class="knob"></span></button>
-          <span class="switch-label">{{ f.cf_active ? '啟用' : '停用' }}</span>
+                  :class="{on: !!f.active}" :aria-checked="!!f.active"
+                  @click.stop="setFieldActive(f, !f.active)"><span class="knob"></span></button>
+          <span class="switch-label">{{ f.active ? '啟用' : '停用' }}</span>
         </template>
       </sortable-list>
       </template>
@@ -961,28 +961,28 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=324"></script>
-<script src="js/api.js?v=324"></script>
-<script src="js/confirm.js?v=324"></script>
-<script src="js/auth.js?v=324"></script>
-<script src="js/pos_shared.js?v=324"></script>
-<script src="js/catalogfields.js?v=324"></script>
-<script src="js/checkout.js?v=324"></script>
-<script src="js/receive.js?v=324"></script>
-<script src="js/stocktake.js?v=324"></script>
-<script src="js/returns.js?v=324"></script>
-<script src="js/records.js?v=324"></script>
-<script src="js/catalog.js?v=324"></script>
-<script src="js/sortable.js?v=324"></script>
-<script src="js/combobox.js?v=324"></script>
-<script src="js/optpicker.js?v=324"></script>
-<script src="js/modelpicker.js?v=324"></script>
-<script src="js/employeepicker.js?v=324"></script>
-<script src="js/membereditor.js?v=324"></script>
-<script src="js/attrfields.js?v=324"></script>
-<script src="js/settings.js?v=324"></script>
-<script src="js/labels.js?v=324"></script>
-<script src="js/app_update.js?v=324"></script>
-<script src="js/app.js?v=324"></script>
+<script src="js/vue.global.prod.js?v=325"></script>
+<script src="js/api.js?v=325"></script>
+<script src="js/confirm.js?v=325"></script>
+<script src="js/auth.js?v=325"></script>
+<script src="js/pos_shared.js?v=325"></script>
+<script src="js/catalogfields.js?v=325"></script>
+<script src="js/checkout.js?v=325"></script>
+<script src="js/receive.js?v=325"></script>
+<script src="js/stocktake.js?v=325"></script>
+<script src="js/returns.js?v=325"></script>
+<script src="js/records.js?v=325"></script>
+<script src="js/catalog.js?v=325"></script>
+<script src="js/sortable.js?v=325"></script>
+<script src="js/combobox.js?v=325"></script>
+<script src="js/optpicker.js?v=325"></script>
+<script src="js/modelpicker.js?v=325"></script>
+<script src="js/employeepicker.js?v=325"></script>
+<script src="js/membereditor.js?v=325"></script>
+<script src="js/attrfields.js?v=325"></script>
+<script src="js/settings.js?v=325"></script>
+<script src="js/labels.js?v=325"></script>
+<script src="js/app_update.js?v=325"></script>
+<script src="js/app.js?v=325"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-from lib.application_errors import ValidationError
+from lib.application_errors import ConflictError, ValidationError
 from lib.db import in_clause, next_sort, stock_map
 from lib.normalize import normalize_key
 from lib import product_rules
@@ -68,8 +68,7 @@ def _resolve_field(conn, name, category_id):
     退路會把詞條寫進別的種類那一份。"""
     field = conn.execute(
         "SELECT f.field_id,f.field_type FROM AttributeField f "
-        "JOIN CategoryField cf ON cf.field_id=f.field_id "
-        "WHERE f.name=? AND f.active=1 AND cf.category_id=? AND cf.active=1 LIMIT 1",
+        "WHERE f.name=? AND f.active=1 AND f.category_id=? LIMIT 1",
         (name, category_id)).fetchone()
     return field
 
@@ -100,13 +99,13 @@ def cleanup_unused_options(conn, option_ids):
 
     傳入候選 option_id 集合(通常為剛因子產品修改/刪除而被移除引用者);
     逐一檢查:仍被任何 VariantAttribute 引用者跳過;被任何
-    CategoryField.default_option_id 引用者跳過;其餘硬刪。回傳實際刪除的 id 清單。"""
+    AttributeField.default_option_id 引用者跳過;其餘硬刪。回傳實際刪除的 id 清單。"""
     deleted = []
     for oid in {o for o in (option_ids or ()) if o is not None}:
         if conn.execute("SELECT 1 FROM VariantAttribute WHERE option_id=? LIMIT 1",
                         (oid,)).fetchone():
             continue
-        if conn.execute("SELECT 1 FROM CategoryField WHERE default_option_id=? LIMIT 1",
+        if conn.execute("SELECT 1 FROM AttributeField WHERE default_option_id=? LIMIT 1",
                         (oid,)).fetchone():
             continue
         conn.execute("DELETE FROM OptionModel WHERE option_id=?", (oid,))
@@ -130,8 +129,8 @@ def set_variant_attributes(conn, vid, category_id, attributes):
         prev_option_ids.add(r["option_id"])
     # 本次可覆寫的欄位=該種類啟用中的模板欄位(+特性詞條);其餘欄位既有值保留
     editable = {r[0] for r in conn.execute(
-        "SELECT f.field_id FROM AttributeField f JOIN CategoryField cf ON cf.field_id=f.field_id "
-        "WHERE cf.category_id=? AND cf.active=1 AND f.active=1", (category_id,))}
+        "SELECT f.field_id FROM AttributeField f WHERE f.category_id=? AND f.active=1",
+        (category_id,))}
     if editable:
         qs = in_clause(list(editable))
         conn.execute(f"DELETE FROM VariantAttribute WHERE variant_id=? AND field_id IN ({qs})",
@@ -162,14 +161,48 @@ def set_variant_attributes(conn, vid, category_id, attributes):
             if not row["active"] and oid not in original:
                 raise ValidationError(f"規格欄「{name}」的選項「{val}」已停用，不可指定")
             conn.execute("INSERT INTO VariantAttribute(variant_id,field_id,option_id) VALUES(?,?,?)", (vid, fid, oid))
+    check_variant_attributes(conn, [vid])
     # 覆寫後清理:舊引用中已無任何子產品使用者硬刪(default 引用除外)
     cleanup_unused_options(conn, prev_option_ids)
+
+
+def check_variant_attributes(conn, variant_ids):
+    """規格值的跨表一致性檢查(資料庫只擋得住單筆規則,這幾條由此處集中把關)。
+
+    ①規格欄屬於商品目前的種類 ②欄型別與值型別對應(text 存文字,其餘存選項)
+    ③select 只能一個值。寫規格值、產品改種類都要在同一交易內呼叫。"""
+    ids = [v for v in dict.fromkeys(variant_ids or ()) if v is not None]
+    if not ids:
+        return
+    base = ("FROM VariantAttribute va JOIN AttributeField f ON f.field_id=va.field_id "
+            "JOIN Variant v ON v.variant_id=va.variant_id JOIN Product p ON p.product_id=v.product_id "
+            f"WHERE va.variant_id IN ({in_clause(ids)})")
+    row = conn.execute(f"SELECT f.name {base} AND f.category_id IS NOT p.category_id LIMIT 1", ids).fetchone()
+    if row:
+        raise ValidationError(f"規格欄「{row[0]}」不屬於此商品的種類")
+    row = conn.execute(f"SELECT f.name {base} AND (f.field_type='text') <> (va.text_value IS NOT NULL) "
+                       "LIMIT 1", ids).fetchone()
+    if row:
+        raise ValidationError(f"規格欄「{row[0]}」的值與欄位型態不符")
+    row = conn.execute(f"SELECT f.name {base} AND f.field_type IN ('select','text') "
+                       "GROUP BY va.variant_id, va.field_id HAVING COUNT(*)>1 LIMIT 1", ids).fetchone()
+    if row:
+        raise ValidationError(f"規格欄「{row[0]}」只能填一個值")
+
+
+def check_field_name(conn, category_id, name, exclude_field_id=None):
+    """同種類規格欄名不可重複:以 normalize_key 比對(全半形、大小寫、空白),型別不同也算重複,
+    因為前端以欄名當 attributes 的鍵。不同種類同名合法。"""
+    key = normalize_key(name)
+    for row in conn.execute("SELECT field_id, name FROM AttributeField WHERE category_id=?", (category_id,)):
+        if row["field_id"] != exclude_field_id and normalize_key(row["name"]) == key:
+            raise ConflictError(f"此種類已有同名規格「{row['name']}」")
 
 
 def attr_rows(conn, ids):
     if not ids: return []
     qs=in_clause(ids)
-    return conn.execute(f"SELECT va.variant_id,f.name field_name,f.field_type,o.value option_value,va.text_value FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id JOIN Variant v ON va.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id LEFT JOIN CategoryField cf ON cf.field_id=va.field_id AND cf.category_id=p.category_id LEFT JOIN AttributeOption o ON va.option_id=o.option_id WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,cf.sort,f.field_id,o.sort,o.option_id", ids).fetchall()
+    return conn.execute(f"SELECT va.variant_id,f.name field_name,f.field_type,o.value option_value,va.text_value FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id JOIN Variant v ON va.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id LEFT JOIN AttributeOption o ON va.option_id=o.option_id WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,f.sort,f.field_id,o.sort,o.option_id", ids).fetchall()
 
 
 def attrs_by_variant(conn, ids):
@@ -196,7 +229,7 @@ def variant_sort_keys(conn, ids):
     keys={vid:[0,0,[],[]] for vid in ids}
     if not ids:return {}
     qs=in_clause(ids)
-    for r in conn.execute(f"SELECT va.variant_id,f.field_type,cf.sort fsort,f.field_id,o.sort osort,o.option_id,o.value oval FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id JOIN Variant v ON va.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id LEFT JOIN CategoryField cf ON cf.field_id=va.field_id AND cf.category_id=p.category_id LEFT JOIN AttributeOption o ON va.option_id=o.option_id WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,cf.sort,f.field_id,o.sort,o.option_id",ids):
+    for r in conn.execute(f"SELECT va.variant_id,f.field_type,f.sort fsort,f.field_id,o.sort osort,o.option_id,o.value oval FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id JOIN Variant v ON va.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id LEFT JOIN AttributeOption o ON va.option_id=o.option_id WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,f.sort,f.field_id,o.sort,o.option_id",ids):
         k=keys[r["variant_id"]]
         if r["field_type"]=="tags":
             if r["oval"]=="抗AR":k[1]=1

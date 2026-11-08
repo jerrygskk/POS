@@ -8,7 +8,7 @@ class TestCatalogTables(ConnTestCase):
         names = {r["name"] for r in self.conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
         for t in ["Category", "Brand", "BrandCategory", "PhoneBrand",
-                  "PhoneModel", "VariantModel", "CategoryField",
+                  "PhoneModel", "VariantModel", "AttributeField",
                   "VariantAttribute", "OptionModel"]:
             self.assertIn(t, names)
 
@@ -64,33 +64,30 @@ class TestCatalogTables(ConnTestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.conn.execute("INSERT INTO VariantModel(variant_id,model_id) VALUES(1,1)")
 
-    # CategoryField 複合主鍵
-    def test_categoryfield_pk(self):
-        self.conn.execute("INSERT INTO Category(name) VALUES('手機殼')")
-        self.conn.execute(
-            "INSERT INTO AttributeField(name,field_type) VALUES('顏色','select')")
-        fid = self.conn.execute(
-            "SELECT field_id FROM AttributeField WHERE name='顏色'").fetchone()["field_id"]
-        self.conn.execute(
-            "INSERT INTO CategoryField(category_id,field_id) VALUES(1,?)", (fid,))
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute(
-                "INSERT INTO CategoryField(category_id,field_id) VALUES(1,?)", (fid,))
+    def _field(self, name, field_type="select", category="手機殼"):
+        cid = self.conn.execute("INSERT OR IGNORE INTO Category(name) VALUES(?)", (category,)).lastrowid
+        cid = self.conn.execute("SELECT category_id FROM Category WHERE name=?", (category,)).fetchone()[0]
+        return self.conn.execute(
+            "INSERT INTO AttributeField(category_id,name,field_type) VALUES(?,?,?)",
+            (cid, name, field_type)).lastrowid
 
-    # AttributeField 全域化:DDL 層無 UNIQUE(name),正規化同名去重交應用層
-    def test_attributefield_unique(self):
-        self.conn.execute("INSERT INTO AttributeField(name) VALUES('版型')")
-        self.conn.execute("INSERT INTO AttributeField(name) VALUES('版型')")
-        n = self.conn.execute(
-            "SELECT COUNT(*) c FROM AttributeField WHERE name='版型'").fetchone()["c"]
-        self.assertEqual(n, 2)
+    # 規格欄隸屬種類:category_id 不可空、指向的種類須存在
+    def test_attributefield_requires_category(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("INSERT INTO AttributeField(name) VALUES('版型')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("INSERT INTO AttributeField(category_id,name) VALUES(999,'版型')")
+
+    # 同種類同名禁止;不同種類同名合法(正規化同名由應用層再擋)
+    def test_attributefield_unique_per_category(self):
+        self._field("版型")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self._field("版型", "text")
+        self._field("版型", category="鋼化玻璃")
 
     # AttributeOption UNIQUE(field_id,value)
     def test_attributeoption_unique(self):
-        self.conn.execute(
-            "INSERT INTO AttributeField(name) VALUES('顏色')")
-        fid = self.conn.execute(
-            "SELECT field_id FROM AttributeField WHERE name='顏色'").fetchone()["field_id"]
+        fid = self._field("顏色")
         self.conn.execute(
             "INSERT INTO AttributeOption(field_id,value) VALUES(?,'黑')", (fid,))
         with self.assertRaises(sqlite3.IntegrityError):
@@ -100,16 +97,51 @@ class TestCatalogTables(ConnTestCase):
     # field_type CHECK 限制
     def test_field_type_check(self):
         with self.assertRaises(sqlite3.IntegrityError):
+            self._field("壞欄", "number")
+
+    # 預設選項必須屬於本欄(複合外鍵),且只限 select
+    def test_default_option_must_belong_to_field_and_be_select(self):
+        fid = self._field("顏色")
+        other = self._field("材質")
+        oid = self.conn.execute("INSERT INTO AttributeOption(field_id,value) VALUES(?,'黑')", (fid,)).lastrowid
+        other_oid = self.conn.execute("INSERT INTO AttributeOption(field_id,value) VALUES(?,'霧面')", (other,)).lastrowid
+        self.conn.execute("UPDATE AttributeField SET default_option_id=? WHERE field_id=?", (oid, fid))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("UPDATE AttributeField SET default_option_id=? WHERE field_id=?", (other_oid, fid))
+        multi = self._field("配件", "multi")
+        multi_oid = self.conn.execute("INSERT INTO AttributeOption(field_id,value) VALUES(?,'掛繩')", (multi,)).lastrowid
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("UPDATE AttributeField SET default_option_id=? WHERE field_id=?", (multi_oid, multi))
+
+    # 被當預設的選項不能直接刪(要先清預設)
+    def test_default_option_cannot_be_deleted_while_referenced(self):
+        fid = self._field("顏色")
+        oid = self.conn.execute("INSERT INTO AttributeOption(field_id,value) VALUES(?,'黑')", (fid,)).lastrowid
+        self.conn.execute("UPDATE AttributeField SET default_option_id=? WHERE field_id=?", (oid, fid))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("DELETE FROM AttributeOption WHERE option_id=?", (oid,))
+
+    # 規格值的選項必須屬於該欄(複合外鍵)
+    def test_variantattribute_option_must_belong_to_field(self):
+        fid, oid = self._make_variant_and_option()
+        other = self._field("顏色")
+        with self.assertRaises(sqlite3.IntegrityError):
             self.conn.execute(
-                "INSERT INTO AttributeField(name,field_type) VALUES('壞欄','number')")
+                "INSERT INTO VariantAttribute(variant_id,field_id,option_id) VALUES(1,?,?)", (other, oid))
+
+    # 同款式同一文字欄只能一筆
+    def test_variantattribute_text_unique(self):
+        self._make_variant_and_option()
+        text = self._field("備註", "text")
+        self.conn.execute("INSERT INTO VariantAttribute(variant_id,field_id,text_value) VALUES(1,?,'a')", (text,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("INSERT INTO VariantAttribute(variant_id,field_id,text_value) VALUES(1,?,'b')", (text,))
 
     def _make_variant_and_option(self):
-        self.conn.execute("INSERT INTO Product(name) VALUES('膜')")
+        fid = self._field("規格")
+        cid = self.conn.execute("SELECT category_id FROM AttributeField WHERE field_id=?", (fid,)).fetchone()[0]
+        self.conn.execute("INSERT INTO Product(name,category_id) VALUES('膜',?)", (cid,))
         self.conn.execute("INSERT INTO Variant(product_id) VALUES(1)")
-        self.conn.execute(
-            "INSERT INTO AttributeField(name,field_type) VALUES('規格','select')")
-        fid = self.conn.execute(
-            "SELECT field_id FROM AttributeField WHERE name='規格'").fetchone()["field_id"]
         oid = self.conn.execute(
             "INSERT INTO AttributeOption(field_id,value) VALUES(?,'亮面')",
             (fid,)).lastrowid

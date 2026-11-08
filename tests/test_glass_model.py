@@ -101,9 +101,10 @@ class TestVaUniqueIndex(unittest.TestCase):
         init_db(db)
         conn = get_conn(db)
         try:
-            conn.execute("INSERT INTO Product(name) VALUES('p')")
+            conn.execute("INSERT INTO Category(name) VALUES('c')")
+            conn.execute("INSERT INTO Product(name,category_id) VALUES('p',1)")
             conn.execute("INSERT INTO Variant(product_id) VALUES(1)")
-            conn.execute("INSERT INTO AttributeField(name,field_type) VALUES('規格','multi')")
+            conn.execute("INSERT INTO AttributeField(category_id,name,field_type) VALUES(1,'規格','multi')")
             fid = conn.execute(
                 "SELECT field_id FROM AttributeField WHERE name='規格'").fetchone()[0]
             conn.execute("INSERT INTO AttributeOption(field_id,value) VALUES(?,'亮面')",
@@ -119,70 +120,6 @@ class TestVaUniqueIndex(unittest.TestCase):
         finally:
             conn.close()
 
-
-class TestV3toV4Migration(unittest.TestCase):
-    """v3→v4:AttributeField 加 default_option_id、欄型放寬 multi/tags;
-    VariantAttribute 移除複合 PK 改唯一索引,允許同欄多筆。既有資料保留。"""
-
-    def _make_v3(self):
-        db = os.path.join(tempfile.mkdtemp(), "v3.db")
-        conn = sqlite3.connect(db)
-        conn.executescript("""
-          CREATE TABLE Product(product_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT);
-          CREATE TABLE Variant(variant_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_id INTEGER NOT NULL);
-          CREATE TABLE AttributeField(field_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL, category_id INTEGER,
-            field_type TEXT NOT NULL DEFAULT 'select'
-              CHECK(field_type IN ('select','text')),
-            sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1,
-            UNIQUE(category_id, name));
-          CREATE TABLE AttributeOption(option_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            field_id INTEGER NOT NULL, value TEXT NOT NULL,
-            sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1,
-            UNIQUE(field_id, value));
-          CREATE TABLE VariantAttribute(variant_id INTEGER NOT NULL,
-            field_id INTEGER NOT NULL, option_id INTEGER, text_value TEXT,
-            PRIMARY KEY(variant_id, field_id),
-            CHECK((option_id IS NULL) <> (text_value IS NULL)));
-          CREATE TABLE Setting(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        """)
-        conn.execute("INSERT INTO Product(name) VALUES('p')")
-        conn.execute("INSERT INTO Variant(product_id) VALUES(1)")
-        conn.execute("INSERT INTO AttributeField(name,category_id,field_type) "
-                     "VALUES('規格',NULL,'select')")
-        conn.execute("INSERT INTO AttributeOption(field_id,value) VALUES(1,'亮面')")
-        conn.execute("INSERT INTO AttributeOption(field_id,value) VALUES(1,'霧面')")
-        conn.execute("INSERT INTO VariantAttribute(variant_id,field_id,option_id) "
-                     "VALUES(1,1,1)")
-        conn.execute("INSERT INTO Setting(key,value) VALUES('schema_version','3')")
-        conn.commit()
-        conn.close()
-        return db
-
-    def test_upgrade(self):
-        db = self._make_v3()
-        init_db(db)   # 開檔自動升級 v3→v4
-        conn = get_conn(db)
-        try:
-            cols = {r["name"] for r in conn.execute("PRAGMA table_info(AttributeField)")}
-            # 升級鏈跑到 v13:AttributeField 全域化,default_option_id 已移至 CategoryField
-            self.assertNotIn("default_option_id", cols)
-            # 既有 VariantAttribute 資料保留
-            self.assertEqual(conn.execute(
-                "SELECT COUNT(*) FROM VariantAttribute").fetchone()[0], 1)
-            # multi 欄型可用 + 同 (variant,field) 多筆 option 允許
-            conn.execute("INSERT INTO VariantAttribute(variant_id,field_id,option_id) "
-                         "VALUES(1,1,2)")
-            self.assertEqual(conn.execute(
-                "SELECT COUNT(*) FROM VariantAttribute "
-                "WHERE variant_id=1 AND field_id=1").fetchone()[0], 2)
-            conn.execute("UPDATE AttributeField SET field_type='tags' WHERE field_id=1")
-            ver = int(conn.execute(
-                "SELECT value FROM Setting WHERE key='schema_version'").fetchone()[0])
-            self.assertEqual(ver, db_schema.SCHEMA_VERSION)
-        finally:
-            conn.close()
 
 
 if __name__ == "__main__":

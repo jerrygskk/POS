@@ -101,10 +101,12 @@ class FacadeTestCase(unittest.TestCase):
         return self.invoke("categories.create", {"name": name})["category_id"]
 
     def create_field(self, name, category_id=None, field_type="select"):
-        payload = {"name": name, "field_type": field_type}
-        if category_id is not None:
-            payload["category_id"] = category_id
-        return self.invoke("fields.create", payload)["field_id"]
+        """規格欄一定隸屬種類;沒指定種類時另建一個測試用種類。"""
+        if category_id is None:
+            self._spare_category_seq = getattr(self, "_spare_category_seq", 0) + 1
+            category_id = self.create_category(f"測試種類{self._spare_category_seq}")
+        return self.invoke("fields.create", {"name": name, "field_type": field_type,
+                                              "category_id": category_id})["field_id"]
 
     def create_options(self, field_id, values):
         for value in values:
