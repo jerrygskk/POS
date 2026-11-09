@@ -227,6 +227,8 @@ window.PosPages["page-variant-batch"] = {
         await this.runPrecheck();
         // 產生後不自動收合組合輸入區:收合與否交給使用者按標題列切換
         this.resetInput();
+        // 預覽表在輸入區下方,不捲過去店員只看到輸入區被清空;捲到這次新產生的第一列
+        if (rows.length) this.$nextTick(() => this.gotoDraft(rows[0].draft_id, false));
       } finally {
         this.generating = false;
       }
@@ -423,10 +425,11 @@ window.PosPages["page-variant-batch"] = {
       return this.drafts.some(d => d.draft_id === error.related_draft_id)
         ? error.related_draft_id : null;
     },
-    gotoDraft(draftId) {
+    gotoDraft(draftId, flash = true) {
       const row = this.$el.querySelector(`tr[data-draft="${draftId}"]`);
       if (!row) return;
       row.scrollIntoView({ block: "center", behavior: "smooth" });
+      if (!flash) return;
       row.classList.remove("flash");
       void row.offsetWidth;
       row.classList.add("flash");

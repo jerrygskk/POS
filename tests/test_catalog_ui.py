@@ -553,11 +553,12 @@ class CatalogTemplateContractTests(unittest.TestCase):
             "  padding-bottom: 2px; flex-wrap: nowrap; }",
             self.css,
         )
-        self.assertIn(".catalog-table { min-width: 1125px;", self.css)
+        self.assertIn(".catalog-table { width: 100%; min-width: 975px; }", self.css)
         self.assertIn(".catalog-table .catalog-variant-row > td { vertical-align: top; }", self.css)
         self.assertIn(".catalog-table .catalog-product-row > td { vertical-align: middle;", self.css)
         self.assertIn(".catalog-col-model { width: 130px; }", self.css)
-        self.assertIn(".catalog-col-spec { width: 410px; }", self.css)
+        # 規格欄不設寬,吃剩餘寬度:預設視窗下操作欄不被切掉
+        self.assertNotRegex(self.css, r"\.catalog-col-spec\s*\{")
         # 型號格一行一個型號:每個型號自己一個 div,分隔號留行尾,單一型號不折行
         self.assertIn('class="catalog-model-line"', self.catalog)
         self.assertIn('v-for="(m, mi) in modelLines(p, v)"', self.catalog)
@@ -594,11 +595,10 @@ class CatalogTemplateContractTests(unittest.TestCase):
         self.assertNotIn("廠牌", info)
         self.assertNotIn("p.active ?", info)
 
-    # 七欄欄寬與白卡寬度互相依賴:欄寬總和 1125 + 外框 1 + 左右內距 16x2 = 白卡上限 1158。
-    # 只改其中一邊會讓表格被撐大或在卡片右緣擠出無作用的橫向捲軸,故以測試綁死。
+    # 固定六欄寬＋規格欄(吃剩餘寬度)。白卡最寬 1158 時內容寬 1125,規格欄約 410,最長規格不折行;
+    # 白卡上限＝內容 1125 + 外框 1 + 左右內距 16x2,只改一邊會在卡片右緣擠出無作用的橫向捲軸。
     CATALOG_COL_WIDTHS = {
         "catalog-col-model": 130,
-        "catalog-col-spec": 410,
         "catalog-col-stock": 55,
         "catalog-col-barcode": 210,
         "catalog-col-price": 85,
@@ -606,6 +606,7 @@ class CatalogTemplateContractTests(unittest.TestCase):
         "catalog-col-actions": 165,
     }
     CATALOG_CONTENT_WIDTH = 1125
+    CATALOG_SPEC_MIN = 260
     CATALOG_CARD_PADDING = 16
     # border-collapse:collapse 會把表格最外圈框線的一半畫在欄寬之外,
     # 所以表格實際寬度是欄寬總和 +1。白卡少留這 1px 就會溢出,
@@ -623,7 +624,12 @@ class CatalogTemplateContractTests(unittest.TestCase):
         widths = {name: self._css_px(name, "width")
                   for name in self.CATALOG_COL_WIDTHS}
         self.assertEqual(widths, self.CATALOG_COL_WIDTHS)
-        self.assertEqual(sum(widths.values()), self.CATALOG_CONTENT_WIDTH)
+        # 白卡最寬時留給規格欄的寬度要放得下最長規格(量測 405)
+        self.assertGreaterEqual(self.CATALOG_CONTENT_WIDTH - sum(widths.values()), 405)
+        # 最小寬度＝固定欄＋規格最窄;員工畫面沒有操作欄
+        fixed = sum(widths.values())
+        self.assertIn(f".catalog-table {{ width: 100%; min-width: {fixed + self.CATALOG_SPEC_MIN}px; }}", self.css)
+        self.assertIn(f".catalog-staff .catalog-table {{ min-width: {fixed - widths['catalog-col-actions'] + self.CATALOG_SPEC_MIN}px; }}", self.css)
         card = self._css_px("catalog-card", "max-width")
         self.assertEqual(
             card,
@@ -640,7 +646,6 @@ class CatalogTemplateContractTests(unittest.TestCase):
     # 狀態欄要放得下「已停用」「待處理」三個字。
     def test_catalog_barcode_and_status_columns_fit_real_content(self):
         self.assertGreaterEqual(self._css_px("catalog-col-barcode", "width"), 205)
-        self.assertGreaterEqual(self._css_px("catalog-col-spec", "width"), 405)
         self.assertGreaterEqual(self._css_px("catalog-col-status", "width"), 69)
 
     def test_catalog_card_wraps_whole_page(self):

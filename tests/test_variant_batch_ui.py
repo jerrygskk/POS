@@ -47,6 +47,7 @@ function mkState(extra) {
   const s = {
     guard: async fn => fn(), showError: msg => { s._error = msg; },
     goPage: () => {}, markSaved: () => { s._saved = true; },
+    $nextTick: fn => { (s._ticks = s._ticks || []).push(fn); },
   };
   for (const key of Object.keys(page.methods)) s[key] = page.methods[key].bind(s);
   Object.assign(s, page.data.call(s));
@@ -288,6 +289,29 @@ const fields = [
 ''')
         self.assertEqual(out["many"], ["", ""])
         self.assertEqual(out["one"], ["F9"])
+
+    def test_generate_preview_scrolls_to_first_new_row(self):
+        """預覽表在輸入區下方:產生後捲到這次新產生的第一列(不閃爍),已有的列不影響目標。"""
+        out = self._run(r'''
+API.batchPrecheckVariants = async (productId, drafts) => ({results:
+  drafts.map(row => ({draft_id:row.draft_id,existing_duplicate:false,errors:[]}))});
+const fields = [{field_id:1,name:"顏色",field_type:"select"}];
+(async () => {
+  const calls = [];
+  const s = mkState({productId:5,fields});
+  s.gotoDraft = (id, flash) => calls.push([id, flash]);
+  s.input.attrs = {"顏色":["黑"]};
+  await s.generatePreview();
+  s._ticks.splice(0).forEach(fn => fn());
+  s.input.attrs = {"顏色":["白","紅"]};
+  await s.generatePreview();
+  s._ticks.splice(0).forEach(fn => fn());
+  out.calls = calls;
+  out.ids = s.drafts.map(row => row.draft_id);
+  done();
+})();
+''')
+        self.assertEqual(out["calls"], [[out["ids"][0], False], [out["ids"][1], False]])
 
     def test_generate_more_than_thirty_rows_requires_confirmation(self):
         out = self._run(r'''
