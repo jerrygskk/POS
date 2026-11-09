@@ -26,7 +26,9 @@
 
 #### DATA：資料模型
 
-- **DATA-1**: **填在 A 種類的值，跑到 B 種類的欄位去了** → 「特性詞條」這種**每個種類各自一份、名字却一樣**的欄位，不可以欄名到全表找。舊版退路是「按名字找、取編號最小的一筆」，資料庫一旦有第二份同名欄，所有種類都會寫進第一份。一律改成只認本種類 `CategoryField` 綁定的那一份（DEVELOPER §2 商品與規格設定）。⚠️ 症狀不會報錯，只會在別的種類看到不該出現的詞條。
+- **DATA-1**: **填在 A 種類的值，跑到 B 種類的欄位去了** → 「特性詞條」這種**每個種類各自一份、名字却一樣**的欄位，不可以欄名到全表找。舊版退路是「按名字找、取編號最小的一筆」，資料庫一旦有第二份同名欄，所有種類都會寫進第一份。一律改成只認本種類（`AttributeField.category_id`）的那一份（DEVELOPER §2 商品與規格設定）。⚠️ 症狀不會報錯，只會在別的種類看到不該出現的詞條。
+
+- **DATA-2**: **管理者核准時確認框寫的內容和實際入帳不同** → 確認框依畫面上的明細組字，但明細可能還在重讀（切換種類中），或確認框開著時店員抽回改數量再送出。前端停用按鈕擋不完；核准 action 要帶確認當下看到的內容（種類、品項、數量、處理方式），後端在同一交易比對現況，不同就回衝突（`returns.approve`）。
 
 #### PS：PowerShell 5.1／環境
 
@@ -36,10 +38,12 @@
 
 #### SQL：SQLite
 
-- **SQL-1**: **共用欄（`category_id` NULL）出現重複列** → SQLite 的 `UNIQUE` 對 NULL 不視為相等，去重不能靠唯一鍵，應用層先查再插（DEVELOPER §2）。
+- **SQL-1**: **唯一鍵含可為 NULL 的欄位卻出現重複列** → SQLite 的 `UNIQUE` 對 NULL 不視為相等，含 NULL 的列擋不住；把欄位設 NOT NULL，或改用部分唯一索引（`WHERE x IS NOT NULL`）。
 - **SQL-2**: **交易中設 `PRAGMA foreign_keys` 沒效果** → 該 PRAGMA 在交易內是 no-op。migration 一旦 OFF，同交易後續（含 seed）FK 都是關的；要保護不能「seed 前開回 ON」，改在 commit 前跑 `PRAGMA foreign_key_check` 驗證，有違規就 rollback。
 - **SQL-3**: **偶發 `database is locked` 直接報 500** → 另一條連線（如自動備份 `.backup()`）與寫入撞上，SQLite 預設不等待。`get_conn` 統一設 `PRAGMA busy_timeout=3000` 讓它自行重試；連線一律走 `get_conn` 單一來源，要加 PRAGMA 集中改一處。
 
+- **SQL-5**: **已入帳明細被 `INSERT OR REPLACE`／`UPDATE OR REPLACE` 改掉，刪除 trigger 卻沒擋** → 撞鍵時 SQLite 先隱含刪除舊列，未開 `recursive_triggers` 時不觸發刪除 trigger；若新列與舊列同款式，複合外鍵也不報錯。鎖定表除了更新／刪除 trigger，還要加「新增前」與「更新前」檢查：會撞上已入帳列（主鍵或任一唯一鍵）就 `RAISE(ABORT)`。測試用原生 SQLite 直接下 REPLACE 驗證。
+- **SQL-6**: **讀到的版號不是數字，啟動直接當掉並寫 error.log** → `int()` 拋 `ValueError` 走了一般失敗流程。讀不出數字的版號視同讀不到版號（`UNKNOWN_VERSION`），走舊庫拒絕流程，不寫任何檔。
 - **SQL-4**: **migration 報 `incomplete input`，資料表定義被切斷** → `_schema_ddl` 依半形分號從 `SCHEMA` 切出各表定義，schema 字串內的註解寫了半形「;」就會從中間斷開。註解改用全形標點。
 
 #### TEST：測試環境

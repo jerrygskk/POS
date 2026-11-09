@@ -5,14 +5,14 @@
 ## 1. 架構
 
 ```
-main.py → RuntimePaths.detect() → 升級前備份 → init_db(pos.db, require_existing=True) → 自動備份
+main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_db(pos.db, require_existing=True) → 自動備份
      → DesktopApplication → pywebview（本機 static/index.html）
      → DesktopBridge → Facade → Service → Repository → SQLite
 ```
 
 - 正式 runtime 不啟動 HTTP server；測試與正式程式都走 Desktop Bridge 與 Facade。
 - `pos.db`、`backups/`、`error.log` 在 `main.py`（開發）或 `POS.exe`（打包）同層；`static/` 打包後在 `sys._MEIPASS/static`，由 `RuntimePaths` 決定。
-- 正式啟動要求資料庫已存在，不會自動建立空白 DB。資料庫版號比程式新時，在任何寫入（含種子）前停下並跳錯誤視窗要求更新程式；其他啟動失敗（升級、備份、初始化）也跳錯誤視窗並告知 error.log 位置，不可靜默結束。
+- 正式啟動要求資料庫已存在，不會自動建立空白 DB。資料庫版號低於 `MIN_SUPPORTED_VERSION`（含有資料表卻讀不到版號、版號不是數字）時，在備份與任何寫入之前拒絕，跳「資料庫版本過舊」要求改用新版標準資料庫。資料庫版號比程式新時，在任何寫入（含種子）前停下並跳錯誤視窗要求更新程式；其他啟動失敗（升級、備份、初始化）也跳錯誤視窗並告知 error.log 位置，不可靜默結束。
 
 ### 關鍵檔案
 
@@ -21,8 +21,8 @@ main.py → RuntimePaths.detect() → 升級前備份 → init_db(pos.db, requir
 | `lib/auth.py` | 管理者身分、密碼雜湊、閒置逾時與唯一受限動作表 `ADMIN_ACTIONS` |
 | `lib/desktop_bridge.py` | JS bridge：轉送 action、統一回傳格式、匯出存檔 |
 | `lib/child_window.py` | 子視窗協調器：唯一子視窗、頁面白名單、傳入脈絡、關閉通知 |
-| `lib/db_schema.py` | 現行 schema DDL 唯一來源與 migration |
-| `lib/legacy_migrations.py` | 凍結的 v1–v13 migration DDL，只供舊資料庫升級 |
+| `lib/db_schema.py` | 現行 schema DDL 唯一來源、`MIN_SUPPORTED_VERSION` 與 migration 清單 |
+| `lib/stock_ledger.py` | 庫存異動唯一入帳入口 `post()` |
 | `lib/product_rules.py` | 共用商品規則（欄位型別驗證、自取碼取號、員工代號檢查） |
 | `lib/variant_batch_service.py` | 子產品批次建立與唯讀預檢 |
 | `lib/label_printer.py`／`lib/label_layout.py` | 標籤機協定／標籤版面（純函式） |
@@ -37,13 +37,18 @@ main.py → RuntimePaths.detect() → 升級前備份 → init_db(pos.db, requir
 
 ### 資料模型
 
-- **Schema**：改現行 schema 一律在 `db_schema.py` 新增 migration，並同步 `SCHEMA`。搬表要明確開交易、保留原編號與流水號，失敗完整回復，不可關閉外鍵檢查。全新資料庫直接建 `SCHEMA`，所以 migration 要能面對欄位已存在的情況。
+- **Schema**：`SCHEMA` 是唯一定義。`MIN_SUPPORTED_VERSION` 以前的升級步驟全部移除（目前等於 v27，`MIGRATIONS` 為空清單），較舊的資料庫一律拒絕開啟，改用母版工具轉出的新版標準資料庫。尚未上線期間，改結構直接改 `SCHEMA` 並重產母版；上線後再改結構才在 `MIGRATIONS` 加步驟：搬表要明確開交易、保留原編號與流水號，失敗完整回復，不可關閉外鍵檢查。
+- **資料庫限制分兩層**：單筆能判斷的寫成 CHECK、複合外鍵、部分唯一索引；跨表規則放程式，在同一交易內檢查（`product_data.check_variant_attributes`、`returns_service.check_kind`、`product_data.check_field_name`）。
 - **金額與數量**：一律 int（新台幣元，無小數）。
-- **庫存採異動流水制**：不存目前庫存，一律由 `StockMovement` 加總（`product_data.stock_of`）。`kind`：`purchase`＋、`sale`－、`adjust`±、`return`＋。
+- **庫存採異動流水制**：不存目前庫存，一律由 `StockMovement` 加總（`product_data.stock_of`）。`kind`：`purchase`＋、`sale`－、`adjust`±、`return`＋、`repair`＋（返新）。
+- **異動來源（schema v26）**：每筆異動恰好指向一個來源明細（`receipt_item_id`／`sale_item_id`／`stocktake_item_id`／`return_item_id`），CHECK 限定來源與 kind、正負一致；複合外鍵保證來源與異動同款式；部分唯一索引防同一明細入帳兩次（返新可分批，不套用）。`employee` 只有返新記，其他看各自單據。
+- **入帳唯一入口** `stock_ledger.post(conn, kind, source_id, qty=None, employee=None)`：數量一律由來源明細算出（返新除外），同交易檢查單據狀態與返新上限。進貨、結帳、盤點核准、退貨核准、返新五個寫入點都走它，不直接寫 `StockMovement`。
+- **已入帳鎖定**：有異動指向的明細，被鎖欄位真的改值（`OLD.x IS NOT NEW.x`）或刪除時由 trigger 擋；`StockMovement` 全表不可改刪。⚠️ 另有新增前與更新前檢查擋 `INSERT／UPDATE OR REPLACE`：撞鍵時的隱含刪除不會觸發刪除 trigger（PITFALLS SQL-5）。返修結案／撤回、退貨原因、盤點備註、單據狀態不在鎖定範圍。
 - **售價**：只看 `Variant.price`，NULL 表示未定價。
-- **商品結構**：`Product`（款）掛 `Category`／`Brand`；`Variant`（子產品）經 `VariantModel` 多對多掛型號；規格欄 `AttributeField` 經 `CategoryField` 掛種類，選項 `AttributeOption` 無上下層連動。
+- **商品結構**：`Product`（款）掛 `Category`／`Brand`；`Variant`（子產品）經 `VariantModel` 多對多掛型號；規格欄 `AttributeField` 直接帶 `category_id`（schema v25 併入原 `CategoryField` 的排序、必填、預設選項），選項 `AttributeOption` 無上下層連動。
 - **規格值**：存在 `VariantAttribute`（`option_id`／`text_value` 恰一非 NULL），改欄名或選項值立即生效。action 以 `attributes:{欄名:值}` 進出，由 `set_variant_attributes`／`attrs_by_variant` 轉換；select 值查無選項回驗證錯誤。
-- **同名欄去重**：`AttributeField` 沒有 `category_id`，同名欄可能有多份，`UNIQUE` 也不套正規化；去重一律先以「欄名＋型別＋種類」查再插。
+- **規格值一致性**：複合外鍵保證選項屬於該欄；跨表規則（欄位屬於商品的種類、select 單值、欄型別與值型別對應）由 `check_variant_attributes` 在寫入的同一交易檢查。已填規格的產品改種類回衝突，不自動清值。
+- **同種類欄名不重複**：資料庫 `UNIQUE(category_id, name)` 只擋完全相同；全半形、大小寫、空白不同的同名由 `check_field_name`（`normalize_key`）擋。⚠️ `fields.create`／`update` 先 `BEGIN IMMEDIATE` 再查重與寫入，否則兩個操作交錯會各自通過檢查。
 - **員工代號**：銷售、進貨、盤點、退貨的 `employee` 只收 1～6，後端必填（`require_employee`）。前端 `employee-picker` 共用同一選擇，切頁與結帳後保留。未選時按鈕**不反灰**，按下才提示，否則店員看不出為何沒反應。
 - **關鍵輸入**：進貨與盤點掃描數量 > 0，實盤量 ≥ 0；單項折扣不超過品項小計，總額不為負，付款方式須在設定清單內。
 
@@ -66,7 +71,7 @@ main.py → RuntimePaths.detect() → 升級前備份 → init_db(pos.db, requir
 - **小計列**：待結帳表 `tfoot`，有品項才顯示；金額未扣整單折抵與會員折扣，所以可能與應收不同。
 - **紀錄查詢條件**：起日晚於迄日由後端拒絕；查詢失敗清空列表與合計，不留上一次結果。匯出 CSV 用最近一次查詢成功的條件，不讀輸入框當下的值（否則匯出內容與畫面不符）。
 - **匯出 CSV**（`sales.export`）：含 BOM 讓 Excel 認得 UTF-8；員工後一欄為會員（只有名稱，刻意不帶電話：匯出檔易外流）。紀錄查詢明細的會員列則帶該會員全部電話（`member_phones`，依號碼排序以「、」串接，即時讀 `MemberPhone`，非結帳當下快照）。⚠️ 文字格開頭是 `= + - @`、tab、換行時補單引號（`_csv_text`），否則 Excel 開檔會當公式執行；會員名稱來自 LINE 匯入與店員輸入，不能假設安全。
-- **進貨批次**：清單在 `window.PosReceiveDraft`，以 `stock.receive` 同一交易全有全無寫入。⚠️ 確認／清空流程期間以 `locked` 鎖定（掃描、改數量、刪列、加標籤、重按都在方法內擋），另有世代編號 `generation`：掃描回來時編號不同就拒絕。只看鎖定擋不住「入庫完成、解鎖後才回來的舊掃描」，它會進下一批而重複入庫。數量欄不用 `v-model`（會直接改資料，方法擋不住）。
+- **進貨批次**：清單在 `window.PosReceiveDraft`，以 `stock.receive` 同一交易全有全無寫入，一次確認建一張進貨單（`Receipt`／`ReceiptItem`，同款式多列各自保留數量），回傳 `receipt_id`。⚠️ 確認／清空流程期間以 `locked` 鎖定（掃描、改數量、刪列、加標籤、重按都在方法內擋），另有世代編號 `generation`：掃描回來時編號不同就拒絕。只看鎖定擋不住「入庫完成、解鎖後才回來的舊掃描」，它會進下一批而重複入庫。數量欄不用 `v-model`（會直接改資料，方法擋不住）。
 - **適用機型欄**：收銀、進貨、退貨明細用 `display_models_by_variant`，種類 `model_mode` 不是 `required` 時顯示「—」，資料不動。
 
 ### 權限（管理者／員工）
@@ -119,10 +124,13 @@ main.py → RuntimePaths.detect() → 升級前備份 → init_db(pos.db, requir
 `ReturnSession`／`ReturnItem`，狀態與作廢規則同盤點，但**不限同時一張**，也不受盤點影響。
 
 - 每項可填銷售單編號（選填，填了須存在）與原因，送審後不可改。
-- 管理者逐項選 `disposition`：`restock`（預設）、`discard`、`reject`、`repair`（返修不入庫）。核准同一交易內只替 `restock` 寫 `kind='return'`。
+- **種類（schema v27）**：`ReturnSession.kind` 為 `normal`／`repair`。一般退貨由管理者逐項選 `disposition`：`restock`（預設）、`discard`、`reject`，核准同一交易內只替 `restock` 寫 `kind='return'`。返修單的品項 `disposition` 為 NULL；兩者一致由 `check_kind` 在掃描、切換、改處理方式、核准時檢查。
+- **切換種類**：`returns.set_kind` 限管理者、限待核准。切返修清空處理方式、切回一般全部設回加回庫存；⚠️ 種類沒變就不動，否則重送會把「不同意」改回加回庫存。
+- **核准帶確認內容**：`returns.approve` 必帶確認框上看到的 `kind` 與各品項 `item_id`／`qty`／`disposition`，與資料庫現況不同回衝突「退貨單內容已變更」。前端在切換期間停用核准鈕。⚠️ 只靠前端停用擋不住「確認框開著時店員抽回改數量再送出」。
+- 品項操作一律以 `ReturnItem.id`（`item_id`）定位。
 - 原因上限 30 字（`REASON_MAX`，前端 `maxlength` 同步）：返新進貨與返修卡片都要一行放得下，不切字。返修結案理由同樣 30 字。
-- **返修單（schema v24）**：返修是整張單的模式。選任一品項為返修時全部品項一起改返修，從返修改成別的也全部一起改；核准時只要有返修就必須全部是返修，否則 `ConflictError`。核准後狀態 `repairing`，不動庫存。返修單抽回後再掃入的新品項沿用返修（否則核准必被擋）。
-  - **返新進貨**：進貨頁切到「返新進貨」，輸入退貨單號帶出品項，可分批進貨（`returns.repair_receive`），每批寫 `StockMovement kind='repair'`、`ref_id`＝退貨單號。已返新件數直接加總這些異動，不另存數字。
+- **返修單**：核准後狀態 `repairing`，不動庫存。返修單抽回後再掃入的新品項沿用返修。
+  - **返新進貨**：進貨頁切到「返新進貨」，輸入退貨單號帶出品項，可分批進貨（`returns.repair_receive`），每批寫 `StockMovement kind='repair'`、`return_item_id`＝退貨品項。已返新件數直接加總這些異動，不另存數字。
   - **結案／撤回結案**（限管理者，`returns.close_item`／`reopen_item`）：結案一次把該品項「未返新」的件數全部結掉，必填理由，存 `closed_qty`／`closed_reason`／`closed_at`；撤回把結案件數清回 0。所以同一品項不會同時有待返新與已結案。
   - 每個品項都返新或結案後，單自動轉 `closed` 並寫 `completed_at`；撤回結案會轉回 `repairing`。
   - **紀錄查詢**：退貨分「一般退貨／返修退貨」切換。返修區只收已核准的返修單（`repairing`／`closed`）；待核准、抽回後進行中的返修單留在一般區，否則兩區都找不到。一般退貨不列作廢單；返修退貨中的單不受日期篩選一律列出。返修明細是卡片：品名為主、規格為從，件數（數量／已返新／待返新或已結案，固定寬度、數字等寬、整組靠右）與狀態膠囊同列，原因獨立淺底區塊；「結案」白底紅框（`.btn-sm.convert`）、「撤回結案」同構藍框（`.btn-sm.subtle`），靠右。
@@ -136,11 +144,11 @@ main.py → RuntimePaths.detect() → 升級前備份 → init_db(pos.db, requir
 - **選項限定型號**：`OptionModel`。`options.list` 帶 `model_ids` 回「未綁型號 ∪ 綁到任一給定型號」，只過濾建檔下拉，不回溯既有資料。`options.set_models` 全量替換，空清單＝通用。
 - **規格欄一律不跨種類共用**（`db_seed.NEW_CATEGORY_OWN_FIELDS`）：同名欄的詞彙在各種類互不相干，共用會汙染建檔候選。新種類自動建自己的「顏色」「款式」，動作放在 `settings.js` 的 `attachDefaultFields`，不放 `categories.create`（否則改寫所有測試對空白種類的假設）。
 - **手機型號固定列**：`Category.model_mode` 為 `required`／`hidden`。型號存 `VariantModel`，不是規格欄，故以固定列（`MODEL_ROW_ID`）呈現。`hidden` 時畫面顯示「—」，⚠️ 既有關聯保留，款式修改照原值送回，避免「關掉顯示」變成「刪掉資料」。
-- **特性詞條固定列**：`tags` 每種類一份同名欄，開關啟用＝建本種類的欄，停用走 `categories.delete_field`。⚠️ 不可用欄名跨種類找詞條欄，只認本種類 `CategoryField` 綁定的那份（`_resolve_field`、`_feature_field_id`、`_feature_id`）。
+- **特性詞條固定列**：`tags` 每種類一份同名欄，開關啟用＝建本種類的欄，停用走 `categories.delete_field`。⚠️ 不可用欄名跨種類找詞條欄，只認本種類（`AttributeField.category_id`）的那份（`_resolve_field`、`_feature_field_id`、`_feature_id`）。
 - **移除規格欄**：`categories.delete_field`＝移除掛勾＋清本種類填過的值，並刪此欄的 `VariantIssue`（⚠️ 漏了會被外鍵擋住）。沒人用才連欄位與選項一起清。確認視窗要顯示影響筆數（`cat_usage_count`）。
 - **必填只往前生效**：改必填不停用既有子產品，因為零售現場停售等於當下賣不了。`set_field` 同步待補清單：改必填→缺值者補 `missing_required`；改選填→刪掉。建檔硬擋，修改既有子產品維持軟性。
 - **可銷售判斷**：種類／產品／款式都啟用，且沒有 `duplicate_signature`。`missing_required` 不擋銷售；款式重複會掃錯商品所以擋。結帳與掃描同一條規則。匯入的問題款式 `active=0`，手動啟用前要排除所有待處理問題。
-- **建檔預設帶入**：`CategoryField.default_option_id` 只在建檔帶入，只對 select 有效，不影響顯示。`categories.set_field` 送 `null` 可清除，其餘欄位的 `null` 視為不動。
+- **建檔預設帶入**：`AttributeField.default_option_id`（CHECK 限 select、複合外鍵限本欄選項） 只在建檔帶入，只對 select 有效，不影響顯示。`categories.set_field` 送 `null` 可清除，其餘欄位的 `null` 視為不動。
 - **規格候選前排**：`variants.field_usage` 依「該廠牌用過→該產品用過→種類次數前 8」，因為規格值常是廠牌專屬。`PINNED_OPTION_VALUES`（亮面／霧面／藍光／防窺）固定排最前。
 - **型號選取器**：`variants.model_usage` 依「該產品→該廠牌→全部展開」，搜尋一律搜全部。與規格選取器故意不同：搜尋框在候選上方、候選區固定高度可捲，因為型號有上百個。
 - **商品資料庫搜尋**：空白切詞取 AND，`casefold` 正規化；比對名稱、種類、廠牌、規格值、型號、條碼。查無啟用資料才另查停用，提供「顯示已停用」入口，不混入結果。廠牌下拉只列目前種類真的有商品的廠牌。
@@ -202,20 +210,22 @@ main.py → RuntimePaths.detect() → 升級前備份 → init_db(pos.db, requir
 - **關閉時**：下載中取消、最多等 3 秒；已進入換檔要等完成，不得停在 exe 已改名的中間狀態。
 - **失敗**：查詢失敗只寫 warning（更新用自己的 logger，桌面 logger 門檻 ERROR）；404 不寫。
 - **換檔兩次改名都失敗**：原 `POS.exe` 已不存在時不刪 `.new`，error.log 寫明手動把 `.new` 或 `.old` 改回 `POS.exe`。
-- **升級前備份**：版號小於 `SCHEMA_VERSION` 先備份 `backups/pos_upgrade_{時間}_v{舊}-v{新}.db`（留 5 份）；失敗就停止啟動。⚠️ 唯讀開檔用 `Path(...).resolve().as_uri() + "?mode=ro"`，自己拼路徑遇到 `#`、`%` 會開錯檔。
+- **升級前備份**：版號低於 `MIN_SUPPORTED_VERSION` 先拒絕、不備份；介於最低支援版與 `SCHEMA_VERSION` 之間才先備份 `backups/pos_upgrade_{時間}_v{舊}-v{新}.db`（留 5 份）；失敗就停止啟動。⚠️ 唯讀開檔用 `Path(...).resolve().as_uri() + "?mode=ro"`，自己拼路徑遇到 `#`、`%` 會開錯檔。
 
 ### 標準資料庫（`tools/make_standard_db.py`）
 
-產生「只有商品與設定、沒有營業紀錄」的資料庫：`init_db` 建全新資料庫後逐表原樣複製，庫存全為 0。不覆蓋既有檔案，來源唯讀。
+把 v24 資料庫的「商品與設定」轉成最新格式的新檔（母版）：營業紀錄一律不帶，庫存全為 0。來源以唯讀連線開啟，輸出檔已存在就停止。
 
-- ⚠️ 每張資料表與設定鍵都要歸在工具的「複製」或「不複製」清單，未歸類就停止。會員（`Member`、`MemberPhone`）屬「複製」。`next_store_barcode` 必須帶，否則新條碼會撞號。
-- **母版**：`docs/standard_db/pos_standard.db`（`docs/` 不入庫，換機器要自行複製）。schema 改版後母版落後工具會停止：複製一份、`init_db` 升級，以副本為 `--source` 產出，核對後換掉母版。
+- **轉換**：`CategoryField` 併入 `AttributeField`（啟用取兩者皆啟用），保留原主鍵與 `sqlite_sequence`。單一交易寫入、`defer_foreign_keys`，commit 前跑外鍵檢查，再以 `check_variant_attributes` 核對單選單值與欄型別。⚠️ 每張資料表與設定鍵都要歸在「複製」或「不複製」清單，未歸類就停止；`next_store_barcode` 必須帶，否則新條碼會撞號。
+- **對帳**：轉完逐表比對資料列、設定鍵與流水號，經正式 `init_db` 再開一次，最後核對來源雜湊值未變。任一步失敗都刪掉輸出檔（含 `-journal`）。
+- **來源結構凍結**在 `tests/fixtures/schema_v24.sql`，測試用它造 v24 來源。
+- **母版**：v24 原始檔 `docs/standard_db/pos_standard.db`（轉換來源，不要刪）與轉出的 `pos_standard_v27.db`（`docs/` 不入庫，換機器要自行複製）。結構有改就重新轉出：
 
 ```
-python tools/make_standard_db.py --source pos.db --output docs/standard_db/pos_standard.db
+python tools/make_standard_db.py --source docs/standard_db/pos_standard.db --output docs/standard_db/pos_standard_v27_new.db
 ```
 
-- **清乾淨 `pos.db`**：關掉 POS → `python tools/make_standard_db.py`（由母版產生根目錄 `pos_standard.db`）→ 自行換名成 `pos.db`。
+- **清乾淨 `pos.db`**：關掉 POS，複製母版換名成 `pos.db`。
 
 ### UI 風格規範
 
