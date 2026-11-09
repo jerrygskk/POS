@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>膜型機門市管理系統</title>
-<link rel="stylesheet" href="css/pos.css?v=328">
+<link rel="stylesheet" href="css/pos.css?v=330">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=328" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=330" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -311,7 +311,7 @@
              :disabled="!canEdit">
       <button @click="current=null; detail=null; reload()">返回列表</button>
       <button class="primary" v-if="canEdit" @click="close">送出</button>
-      <button class="primary" v-if="canReview" @click="approve">核准</button>
+      <button class="primary" v-if="canReview" :disabled="kindBusy" @click="approve">核准</button>
       <span v-if="canReview" class="mode-switch">
         <button type="button" class="chip-toggle" :class="{on: detail.kind==='normal'}" :disabled="kindBusy" @click="setKind('normal')">一般退貨</button>
         <button type="button" class="chip-toggle" :class="{on: detail.kind==='repair'}" :disabled="kindBusy" @click="setKind('repair')">返修</button>
@@ -965,28 +965,28 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=328"></script>
-<script src="js/api.js?v=328"></script>
-<script src="js/confirm.js?v=328"></script>
-<script src="js/auth.js?v=328"></script>
-<script src="js/pos_shared.js?v=328"></script>
-<script src="js/catalogfields.js?v=328"></script>
-<script src="js/checkout.js?v=328"></script>
-<script src="js/receive.js?v=328"></script>
-<script src="js/stocktake.js?v=328"></script>
-<script src="js/returns.js?v=328"></script>
-<script src="js/records.js?v=328"></script>
-<script src="js/catalog.js?v=328"></script>
-<script src="js/sortable.js?v=328"></script>
-<script src="js/combobox.js?v=328"></script>
-<script src="js/optpicker.js?v=328"></script>
-<script src="js/modelpicker.js?v=328"></script>
-<script src="js/employeepicker.js?v=328"></script>
-<script src="js/membereditor.js?v=328"></script>
-<script src="js/attrfields.js?v=328"></script>
-<script src="js/settings.js?v=328"></script>
-<script src="js/labels.js?v=328"></script>
-<script src="js/app_update.js?v=328"></script>
-<script src="js/app.js?v=328"></script>
+<script src="js/vue.global.prod.js?v=330"></script>
+<script src="js/api.js?v=330"></script>
+<script src="js/confirm.js?v=330"></script>
+<script src="js/auth.js?v=330"></script>
+<script src="js/pos_shared.js?v=330"></script>
+<script src="js/catalogfields.js?v=330"></script>
+<script src="js/checkout.js?v=330"></script>
+<script src="js/receive.js?v=330"></script>
+<script src="js/stocktake.js?v=330"></script>
+<script src="js/returns.js?v=330"></script>
+<script src="js/records.js?v=330"></script>
+<script src="js/catalog.js?v=330"></script>
+<script src="js/sortable.js?v=330"></script>
+<script src="js/combobox.js?v=330"></script>
+<script src="js/optpicker.js?v=330"></script>
+<script src="js/modelpicker.js?v=330"></script>
+<script src="js/employeepicker.js?v=330"></script>
+<script src="js/membereditor.js?v=330"></script>
+<script src="js/attrfields.js?v=330"></script>
+<script src="js/settings.js?v=330"></script>
+<script src="js/labels.js?v=330"></script>
+<script src="js/app_update.js?v=330"></script>
+<script src="js/app.js?v=330"></script>
 </body>
 </html>

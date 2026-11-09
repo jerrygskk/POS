@@ -52,6 +52,22 @@ class MinSupportedVersionTest(unittest.TestCase):
         _legacy_db(self.db, None)
         self.assert_rejected_without_writing()
 
+    def test_unparsable_version_is_rejected(self):
+        _legacy_db(self.db, "invalid")
+        self.assert_rejected_without_writing()
+
+    def test_main_rejects_unparsable_version_without_error_log(self):
+        paths = RuntimePaths.from_root(self.root)
+        _legacy_db(paths.db_path, "invalid")
+        before = _digest(paths.db_path)
+        dialog, app = Mock(), Mock()
+        with patch.object(RuntimePaths, "detect", return_value=paths):
+            with self.assertRaises(SystemExit):
+                main.main(application_factory=app, error_dialog=dialog)
+        self.assertIn("資料庫版本過舊", dialog.call_args.args[1])
+        self.assertEqual(_digest(paths.db_path), before)
+        self.assertEqual(sorted(p.name for p in self.root.iterdir() if p.is_file()), ["pos.db"])
+
     def test_database_without_setting_table_is_rejected(self):
         conn = sqlite3.connect(self.db)
         conn.execute("CREATE TABLE Product(product_id INTEGER PRIMARY KEY)")

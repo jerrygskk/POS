@@ -53,18 +53,49 @@ class TestReturns(ReturnsBase):
         self.assertEqual(items[self.v1]["disposition"], "restock")
         self.assertNotIn(self.v3, items)
 
+    def test_approve_rejects_stale_confirmation(self):
+        # 確認框是舊內容(切換種類或改處理方式尚未讀回)時拒絕,不得照資料庫現況入帳
+        self.fill()
+        self.invoke("returns.close", {"return_id": self.rid})
+        shown = self.approve_payload(self.rid)
+        self.invoke("returns.set_kind", {"return_id": self.rid, "kind": "repair"})
+        self.assert_application_error("conflict", "returns.approve", shown)
+        self.invoke("returns.set_kind", {"return_id": self.rid, "kind": "normal"})
+        shown = self.approve_payload(self.rid)
+        self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "disposition": "reject"})
+        self.assert_application_error("conflict", "returns.approve", shown)
+        # 確認後店員抽回改數量再送出:舊確認不得照新數量入帳
+        self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "disposition": "restock"})
+        shown = self.approve_payload(self.rid)
+        self.invoke("returns.withdraw", {"return_id": self.rid})
+        self.invoke("returns.set_qty", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "qty": 3})
+        self.invoke("returns.close", {"return_id": self.rid})
+        self.assert_application_error("conflict", "returns.approve", shown)
+        missing = self.approve_payload(self.rid); missing["items"].pop()
+        self.assert_application_error("conflict", "returns.approve", missing)
+        self.assertEqual(self.invoke("returns.detail", {"return_id": self.rid})["status"], "pending")
+        self.assertEqual(self.stock(self.v1), 5)
+
+    def test_resending_same_kind_keeps_dispositions(self):
+        self.fill()
+        self.invoke("returns.close", {"return_id": self.rid})
+        self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "disposition": "reject"})
+        self.invoke("returns.set_kind", {"return_id": self.rid, "kind": "normal"})
+        self.invoke("returns.approve", self.approve_payload(self.rid))
+        self.assertEqual(self.stock(self.v1), 5)
+
     def test_approve_applies_only_restock(self):
         self.fill()
         self.invoke("returns.close", {"return_id": self.rid})
         self.assertEqual(self.stock(self.v1), 5)
         self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v2), "disposition": "discard"})
         self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v3), "disposition": "reject"})
-        self.invoke("returns.approve", {"return_id": self.rid})
+        self.invoke("returns.approve", self.approve_payload(self.rid))
         self.assertEqual([self.stock(v) for v in (self.v1, self.v2, self.v3)], [7, 5, 5])
         detail = self.invoke("returns.detail", {"return_id": self.rid})
         self.assertEqual(detail["status"], "closed")
         self.assertIsNotNone(detail["approved_at"])
-        self.assert_application_error("conflict", "returns.approve", {"return_id": self.rid})
+        self.assert_application_error("conflict", "returns.approve", self.approve_payload(self.rid))
         history = self.invoke("returns.history", {})
         self.assertEqual([h["return_id"] for h in history], [self.rid])
 
@@ -114,14 +145,14 @@ class TestReturns(ReturnsBase):
         rid = self.invoke("returns.create", {"employee": 1})["return_id"]
         self.invoke("returns.scan", {"return_id": rid, "variant_id": self.v1, "qty": 1})
         self.invoke("returns.close", {"return_id": rid})
-        self.invoke("returns.approve", {"return_id": rid})
+        self.invoke("returns.approve", self.approve_payload(rid))
         self.assert_application_error("conflict", "returns.cancel", {"return_id": rid, "employee": 1})
 
     def test_employee_cannot_review(self):
         self.fill()
         self.invoke("returns.close", {"return_id": self.rid})
         self.as_employee()
-        for action, payload in (("returns.approve", {"return_id": self.rid}),
+        for action, payload in (("returns.approve", self.approve_payload(self.rid)),
                                 ("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "disposition": "discard"}),
                                 ("returns.pending_count", {})):
             with self.subTest(action=action):
@@ -144,7 +175,7 @@ class TestReturns(ReturnsBase):
         self.invoke("stocktake.close", {"session_id": sid})
         self.fill()
         self.invoke("returns.close", {"return_id": self.rid})
-        self.invoke("returns.approve", {"return_id": self.rid})
+        self.invoke("returns.approve", self.approve_payload(self.rid))
         self.invoke("stocktake.withdraw", {"session_id": sid})
         item = self.invoke("stocktake.detail", {"session_id": sid})["items"][0]
         self.assertEqual((item["system_qty"], item["counted_qty"]), (7, 7))

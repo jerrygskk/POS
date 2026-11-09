@@ -157,16 +157,11 @@ class UpgradeBackupTest(unittest.TestCase):
         self.make_db(self.paths, OLD - 1)
         self.assert_rejected_untouched(DatabaseTooOldError)
 
-    def test_bad_version_value_is_logged(self):
+    def test_unparsable_version_is_rejected_before_any_write(self):
+        # 版號讀得到但不是數字:同讀不到版號,走舊庫拒絕流程(不寫 error.log、不備份)
         self.make_db(self.paths, "abc")
-        with self.assertRaises(ValueError):
-            main.prepare_runtime(self.paths)
-        self.assertIn("資料庫初始化失敗", self.paths.error_log_path.read_text(encoding="utf-8"))
-        self.assertEqual(self.upgrade_backups(self.paths), [])
-        conn = get_conn(self.paths.db_path)
-        value = conn.execute("SELECT value FROM Setting WHERE key='schema_version'").fetchone()[0]
-        conn.close()
-        self.assertEqual(value, "abc")
+        self.assert_rejected_untouched(DatabaseTooOldError)
+        self.assertFalse(self.paths.error_log_path.exists())
 
     def test_upgrade_backup_with_special_chars_in_path(self):
         for name in ("a#b", "a%20b", "a?b"):

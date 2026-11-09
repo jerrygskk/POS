@@ -1,5 +1,7 @@
 """規格值的跨表一致性:資料庫擋不了的規則由 product_data.check_variant_attributes 集中把關。"""
+import sqlite3
 import unittest
+from unittest.mock import patch
 
 from base import FacadeTestCase
 from lib import product_data
@@ -34,6 +36,25 @@ class AttributeConsistencyTest(FacadeTestCase):
         finally:
             conn.rollback()
             conn.close()
+
+    def test_field_name_check_runs_inside_write_lock(self):
+        # 查重與寫入同一寫入交易:查重當下別的連線拿不到寫入鎖,交錯的兩個新增無法都通過
+        seen = []
+        real = product_data.check_field_name
+        def probe(conn, *args, **kwargs):
+            other = sqlite3.connect(self.db, timeout=0)
+            try:
+                with self.assertRaises(sqlite3.OperationalError):
+                    other.execute("BEGIN IMMEDIATE")
+            finally:
+                other.close()
+            seen.append(True)
+            return real(conn, *args, **kwargs)
+        with patch.object(product_data, "check_field_name", probe):
+            fid = self.invoke("fields.create", {"name": "abc", "category_id": self.case})["field_id"]
+            self.invoke("fields.update", {"id": fid, "fields": {"name": "abd"}})
+        self.assertEqual(len(seen), 2)
+        self.assert_application_error("conflict", "fields.create", {"name": "ＡＢＤ", "category_id": self.case})
 
     def test_multi_values_are_allowed(self):
         conn = get_conn(self.db)

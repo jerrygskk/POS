@@ -73,7 +73,7 @@ const API = {
   closeReturn: return_id => API.invoke("returns.close", {return_id}), withdrawReturn: return_id => API.invoke("returns.withdraw", {return_id}),
   setReturnDisposition: (return_id, item_id, disposition) => API.invoke("returns.set_disposition", {return_id, item_id, disposition}),
   setReturnKind: (return_id, kind) => API.invoke("returns.set_kind", {return_id, kind}),
-  approveReturn: return_id => API.invoke("returns.approve", {return_id}),
+  approveReturn: (return_id, kind, items) => API.invoke("returns.approve", {return_id, kind, items}),
   cancelReturn: (return_id, employee) => API.invoke("returns.cancel", {return_id, employee}),
   pendingReturnCount: () => API.invoke("returns.pending_count", {}),
   repairReceive: p => API.invoke("returns.repair_receive", p),

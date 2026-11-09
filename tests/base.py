@@ -98,6 +98,12 @@ class FacadeTestCase(unittest.TestCase):
         self.assertEqual(raised.exception.code, code)
         return raised.exception
 
+    def approve_payload(self, rid):
+        """核准退貨要附上確認框看到的種類與品項處理方式;測試直接取資料庫現況。"""
+        detail = self.invoke("returns.detail", {"return_id": rid})
+        return {"return_id": rid, "kind": detail["kind"],
+                "items": [{"item_id": i["id"], "qty": i["qty"], "disposition": i["disposition"]} for i in detail["items"]]}
+
     def invoke_envelope(self, action, payload=None):
         return self.bridge.invoke(action, payload)
 

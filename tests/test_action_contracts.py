@@ -179,7 +179,7 @@ ACTION_CONTRACTS = {
     "returns.withdraw": schema([I("return_id", required=True)]),
     "returns.set_kind": schema([I("return_id", required=True), S("kind", required=True, constraint="normal|repair", blank="reject")]),
     "returns.set_disposition": schema([I("return_id", required=True), I("item_id", required=True), S("disposition", required=True, constraint="restock|discard|reject", blank="reject")]),
-    "returns.approve": schema([I("return_id", required=True)]),
+    "returns.approve": schema([I("return_id", required=True), S("kind", required=True, constraint="normal|repair", blank="reject"), field("items", "list[ApproveItem]", required=True, wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].item_id", required=True), I("items[].qty", required=True, constraint=">0"), S("items[].disposition", required=True, nullable=True, constraint="restock|discard|reject", blank="reject")], notes=("確認框顯示的種類與品項數量、處理方式;與資料庫現況不同回衝突。",)),
     "returns.cancel": schema([I("return_id", required=True), I("employee", required=True, constraint="1..6")]),
     "returns.pending_count": schema([]),
     "returns.repair_receive": schema([I("return_id", required=True), I("employee", required=True, constraint="1..6"), field("items", "list[RepairItem]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].item_id", required=True), I("items[].qty", required=True, constraint=">0")]),
@@ -527,7 +527,7 @@ class ActionContractTests(FacadeTestCase):
         self.repair_item_id = self.invoke("returns.detail", {"return_id":self.repair_id})["items"][0]["id"]
         self.invoke("returns.close", {"return_id":self.repair_id})
         self.invoke("returns.set_kind", {"return_id":self.repair_id, "kind":"repair"})
-        self.invoke("returns.approve", {"return_id":self.repair_id})
+        self.invoke("returns.approve", {"return_id":self.repair_id, "kind":"repair", "items":[{"item_id":self.repair_item_id, "qty":500, "disposition":None}]})
         self.delete_category_id = self.create_category("待刪種類")
         self.delete_brand_id = self.invoke("brands.create", {"name":"待刪廠牌"})["brand_id"]
         self.delete_phone_brand_id = self.create_phone_brand("待刪手機牌")
@@ -564,7 +564,7 @@ class ActionContractTests(FacadeTestCase):
             "returns.close":{"return_id":self.return_id}, "returns.withdraw":{"return_id":self.return_id},
             "returns.set_disposition":{"return_id":self.return_id,"item_id":self.return_item_id,"disposition":"discard"},
             "returns.set_kind":{"return_id":self.return_id,"kind":"repair"},
-            "returns.approve":{"return_id":self.return_id}, "returns.cancel":{"return_id":self.return_id,"employee":1}, "returns.pending_count":{},
+            "returns.approve":{"return_id":self.return_id,"kind":"normal","items":[{"item_id":self.return_item_id,"qty":1,"disposition":"restock"}]}, "returns.cancel":{"return_id":self.return_id,"employee":1}, "returns.pending_count":{},
             "returns.repair_receive":{"return_id":self.repair_id,"employee":1,"items":[{"item_id":self.repair_item_id,"qty":1}]},
             "returns.close_item":{"return_id":self.repair_id,"item_id":self.repair_item_id,"reason":"廠商不保固"},
             "returns.reopen_item":{"return_id":self.repair_id,"item_id":self.repair_item_id},

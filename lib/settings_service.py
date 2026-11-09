@@ -496,6 +496,9 @@ class SettingsFacade(BaseFacade):
         _validate_action(action, payload)
         return payload
     def _dispatch(self, action, payload, conn):
+        # 欄名查重(正規化比對)與寫入須在同一寫入交易,否則兩個操作交錯會各自通過檢查
+        if action in {"fields.create", "fields.update"}:
+            conn.execute("BEGIN IMMEDIATE")
         s=SettingsService(SettingsRepository(conn)); parts=action.split("."); kind=parts[0]; op=parts[1] if len(parts)==2 else ""
         simple={"categories":"categories","brands":"brands","phone_brands":"phone_brands","device_types":"device_types"}
         if kind in simple and op in {"list","create","update","delete","sort"}:

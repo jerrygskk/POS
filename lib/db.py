@@ -68,7 +68,10 @@ def _get_schema_version(conn):
         "SELECT value FROM Setting WHERE key='schema_version'").fetchone()
     if row is None:
         return UNKNOWN_VERSION
-    return int(row["value"])
+    try:
+        return int(row["value"])
+    except (TypeError, ValueError):
+        return UNKNOWN_VERSION  # 版號不是數字:同讀不到版號,走舊庫拒絕流程
 
 
 def read_schema_version(db_path):

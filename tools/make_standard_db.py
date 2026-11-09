@@ -23,7 +23,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from lib import db_schema, db_seed  # noqa: E402
+from lib import db_schema, db_seed, product_data  # noqa: E402
+from lib.application_errors import ValidationError  # noqa: E402
 from lib.db import init_db  # noqa: E402
 from lib.normalize import normalize_key  # noqa: E402
 
@@ -176,6 +177,12 @@ def _convert(conn):
     violations = conn.execute("PRAGMA main.foreign_key_check").fetchall()
     if violations:
         raise ConversionError(f"外鍵檢查失敗：{', '.join(sorted({row[0] for row in violations}))}")
+    # 資料庫只擋單筆;單選只能一個值、欄型別與值型別對應等跨表規則用正式檢查再核一次
+    variant_ids = [r[0] for r in conn.execute("SELECT variant_id FROM main.Variant")]
+    try:
+        product_data.check_variant_attributes(conn, variant_ids)
+    except ValidationError as exc:
+        raise ConversionError(f"規格值檢查失敗：{exc}") from exc
     conn.execute("COMMIT")
 
 
@@ -222,14 +229,13 @@ def build(source, output):
         conn.execute("VACUUM")
         conn.close()
         init_db(output, require_existing=True)  # 經正式流程再開一次，確認可被程式直接使用
+        if file_hash(source) != before:  # 放在清理範圍內:來源被改就不留輸出檔
+            raise ConversionError("來源檔內容在轉換期間被改變")
     except Exception:
         conn.close()
         for path in (output, output.with_name(output.name + "-journal")):
             path.unlink(missing_ok=True)  # 半成品不留
         raise
-    finally:
-        if file_hash(source) != before:
-            raise ConversionError("來源檔內容在轉換期間被改變")
     settings.pop("admin_password_hash", None)
     return counts, settings
 

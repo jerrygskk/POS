@@ -51,7 +51,7 @@ class StockSourcesTest(FacadeTestCase):
         ret = self.invoke("returns.create", {"employee": 3})["return_id"]
         self.invoke("returns.scan", {"return_id": ret, "variant_id": self.v1, "qty": 1})
         self.invoke("returns.close", {"return_id": ret})
-        self.invoke("returns.approve", {"return_id": ret})
+        self.invoke("returns.approve", self.approve_payload(ret))
         self.assertEqual(self.stock(self.v1), 7)
         sid = self.invoke("stocktake.create", {"employee": 4})["session_id"]
         self.invoke("stocktake.scan", {"session_id": sid, "variant_id": self.v2, "qty": 3})
@@ -63,7 +63,7 @@ class StockSourcesTest(FacadeTestCase):
         rep_item = self.return_item_id(rep, self.v2)
         self.invoke("returns.close", {"return_id": rep})
         self.invoke("returns.set_kind", {"return_id": rep, "kind": "repair"})
-        self.invoke("returns.approve", {"return_id": rep})
+        self.invoke("returns.approve", self.approve_payload(rep))
         for n in (1, 1):  # 分批返新合法
             self.invoke("returns.repair_receive", {"return_id": rep, "employee": 6, "items": [{"item_id": rep_item, "qty": n}]})
         self.assertEqual(self.stock(self.v2), 5)
@@ -159,6 +159,68 @@ class StockSourcesTest(FacadeTestCase):
             conn.execute("DELETE FROM StockMovement WHERE move_id=?", (move,))
         conn.rollback()
 
+    def test_posted_rows_reject_insert_or_replace(self):
+        # INSERT OR REPLACE 撞鍵時隱含刪除舊列,刪除觸發器不會觸發;須由新增前檢查擋下
+        ids = self.build_flow()
+        conn = self.raw()
+        conn.execute("PRAGMA foreign_keys=ON")
+        move = conn.execute("SELECT move_id,variant_id,receipt_item_id FROM StockMovement WHERE receipt_item_id=?", (ids["receipt_item"],)).fetchone()
+        cases = {
+            "進貨明細主鍵": ("INSERT OR REPLACE INTO ReceiptItem(receipt_item_id,receipt_id,variant_id,qty) "
+                             "SELECT receipt_item_id,receipt_id,variant_id,8 FROM ReceiptItem WHERE receipt_item_id=?", (ids["receipt_item"],)),
+            "銷售明細主鍵": ("INSERT OR REPLACE INTO SaleItem(item_id,sale_id,variant_id,qty,unit_price) "
+                             "SELECT item_id,sale_id,variant_id,9,1 FROM SaleItem WHERE item_id=?", (ids["sale_item"],)),
+            "銷售單主鍵": ("INSERT OR REPLACE INTO Sale(sale_id,payment,total,paid) VALUES(?,'現金',1,1)", (ids["sale"],)),
+            "盤點明細主鍵": ("INSERT OR REPLACE INTO StocktakeItem(id,session_id,variant_id,system_qty,counted_qty) "
+                             "SELECT id,session_id,variant_id,9,9 FROM StocktakeItem WHERE id=?", (ids["stocktake_item"],)),
+            "盤點明細同單同款": ("INSERT OR REPLACE INTO StocktakeItem(session_id,variant_id,system_qty,counted_qty) "
+                                 "SELECT session_id,variant_id,9,9 FROM StocktakeItem WHERE id=?", (ids["stocktake_item"],)),
+            "退貨品項主鍵": ("INSERT OR REPLACE INTO ReturnItem(id,return_id,variant_id,qty,disposition) "
+                             "SELECT id,return_id,variant_id,9,'restock' FROM ReturnItem WHERE id=?", (ids["return_item"],)),
+            "退貨品項同單同款": ("INSERT OR REPLACE INTO ReturnItem(return_id,variant_id,qty,disposition) "
+                                 "SELECT return_id,variant_id,9,'restock' FROM ReturnItem WHERE id=?", (ids["return_item"],)),
+            "異動主鍵": ("INSERT OR REPLACE INTO StockMovement(move_id,variant_id,qty,kind,receipt_item_id) VALUES(?,?,9,'purchase',?)",
+                         (move["move_id"], move["variant_id"], move["receipt_item_id"])),
+            "異動同來源": ("INSERT OR REPLACE INTO StockMovement(variant_id,qty,kind,receipt_item_id) VALUES(?,9,'purchase',?)",
+                           (move["variant_id"], move["receipt_item_id"])),
+            "退貨入庫同來源": ("INSERT OR REPLACE INTO StockMovement(variant_id,qty,kind,return_item_id) VALUES(?,9,'return',?)",
+                               (self.v1, ids["return_item"])),
+        }
+        for name, (sql, args) in cases.items():
+            with self.subTest(name), self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(sql, args)
+        self.assertEqual(conn.execute("SELECT qty FROM ReceiptItem WHERE receipt_item_id=?", (ids["receipt_item"],)).fetchone()[0], 5)
+        conn.rollback()
+
+    def test_posted_rows_reject_update_or_replace(self):
+        # 把未入帳的列改成撞上已入帳列的鍵:UPDATE OR REPLACE 會隱含刪除已入帳列,須擋下
+        ids = self.build_flow()
+        conn = self.raw()
+        conn.execute("PRAGMA foreign_keys=ON")
+        receipt = conn.execute("INSERT INTO Receipt(employee) VALUES(1)").lastrowid
+        free_receipt_item = conn.execute("INSERT INTO ReceiptItem(receipt_id,variant_id,qty) VALUES(?,?,1)", (receipt, self.v1)).lastrowid
+        free_sale = conn.execute("INSERT INTO Sale(payment,total,paid) VALUES('現金',0,0)").lastrowid
+        free_sale_item = conn.execute("INSERT INTO SaleItem(sale_id,variant_id,qty,unit_price) VALUES(?,?,1,1)", (free_sale, self.v1)).lastrowid
+        sid = conn.execute("SELECT session_id FROM StocktakeItem WHERE id=?", (ids["stocktake_item"],)).fetchone()[0]
+        free_take = conn.execute("INSERT INTO StocktakeItem(session_id,variant_id,system_qty,counted_qty) VALUES(?,?,0,0)", (sid, self.v1)).lastrowid
+        rid, rvid = conn.execute("SELECT return_id,variant_id FROM ReturnItem WHERE id=?", (ids["return_item"],)).fetchone()
+        other_vid = self.v2 if rvid == self.v1 else self.v1
+        free_ret = conn.execute("INSERT INTO ReturnItem(return_id,variant_id,qty) VALUES(?,?,1)", (rid, other_vid)).lastrowid
+        cases = {
+            "進貨明細主鍵": ("UPDATE OR REPLACE ReceiptItem SET receipt_item_id=? WHERE receipt_item_id=?", (ids["receipt_item"], free_receipt_item)),
+            "銷售明細主鍵": ("UPDATE OR REPLACE SaleItem SET item_id=? WHERE item_id=?", (ids["sale_item"], free_sale_item)),
+            "銷售單主鍵": ("UPDATE OR REPLACE Sale SET sale_id=? WHERE sale_id=?", (ids["sale"], free_sale)),
+            "盤點明細主鍵": ("UPDATE OR REPLACE StocktakeItem SET id=? WHERE id=?", (ids["stocktake_item"], free_take)),
+            "盤點明細同單同款": ("UPDATE OR REPLACE StocktakeItem SET variant_id=? WHERE id=?", (self.v2, free_take)),
+            "退貨品項主鍵": ("UPDATE OR REPLACE ReturnItem SET id=? WHERE id=?", (ids["return_item"], free_ret)),
+            "退貨品項同單同款": ("UPDATE OR REPLACE ReturnItem SET variant_id=? WHERE id=?", (rvid, free_ret)),
+        }
+        for name, (sql, args) in cases.items():
+            with self.subTest(name), self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(sql, args)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM ReceiptItem WHERE receipt_item_id=?", (ids["receipt_item"],)).fetchone()[0], 1)
+        conn.rollback()
+
     def test_allowed_updates_still_work(self):
         ids = self.build_flow()
         conn = self.raw()
@@ -179,7 +241,7 @@ class StockSourcesTest(FacadeTestCase):
         rep_item = self.return_item_id(rep, self.v1)
         self.invoke("returns.close", {"return_id": rep})
         self.invoke("returns.set_kind", {"return_id": rep, "kind": "repair"})
-        self.invoke("returns.approve", {"return_id": rep})
+        self.invoke("returns.approve", self.approve_payload(rep))
         self.invoke("returns.repair_receive", {"return_id": rep, "employee": 1, "items": [{"item_id": rep_item, "qty": 1}]})
         self.invoke("returns.close_item", {"return_id": rep, "item_id": rep_item, "reason": "廠商不換"})
         self.assertEqual(self.invoke("returns.detail", {"return_id": rep})["status"], "closed")
@@ -243,7 +305,7 @@ class StockSourcesTest(FacadeTestCase):
             self.invoke("returns.scan", {"return_id": ret, "variant_id": vid, "qty": 1})
         self.invoke("returns.close", {"return_id": ret})
         with self.fail_on_second_post(), self.assertRaises(RuntimeError):
-            self.invoke("returns.approve", {"return_id": ret})
+            self.invoke("returns.approve", self.approve_payload(ret))
         self.assertEqual(self.one("SELECT status FROM ReturnSession WHERE return_id=?", (ret,))[0], "pending")
         self.assertEqual(self.counts("StockMovement"), [base_moves])
 
@@ -253,7 +315,7 @@ class StockSourcesTest(FacadeTestCase):
         items = [self.return_item_id(rep, v) for v in (self.v1, self.v2)]
         self.invoke("returns.close", {"return_id": rep})
         self.invoke("returns.set_kind", {"return_id": rep, "kind": "repair"})
-        self.invoke("returns.approve", {"return_id": rep})
+        self.invoke("returns.approve", self.approve_payload(rep))
         with self.fail_on_second_post(), self.assertRaises(RuntimeError):
             self.invoke("returns.repair_receive", {"return_id": rep, "employee": 1,
                                                    "items": [{"item_id": i, "qty": 1} for i in items]})

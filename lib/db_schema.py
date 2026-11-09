@@ -295,6 +295,52 @@ CREATE TRIGGER IF NOT EXISTS trg_sale_lock_update BEFORE UPDATE ON Sale
    AND (OLD.order_discount IS NOT NEW.order_discount OR OLD.member_discount IS NOT NEW.member_discount
         OR OLD.total IS NOT NEW.total OR OLD.paid IS NOT NEW.paid OR OLD.change IS NOT NEW.change)
   BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+-- INSERT OR REPLACE 撞到既有列時會先隱含刪除,刪除觸發器不會觸發(未開 recursive_triggers):
+-- 新增前若會撞到已入帳的列(主鍵或任一唯一鍵)就擋下
+CREATE TRIGGER IF NOT EXISTS trg_receiptitem_lock_replace BEFORE INSERT ON ReceiptItem
+  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE receipt_item_id=NEW.receipt_item_id)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_saleitem_lock_replace BEFORE INSERT ON SaleItem
+  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE sale_item_id=NEW.item_id)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_stocktakeitem_lock_replace BEFORE INSERT ON StocktakeItem
+  WHEN EXISTS(SELECT 1 FROM StocktakeItem i JOIN StockMovement m ON m.stocktake_item_id=i.id
+              WHERE i.id=NEW.id OR (i.session_id=NEW.session_id AND i.variant_id=NEW.variant_id))
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_returnitem_lock_replace BEFORE INSERT ON ReturnItem
+  WHEN EXISTS(SELECT 1 FROM ReturnItem i JOIN StockMovement m ON m.return_item_id=i.id
+              WHERE i.id=NEW.id OR (i.return_id=NEW.return_id AND i.variant_id=NEW.variant_id))
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sale_lock_replace BEFORE INSERT ON Sale
+  WHEN EXISTS(SELECT 1 FROM SaleItem si JOIN StockMovement m ON m.sale_item_id=si.item_id WHERE si.sale_id=NEW.sale_id)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+-- UPDATE OR REPLACE 把別列改成撞上已入帳列的鍵時,同樣會隱含刪除已入帳列:更新前一併擋下
+CREATE TRIGGER IF NOT EXISTS trg_receiptitem_lock_update_replace BEFORE UPDATE ON ReceiptItem
+  WHEN NEW.receipt_item_id IS NOT OLD.receipt_item_id
+   AND EXISTS(SELECT 1 FROM StockMovement WHERE receipt_item_id=NEW.receipt_item_id)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_saleitem_lock_update_replace BEFORE UPDATE ON SaleItem
+  WHEN NEW.item_id IS NOT OLD.item_id
+   AND EXISTS(SELECT 1 FROM StockMovement WHERE sale_item_id=NEW.item_id)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sale_lock_update_replace BEFORE UPDATE ON Sale
+  WHEN NEW.sale_id IS NOT OLD.sale_id
+   AND EXISTS(SELECT 1 FROM SaleItem si JOIN StockMovement m ON m.sale_item_id=si.item_id WHERE si.sale_id=NEW.sale_id)
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_stocktakeitem_lock_update_replace BEFORE UPDATE ON StocktakeItem
+  WHEN EXISTS(SELECT 1 FROM StocktakeItem i JOIN StockMovement m ON m.stocktake_item_id=i.id
+              WHERE i.id<>OLD.id AND (i.id=NEW.id OR (i.session_id=NEW.session_id AND i.variant_id=NEW.variant_id)))
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_returnitem_lock_update_replace BEFORE UPDATE ON ReturnItem
+  WHEN EXISTS(SELECT 1 FROM ReturnItem i JOIN StockMovement m ON m.return_item_id=i.id
+              WHERE i.id<>OLD.id AND (i.id=NEW.id OR (i.return_id=NEW.return_id AND i.variant_id=NEW.variant_id)))
+  BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_replace BEFORE INSERT ON StockMovement
+  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE move_id=NEW.move_id
+              OR receipt_item_id=NEW.receipt_item_id OR sale_item_id=NEW.sale_item_id
+              OR stocktake_item_id=NEW.stocktake_item_id
+              OR (kind='return' AND NEW.kind='return' AND return_item_id=NEW.return_item_id))
+  BEGIN SELECT RAISE(ABORT, '庫存異動不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_update BEFORE UPDATE ON StockMovement
   BEGIN SELECT RAISE(ABORT, '庫存異動不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_delete BEFORE DELETE ON StockMovement

@@ -28,7 +28,7 @@ class TestRepair(ReturnsBase):
 
     def start_repair(self):
         self.set_kind("repair")
-        self.invoke("returns.approve", {"return_id": self.rid})
+        self.invoke("returns.approve", self.approve_payload(self.rid))
 
     def receive(self, vid, qty, employee=1):
         return self.invoke("returns.repair_receive", {"return_id": self.rid, "employee": employee,
@@ -104,7 +104,7 @@ class TestRepair(ReturnsBase):
         with get_conn(self.db) as conn:
             conn.execute("UPDATE ReturnSession SET kind='repair' WHERE return_id=?", (self.rid,))
             conn.commit()
-        self.assert_application_error("conflict", "returns.approve", {"return_id": self.rid})
+        self.assert_application_error("conflict", "returns.approve", self.approve_payload(self.rid))
 
     def test_approve_repair_keeps_stock_and_marks_repairing(self):
         self.start_repair()

@@ -12,7 +12,7 @@ class TestFixG2Returns(ReturnsBase):
         self.invoke("returns.close", {"return_id": rid})
         self.as_admin()
         self.invoke("returns.set_kind", {"return_id": rid, "kind": "repair"})
-        if approve: self.invoke("returns.approve", {"return_id": rid})
+        if approve: self.invoke("returns.approve", self.approve_payload(rid))
         return rid
 
     def ids(self, kind):
@@ -35,7 +35,7 @@ class TestFixG2Returns(ReturnsBase):
         items = {i["variant_id"]: i["disposition"] for i in self.invoke("returns.detail", {"return_id": rid})["items"]}
         self.assertIsNone(items[self.v2])   # 依單據種類:返修單品項沒有個別處理方式
         self.invoke("returns.close", {"return_id": rid})
-        self.invoke("returns.approve", {"return_id": rid})
+        self.invoke("returns.approve", self.approve_payload(rid))
         self.assertEqual(self.invoke("returns.detail", {"return_id": rid})["status"], "repairing")
 
     def test_normal_scan_still_restock(self):

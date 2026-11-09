@@ -126,7 +126,11 @@ window.PosPages["page-returns"] = {
     },
     async approve() {
       if (!this.canReview) { this.showError("需要管理者權限"); return; }
+      if (this.kindBusy) return;
       const rid = this.current;
+      // 確認框顯示的內容一併送後端核對,讀回前若已變更則後端拒絕
+      const kind = this.detail.kind;
+      const items = this.detail.items.map(i => ({item_id: i.id, qty: i.qty, disposition: i.disposition ?? null}));
       const count = key => this.detail.items.filter(i => i.disposition === key).length;
       const message = this.detail.kind === "repair"
         ? `返修不入庫 ${this.detail.items.length} 項。核准後此單轉為返修中，等待返新進貨或結案，不會調整庫存。確定核准?`
@@ -137,7 +141,7 @@ window.PosPages["page-returns"] = {
       if (!this.canReview) { this.showError("需要管理者權限"); return; }
       // 失敗留在原單並重新載入,成功才清空回清單
       let ok = false;
-      await this.write(async () => { await API.approveReturn(rid); ok = true; });
+      await this.write(async () => { await API.approveReturn(rid, kind, items); ok = true; });
       if (!ok) return;
       this.current = null; this.detail = null;
       await this.guard(() => this.reload());

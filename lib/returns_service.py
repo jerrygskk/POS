@@ -26,7 +26,7 @@ def _validate(action, payload):
         "returns.close":{"return_id"}, "returns.withdraw":{"return_id"},
         "returns.set_disposition":{"return_id","item_id","disposition"},
         "returns.set_kind":{"return_id","kind"},
-        "returns.approve":{"return_id"}, "returns.cancel":{"return_id","employee"},
+        "returns.approve":{"return_id","kind","items"}, "returns.cancel":{"return_id","employee"},
         "returns.pending_count":set()}[action]
     _allow(payload, allowed)
     for key in ("return_id", "variant_id", "item_id"):
@@ -57,6 +57,17 @@ def _validate(action, payload):
         if len((payload["reason"] or "").strip()) > REASON_MAX: raise ValidationError(f"退貨原因最多 {REASON_MAX} 字")
     if action == "returns.set_disposition" and payload.get("disposition") not in DISPOSITIONS:
         raise ValidationError("處理方式不正確")
+    if action == "returns.approve":
+        # 前端把確認框上顯示的種類與各品項處理方式一起送來,後端核對一致才入帳
+        if payload.get("kind") not in RETURN_KINDS: raise ValidationError("退貨種類不正確")
+        items = payload.get("items")
+        if not isinstance(items, list): raise ValidationError("items 必須是清單")
+        for it in items:
+            if not isinstance(it, dict) or set(it) != {"item_id", "qty", "disposition"}: raise ValidationError("items 格式不正確")
+            if not _is_int(it["item_id"]): raise ValidationError("item_id 必須是整數")
+            if not _is_int(it["qty"]) or it["qty"] <= 0: raise ValidationError("數量必須是正整數")
+            if it["disposition"] is not None and it["disposition"] not in DISPOSITIONS: raise ValidationError("處理方式不正確")
+        if len({it["item_id"] for it in items}) != len(items): raise ValidationError("品項重複")
     if action == "returns.set_kind" and payload.get("kind") not in RETURN_KINDS:
         raise ValidationError("退貨種類不正確")
     if action == "returns.history":
@@ -208,17 +219,24 @@ class ReturnsService:
         self.repo.check_kind(rid)
         return {"ok": True}
     def set_kind(self, rid, kind):
-        # 整張單切換:切返修時品項處理方式全部清空,切回一般時全部設回加回庫存
-        self.repo.require_pending(rid)
+        # 整張單切換:切返修時品項處理方式全部清空,切回一般時全部設回加回庫存;
+        # 種類沒變就不動,重送不得蓋掉已選的不入庫／不同意
+        session = self.repo.require_pending(rid)
+        if session["kind"] == kind: return {"ok": True}
         self.repo.execute("UPDATE ReturnSession SET kind=? WHERE return_id=?", (kind, rid))
         self.repo.execute("UPDATE ReturnItem SET disposition=? WHERE return_id=?",
                           (None if kind == "repair" else "restock", rid))
         self.repo.check_kind(rid)
         return {"ok": True}
-    def approve(self, rid):
+    def approve(self, rid, kind, items):
         # 只有「加回庫存」的品項寫入庫存流水;不入庫與不同意只留在退貨單上
         session = self.repo.require_pending(rid)
         self.repo.check_kind(rid)
+        # 確認框顯示的內容(種類、品項、數量、處理方式)必須等於資料庫現況;
+        # 切換尚未讀回、或抽回改數量後重送,都拒絕,避免照未確認的內容入帳
+        saved = {r["id"]: (r["qty"], r["disposition"]) for r in self.repo.all("SELECT id,qty,disposition FROM ReturnItem WHERE return_id=?", (rid,))}
+        if session["kind"] != kind or saved != {it["item_id"]: (it["qty"], it["disposition"]) for it in items}:
+            raise ConflictError("退貨單內容已變更，請重新確認後再核准")
         if session["kind"] == "repair":
             # 返修品項等返新進貨或結案才完成,核准當下不動庫存
             self.repo.execute("UPDATE ReturnSession SET status='repairing',approved_at=datetime('now','localtime') WHERE return_id=?", (rid,))
@@ -305,7 +323,7 @@ class ReturnsFacade(BaseFacade):
         if not self._is_admin(): raise ForbiddenError()
         if action == "returns.set_disposition": return s.set_disposition(p["return_id"], p["item_id"], p["disposition"])
         if action == "returns.set_kind": return s.set_kind(p["return_id"], p["kind"])
-        if action == "returns.approve": return s.approve(p["return_id"])
+        if action == "returns.approve": return s.approve(p["return_id"], p["kind"], p["items"])
         if action == "returns.close_item": return s.close_item(p["return_id"], p["item_id"], p["reason"])
         if action == "returns.reopen_item": return s.reopen_item(p["return_id"], p["item_id"])
         return s.pending_count()

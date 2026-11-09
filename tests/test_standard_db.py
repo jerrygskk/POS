@@ -3,6 +3,7 @@ import hashlib
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from lib import db_schema
@@ -150,6 +151,27 @@ class StandardDbTest(unittest.TestCase):
     def test_duplicate_text_value_aborts_and_removes_output(self):
         self._mutate("INSERT INTO VariantAttribute VALUES(1,2,NULL,'另一筆');")
         self.assert_failed_cleanly("寫入新格式失敗")
+
+    def test_two_values_on_select_field_stops(self):
+        self._mutate("INSERT INTO VariantAttribute VALUES(1,1,11,NULL);")
+        self.assert_failed_cleanly("只能填一個值")
+
+    def test_option_value_on_text_field_stops(self):
+        self._mutate("INSERT INTO AttributeOption(option_id,field_id,value,sort,active) VALUES(15,2,'選項',1,1);"
+                     "INSERT INTO VariantAttribute VALUES(2,2,15,NULL);")
+        self.assert_failed_cleanly("型態不符")
+
+    def test_source_hash_change_removes_output(self):
+        real = tool.file_hash
+        calls = []
+        def changed(path):
+            calls.append(path)
+            return real(path) + ("-changed" if len(calls) > 1 else "")
+        with patch.object(tool, "file_hash", changed), self.assertRaises(tool.ConversionError) as raised:
+            self.build()
+        self.assertIn("被改變", str(raised.exception))
+        self.assertFalse(self.out.exists())
+        self.assertFalse(self.out.with_name(self.out.name + "-journal").exists())
 
 
 if __name__ == "__main__":
