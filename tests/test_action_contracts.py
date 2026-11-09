@@ -177,7 +177,8 @@ ACTION_CONTRACTS = {
     "returns.remove_item": schema([I("return_id", required=True), I("item_id", required=True)]),
     "returns.close": schema([I("return_id", required=True)]),
     "returns.withdraw": schema([I("return_id", required=True)]),
-    "returns.set_disposition": schema([I("return_id", required=True), I("item_id", required=True), S("disposition", required=True, constraint="restock|discard|reject|repair", blank="reject")]),
+    "returns.set_kind": schema([I("return_id", required=True), S("kind", required=True, constraint="normal|repair", blank="reject")]),
+    "returns.set_disposition": schema([I("return_id", required=True), I("item_id", required=True), S("disposition", required=True, constraint="restock|discard|reject", blank="reject")]),
     "returns.approve": schema([I("return_id", required=True)]),
     "returns.cancel": schema([I("return_id", required=True), I("employee", required=True, constraint="1..6")]),
     "returns.pending_count": schema([]),
@@ -246,7 +247,7 @@ TARGET_BY_ACTION = {
     **{action:"lib.returns_service.ReturnsFacade._prepare_payload -> _validate" for action in (
         "returns.create","returns.list","returns.history","returns.detail","returns.scan",
         "returns.set_qty","returns.set_sale","returns.set_reason","returns.remove_item","returns.close","returns.withdraw",
-        "returns.set_disposition","returns.approve","returns.cancel","returns.pending_count",
+        "returns.set_disposition","returns.set_kind","returns.approve","returns.cancel","returns.pending_count",
         "returns.repair_receive","returns.close_item","returns.reopen_item")},
     "payments.list":"lib.sales_service.SalesFacade._prepare_payload -> _strict_mapping",
     "sales.recent":"lib.sales_service.SalesFacade._prepare_payload -> _strict_mapping",
@@ -525,7 +526,7 @@ class ActionContractTests(FacadeTestCase):
         self.invoke("returns.scan", {"return_id":self.repair_id, "variant_id":self.variant_id, "qty":500})
         self.repair_item_id = self.invoke("returns.detail", {"return_id":self.repair_id})["items"][0]["id"]
         self.invoke("returns.close", {"return_id":self.repair_id})
-        self.invoke("returns.set_disposition", {"return_id":self.repair_id, "item_id":self.repair_item_id, "disposition":"repair"})
+        self.invoke("returns.set_kind", {"return_id":self.repair_id, "kind":"repair"})
         self.invoke("returns.approve", {"return_id":self.repair_id})
         self.delete_category_id = self.create_category("待刪種類")
         self.delete_brand_id = self.invoke("brands.create", {"name":"待刪廠牌"})["brand_id"]
@@ -562,6 +563,7 @@ class ActionContractTests(FacadeTestCase):
             "returns.set_reason":{"return_id":self.return_id,"item_id":self.return_item_id,"reason":None}, "returns.remove_item":{"return_id":self.return_id,"item_id":self.return_item_id},
             "returns.close":{"return_id":self.return_id}, "returns.withdraw":{"return_id":self.return_id},
             "returns.set_disposition":{"return_id":self.return_id,"item_id":self.return_item_id,"disposition":"discard"},
+            "returns.set_kind":{"return_id":self.return_id,"kind":"repair"},
             "returns.approve":{"return_id":self.return_id}, "returns.cancel":{"return_id":self.return_id,"employee":1}, "returns.pending_count":{},
             "returns.repair_receive":{"return_id":self.repair_id,"employee":1,"items":[{"item_id":self.repair_item_id,"qty":1}]},
             "returns.close_item":{"return_id":self.repair_id,"item_id":self.repair_item_id,"reason":"廠商不保固"},
@@ -596,7 +598,7 @@ class ActionContractTests(FacadeTestCase):
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
                              self.facade.stocktake.ACTIONS, self.facade.returns.ACTIONS,
                              self.facade.printing.ACTIONS, self.facade.members.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 109)
+        self.assertEqual(len(ACTION_CONTRACTS), 110)
         self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS | AUTH_ACTIONS | DESKTOP_UPDATE_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
@@ -758,7 +760,7 @@ class ActionContractTests(FacadeTestCase):
             self.invoke("stocktake.close", {"session_id": self.session_id})
             if action == "stocktake.create":
                 self.invoke("stocktake.approve", {"session_id": self.session_id})
-        if action in {"returns.withdraw", "returns.set_disposition", "returns.approve"}:
+        if action in {"returns.withdraw", "returns.set_disposition", "returns.set_kind", "returns.approve"}:
             self.invoke("returns.close", {"return_id": self.return_id})
         if action == "returns.reopen_item":
             self.invoke("returns.close_item", {"return_id": self.repair_id, "item_id": self.repair_item_id, "reason": "x"})

@@ -9,8 +9,10 @@ window.PosMixin = {
     statusText(status) {
       return {open: "進行中", pending: "待核准", repairing: "返修中", closed: "已結案", cancelled: "已作廢"}[status] || status;
     },
+    // 返修單的品項沒有個別處理方式(NULL),一律顯示返修不入庫
     dispositionText(key) {
-      return {restock: "加回庫存", discard: "退貨不入庫", reject: "不同意退貨", repair: "返修不入庫"}[key] || key;
+      if (key == null) return "返修不入庫";
+      return {restock: "加回庫存", discard: "退貨不入庫", reject: "不同意退貨"}[key] || key;
     },
     async guard(fn) {
       try { return await fn(); }

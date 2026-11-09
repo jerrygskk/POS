@@ -216,7 +216,8 @@ CREATE TABLE IF NOT EXISTS ReturnSession(      -- 退貨單:送審後由管理�
   cancelled_by INTEGER CHECK(cancelled_by BETWEEN 1 AND 6),
   status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','pending','repairing','closed','cancelled')),
   refund_amount INTEGER,                        -- 退款金額:預留,尚未使用
-  completed_at TEXT                             -- 返修單全部品項返新或結案的時間
+  completed_at TEXT,                            -- 返修單全部品項返新或結案的時間
+  kind TEXT NOT NULL DEFAULT 'normal' CHECK(kind IN ('normal','repair'))  -- 整張單的模式:一般／返修
 );
 CREATE TABLE IF NOT EXISTS ReturnItem(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -225,11 +226,15 @@ CREATE TABLE IF NOT EXISTS ReturnItem(
   qty INTEGER NOT NULL CHECK(qty > 0),
   sale_id INTEGER REFERENCES Sale(sale_id),     -- 原銷售單(選填)
   reason TEXT,
-  disposition TEXT NOT NULL DEFAULT 'restock'
-    CHECK(disposition IN ('restock','discard','reject','repair')),  -- 加回庫存／退貨不入庫／不同意／返修不入庫
+  -- 一般退貨:加回庫存／退貨不入庫／不同意。返修單的品項為 NULL
+  -- (與父單 kind 一致由 returns_service._check_kind 在同一交易檢查)
+  disposition TEXT DEFAULT 'restock' CHECK(disposition IN ('restock','discard','reject')),
   closed_qty INTEGER NOT NULL DEFAULT 0,        -- 返修結案件數(廠商不換不修)，已返新件數看 StockMovement kind=repair
   closed_reason TEXT,
   closed_at TEXT,
+  CHECK(closed_qty BETWEEN 0 AND qty),
+  CHECK(closed_qty = 0 OR (closed_reason IS NOT NULL AND closed_at IS NOT NULL)),
+  CHECK(closed_qty = 0 OR disposition IS NULL),  -- 只有返修品項能結案
   UNIQUE(return_id, variant_id),
   UNIQUE(id, variant_id)
 );
@@ -301,7 +306,7 @@ CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_delete BEFORE DELETE ON StockM
 # 勿自行 commit/executescript(runner 已包在同一交易裡)。
 # 舊版(v24 以前)的升級步驟已移除:低於 MIN_SUPPORTED_VERSION 的資料庫一律拒絕開啟,
 # 主檔改由 tools/make_standard_db.py 唯讀轉出新母版。
-BASE_VERSION = 26
+BASE_VERSION = 27
 MIGRATIONS = []
 
 # 最新版號 = 新結構第一版 + 升級步驟筆數;全新 DB 建 SCHEMA 即為此版

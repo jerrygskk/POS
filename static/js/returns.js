@@ -5,7 +5,8 @@ window.PosPages["page-returns"] = {
   data() {
     return { sessions: [], current: null, detail: null, scanCode: "",
              employee: window.PosEmployee,
-             dispositions: [["restock", "加回庫存"], ["discard", "退貨不入庫"], ["reject", "不同意退貨"], ["repair", "返修不入庫"]] };
+             kindBusy: false,
+             dispositions: [["restock", "加回庫存"], ["discard", "退貨不入庫"], ["reject", "不同意退貨"]] };
   },
   computed: {
     isAdmin() { return window.PosAuth.isAdmin; },
@@ -81,6 +82,17 @@ window.PosPages["page-returns"] = {
       if (!this.canEdit) { this.showError("退貨單不是進行中，無法移除品項"); return; }
       await this.write(() => API.removeReturnItem(this.current, it.id));
     },
+    // 返修是整張單的模式:切換一次改全部品項;切換中不可重按,成敗都重讀單據
+    async setKind(kind) {
+      if (!this.canReview) { this.showError("需要管理者權限"); await this.guard(() => this.refreshDetail()); return; }
+      if (this.kindBusy || this.detail.kind === kind) return;
+      const rid = this.current;
+      this.kindBusy = true;
+      try {
+        await this.write(() => API.setReturnKind(rid, kind));
+        await this.guard(() => window.PosAuthOps.refresh());
+      } finally { this.kindBusy = false; }
+    },
     async setDisposition(it) {
       if (!this.canReview) { this.showError("需要管理者權限"); await this.guard(() => this.refreshDetail()); return; }
       await this.write(() => API.setReturnDisposition(this.current, it.id, it.disposition));
@@ -116,8 +128,8 @@ window.PosPages["page-returns"] = {
       if (!this.canReview) { this.showError("需要管理者權限"); return; }
       const rid = this.current;
       const count = key => this.detail.items.filter(i => i.disposition === key).length;
-      const message = count("repair")
-        ? `返修不入庫 ${count("repair")} 項。核准後此單轉為返修中，等待返新進貨或結案，不會調整庫存。確定核准?`
+      const message = this.detail.kind === "repair"
+        ? `返修不入庫 ${this.detail.items.length} 項。核准後此單轉為返修中，等待返新進貨或結案，不會調整庫存。確定核准?`
         : `加回庫存 ${count("restock")} 項、退貨不入庫 ${count("discard")} 項、不同意 ${count("reject")} 項。核准後依此調整庫存。確定核准?`;
       if (!await PosConfirm.ask(message)) return;
       // 確認期間換到別張單就不動;仍在原單才檢查權限

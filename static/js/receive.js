@@ -140,7 +140,7 @@ window.PosPages["page-receive"] = {
       this.$nextTick(() => (mode === "normal" ? this.$refs.scan : this.$refs.repairInput)?.focus());
     },
     repairLeft(it) { return it.qty - it.closed_qty - it.repaired_qty; },
-    repairItems() { return (this.draft.repair?.items || []).filter(it => it.disposition === "repair"); },
+    repairItems() { return this.draft.repair?.kind === "repair" ? this.draft.repair.items : []; },
     async loadRepair() {
       if (this.draft.repairBusy) return;
       const text = String(this.draft.repairInput || "").trim();
@@ -148,7 +148,7 @@ window.PosPages["page-receive"] = {
       this.draft.repairBusy = true;
       try {
         const detail = await API.returnDetail(Number(text));
-        if (!detail.is_repair) { this.showError(`退貨單 ${text} 不是返修單`); return; }
+        if (detail.kind !== "repair") { this.showError(`退貨單 ${text} 不是返修單`); return; }
         if (detail.status !== "repairing") { this.showError(`退貨單 ${text} 目前為「${this.statusText(detail.status)}」，沒有待返新的品項`); return; }
         this.draft.repair = detail;
         this.draft.repairQty = {};

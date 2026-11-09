@@ -11,7 +11,7 @@ class TestFixG2Returns(ReturnsBase):
         self.invoke("returns.scan", {"return_id": rid, "variant_id": self.v1, "qty": 2})
         self.invoke("returns.close", {"return_id": rid})
         self.as_admin()
-        self.invoke("returns.set_disposition", {"return_id": rid, "item_id": self.return_item_id(rid, self.v1), "disposition": "repair"})
+        self.invoke("returns.set_kind", {"return_id": rid, "kind": "repair"})
         if approve: self.invoke("returns.approve", {"return_id": rid})
         return rid
 
@@ -33,7 +33,7 @@ class TestFixG2Returns(ReturnsBase):
         self.invoke("returns.withdraw", {"return_id": rid})
         self.invoke("returns.scan", {"return_id": rid, "variant_id": self.v2, "qty": 1})
         items = {i["variant_id"]: i["disposition"] for i in self.invoke("returns.detail", {"return_id": rid})["items"]}
-        self.assertEqual(items[self.v2], "repair")
+        self.assertIsNone(items[self.v2])   # 依單據種類:返修單品項沒有個別處理方式
         self.invoke("returns.close", {"return_id": rid})
         self.invoke("returns.approve", {"return_id": rid})
         self.assertEqual(self.invoke("returns.detail", {"return_id": rid})["status"], "repairing")
@@ -88,4 +88,4 @@ def _old_detail(svc, rid):
               "disposition": r["disposition"], "closed_qty": r["closed_qty"], "closed_reason": r["closed_reason"],
               "closed_at": r["closed_at"], "repaired_qty": repaired.get(r["id"], 0),
               "label_barcode": codes.get(r["variant_id"])} for r in rows]
-    return {**dict(session), "is_repair": any(r["disposition"] == "repair" for r in rows), "items": items}
+    return {**dict(session), "items": items}

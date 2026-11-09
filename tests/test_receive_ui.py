@@ -168,7 +168,7 @@ assert.equal(errors.pop(),"進貨清單已變動，請重新確認進貨。");as
     def test_repair_labels_lock_repair_screen_while_adding(self):
         self._run(r'''
 process.exitCode=1;const s=mk();s.draft.mode="repair";s.$refs.repairInput={focus(){}};
-s.draft.repair={return_id:5,status:"repairing",is_repair:true,items:[]};s.draft.repairQty={7:2};s.draft.repairLabeled={};
+s.draft.repair={return_id:5,status:"repairing",kind:"repair",items:[]};s.draft.repairQty={7:2};s.draft.repairLabeled={};
 const it={id:7,variant_id:7,label_barcode:"TL7"},d=deferred();let asks=0;confirm.ask=async()=>{asks++;return true};
 context.window.PosLabelQueueAdd=(...args)=>{labelCalls.push(args);return d.promise};
 const first=s.addRepairLabels(it);s.addRepairLabels(it);await tick();

@@ -23,8 +23,11 @@ class TestRepair(ReturnsBase):
     def items(self):
         return {i["variant_id"]: i for i in self.invoke("returns.detail", {"return_id": self.rid})["items"]}
 
+    def set_kind(self, kind):
+        return self.invoke("returns.set_kind", {"return_id": self.rid, "kind": kind})
+
     def start_repair(self):
-        self.disp(self.v1, "repair")
+        self.set_kind("repair")
         self.invoke("returns.approve", {"return_id": self.rid})
 
     def receive(self, vid, qty, employee=1):
@@ -34,20 +37,74 @@ class TestRepair(ReturnsBase):
     def status(self):
         return self.invoke("returns.detail", {"return_id": self.rid})["status"]
 
-    def test_repair_switches_whole_sheet(self):
+    def test_set_kind_switches_whole_sheet(self):
         self.disp(self.v3, "reject")
-        self.disp(self.v1, "repair")
-        self.assertEqual({i["disposition"] for i in self.items().values()}, {"repair"})
-        self.disp(self.v2, "reject")
-        self.assertEqual({i["disposition"] for i in self.items().values()}, {"reject"})
+        self.set_kind("repair")
+        detail = self.invoke("returns.detail", {"return_id": self.rid})
+        self.assertEqual((detail["kind"], {i["disposition"] for i in detail["items"]}), ("repair", {None}))
+        self.assertNotIn("is_repair", detail)
+        # 返修單不逐項選處理方式
+        self.assert_application_error("conflict", "returns.set_disposition",
+                                      {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v2), "disposition": "reject"})
+        self.set_kind("normal")
+        detail = self.invoke("returns.detail", {"return_id": self.rid})
+        self.assertEqual((detail["kind"], {i["disposition"] for i in detail["items"]}), ("normal", {"restock"}))
+        self.assert_application_error("validation_error", "returns.set_disposition",
+                                      {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v2), "disposition": "repair"})
+        self.assert_application_error("validation_error", "returns.set_kind", {"return_id": self.rid, "kind": "other"})
 
-    def test_approve_rejects_mixed_sheet(self):
-        for other in ("restock", "reject"):
-            with get_conn(self.db) as conn:
-                conn.execute("UPDATE ReturnItem SET disposition=? WHERE return_id=?", (other, self.rid))
-                conn.execute("UPDATE ReturnItem SET disposition='repair' WHERE return_id=? AND variant_id=?", (self.rid, self.v1))
-                conn.commit()
-            self.assert_application_error("conflict", "returns.approve", {"return_id": self.rid})
+    def test_set_kind_only_while_pending(self):
+        self.invoke("returns.withdraw", {"return_id": self.rid})
+        self.assert_application_error("conflict", "returns.set_kind", {"return_id": self.rid, "kind": "repair"})
+        empty = self.invoke("returns.create", {"employee": 1})["return_id"]
+        self.assert_application_error("conflict", "returns.set_kind", {"return_id": empty, "kind": "repair"})
+
+    def test_set_kind_requires_admin_even_after_confirm(self):
+        self.as_employee()
+        self.assert_application_error("forbidden", "returns.set_kind", {"return_id": self.rid, "kind": "repair"})
+        self.as_admin()
+        # 外層檢查時是管理者,進交易後已閒置登出(確認框期間):交易內再查一次仍擋下且不寫入
+        from lib.returns_service import ReturnsFacade
+        from lib.application_errors import ForbiddenError
+        answers = iter([True, False])
+
+        class FlakySession:
+            def is_admin(self):
+                return next(answers, False)
+        with self.assertRaises(ForbiddenError):
+            ReturnsFacade(self.db, session=FlakySession()).invoke("returns.set_kind", {"return_id": self.rid, "kind": "repair"})
+        self.assertEqual(self.invoke("returns.detail", {"return_id": self.rid})["kind"], "normal")
+
+    def test_empty_pending_sheet_can_switch(self):
+        # 抽回、刪光品項是進行中,不能送審;直接在資料庫造一張空的待核准單,切換仍一致
+        empty = self.invoke("returns.create", {"employee": 1})["return_id"]
+        with get_conn(self.db) as conn:
+            conn.execute("UPDATE ReturnSession SET status='pending' WHERE return_id=?", (empty,))
+            conn.commit()
+        self.invoke("returns.set_kind", {"return_id": empty, "kind": "repair"})
+        self.assertEqual(self.invoke("returns.detail", {"return_id": empty})["kind"], "repair")
+
+    def test_database_rejects_bad_dispositions_and_close_fields(self):
+        conn = get_conn(self.db)
+        self.addCleanup(conn.close)
+        item = self.return_item_id(self.rid, self.v1)
+        for sql, args in (
+            ("UPDATE ReturnItem SET disposition='repair' WHERE id=?", (item,)),                      # 舊值已移除
+            ("UPDATE ReturnItem SET disposition=NULL, closed_qty=3, closed_reason='x', closed_at='t' WHERE id=?", (item,)),  # 超過數量
+            ("UPDATE ReturnItem SET disposition=NULL, closed_qty=1 WHERE id=?", (item,)),            # 結案缺理由與時間
+            ("UPDATE ReturnItem SET closed_qty=1, closed_reason='x', closed_at='t' WHERE id=?", (item,)),  # 一般品項不能結案
+            ("UPDATE ReturnSession SET kind='other' WHERE return_id=?", (self.rid,)),
+        ):
+            with self.subTest(sql), self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(sql, args)
+        conn.rollback()
+
+    def test_service_rejects_kind_and_disposition_mismatch(self):
+        # 資料庫只擋單筆;單據種類與品項不一致由服務在同一交易擋下
+        with get_conn(self.db) as conn:
+            conn.execute("UPDATE ReturnSession SET kind='repair' WHERE return_id=?", (self.rid,))
+            conn.commit()
+        self.assert_application_error("conflict", "returns.approve", {"return_id": self.rid})
 
     def test_approve_repair_keeps_stock_and_marks_repairing(self):
         self.start_repair()

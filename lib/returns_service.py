@@ -3,11 +3,12 @@ from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from lib.product_rules import allow_keys as _allow, date_range, date_sql, is_int as _is_int, require_employee
 
-DISPOSITIONS = ("restock", "discard", "reject", "repair")
-HISTORY_KINDS = ("normal", "repair")
+DISPOSITIONS = ("restock", "discard", "reject")
+RETURN_KINDS = ("normal", "repair")
+HISTORY_KINDS = RETURN_KINDS
 REASON_MAX = 30
-# 返修單:任一品項返修整張就是返修單,全部品項都是返修,不混其他處理方式;一般退貨不含返修
-REPAIR_SQL = "EXISTS (SELECT 1 FROM ReturnItem x WHERE x.return_id=ReturnSession.return_id AND x.disposition='repair')"
+# 返修是整張單的模式(ReturnSession.kind),返修單的品項沒有個別處理方式
+REPAIR_SQL = "kind='repair'"
 
 def _optional_text(payload, key):
     if payload.get(key) is not None and not isinstance(payload[key], str):
@@ -24,6 +25,7 @@ def _validate(action, payload):
         "returns.remove_item":{"return_id","item_id"},
         "returns.close":{"return_id"}, "returns.withdraw":{"return_id"},
         "returns.set_disposition":{"return_id","item_id","disposition"},
+        "returns.set_kind":{"return_id","kind"},
         "returns.approve":{"return_id"}, "returns.cancel":{"return_id","employee"},
         "returns.pending_count":set()}[action]
     _allow(payload, allowed)
@@ -55,6 +57,8 @@ def _validate(action, payload):
         if len((payload["reason"] or "").strip()) > REASON_MAX: raise ValidationError(f"退貨原因最多 {REASON_MAX} 字")
     if action == "returns.set_disposition" and payload.get("disposition") not in DISPOSITIONS:
         raise ValidationError("處理方式不正確")
+    if action == "returns.set_kind" and payload.get("kind") not in RETURN_KINDS:
+        raise ValidationError("退貨種類不正確")
     if action == "returns.history":
         if payload.get("kind", "normal") not in HISTORY_KINDS: raise ValidationError("退貨種類不正確")
         date_range(payload)
@@ -82,13 +86,14 @@ class ReturnsRepository(BaseRepository):
             "SELECT variant_id,COALESCE(MIN(CASE WHEN source='store' THEN barcode END),"
             f"MIN(CASE WHEN source='factory' THEN barcode END)) code FROM Barcode WHERE variant_id IN ({marks}) GROUP BY variant_id", vids)}
     def repair_item(self, rid, item_id):
-        row = self.one("SELECT * FROM ReturnItem WHERE return_id=? AND id=? AND disposition='repair'", (rid, item_id))
+        row = self.one("SELECT i.* FROM ReturnItem i JOIN ReturnSession s ON s.return_id=i.return_id "
+                       "WHERE i.return_id=? AND i.id=? AND s.kind='repair'", (rid, item_id))
         if row is None: raise NotFoundError("找不到返修品項")
         return row
     # 每個返修品項都返新或結案完,整張單才算完成;撤回結案時退回返修中
     def refresh_completion(self, rid):
         done = self.repaired(rid)
-        left = [r for r in self.all("SELECT id,qty,closed_qty FROM ReturnItem WHERE return_id=? AND disposition='repair'", (rid,))
+        left = [r for r in self.all("SELECT id,qty,closed_qty FROM ReturnItem WHERE return_id=?", (rid,))
                 if r["qty"] - r["closed_qty"] - done.get(r["id"], 0) > 0]
         if left:
             self.execute("UPDATE ReturnSession SET status='repairing',completed_at=NULL WHERE return_id=?", (rid,))
@@ -104,6 +109,12 @@ class ReturnsRepository(BaseRepository):
             raise NotFoundError("找不到子產品")
     def update_item(self, sql, args):
         if self.execute(sql, args).rowcount == 0: raise NotFoundError("找不到退貨品項")
+    def check_kind(self, rid):
+        """單據種類與品項處理方式一致:返修單的品項全為 NULL,一般單全有處理方式。
+        跨兩張表,不寫 trigger,所有會改到兩邊的寫入在同一交易內呼叫。"""
+        bad = self.one("SELECT 1 FROM ReturnItem i JOIN ReturnSession s ON s.return_id=i.return_id "
+                       "WHERE i.return_id=? AND (s.kind='repair') <> (i.disposition IS NULL) LIMIT 1", (rid,))
+        if bad: raise ConflictError("退貨品項的處理方式與退貨單種類不一致")
 
 class ReturnsService:
     def __init__(self, repository):
@@ -151,14 +162,16 @@ class ReturnsService:
                   "disposition": r["disposition"], "closed_qty": r["closed_qty"], "closed_reason": r["closed_reason"],
                   "closed_at": r["closed_at"], "repaired_qty": repaired.get(r["id"], 0),
                   "label_barcode": codes.get(r["variant_id"])} for r in rows]
-        return {**dict(session), "is_repair": any(r["disposition"] == "repair" for r in rows), "items": items}
+        return {**dict(session), "items": items}
     def scan(self, rid, vid, qty):
         self.repo.require_open(rid)
         self.repo.require_variant(vid)
-        # 返修是整張單的模式:單上已是返修(抽回後再掃)時,新品項也設返修
-        disp = "repair" if self.repo.one("SELECT 1 FROM ReturnItem WHERE return_id=? AND disposition='repair' LIMIT 1", (rid,)) else "restock"
+        # 新品項依單據種類:返修單(抽回後再掃)沒有個別處理方式,一般單預設加回庫存
+        session = self.repo.session(rid)
+        disp = None if session["kind"] == "repair" else "restock"
         self.repo.execute("INSERT INTO ReturnItem(return_id,variant_id,qty,disposition) VALUES(?,?,?,?) "
                           "ON CONFLICT(return_id,variant_id) DO UPDATE SET qty=qty+excluded.qty", (rid, vid, qty, disp))
+        self.repo.check_kind(rid)
         return {"qty": self.repo.one("SELECT qty FROM ReturnItem WHERE return_id=? AND variant_id=?", (rid, vid))["qty"]}
     def set_qty(self, rid, item_id, qty):
         self.repo.require_open(rid)
@@ -188,20 +201,25 @@ class ReturnsService:
         self.repo.execute("UPDATE ReturnSession SET status='open',submitted_at=NULL WHERE return_id=?", (rid,))
         return {"ok": True}
     def set_disposition(self, rid, item_id, disposition):
-        # 返修是整張單的模式:改成返修時全部品項一起改返修;從返修改回別的處理方式時全部品項一起改回
-        self.repo.require_pending(rid)
-        old = self.repo.one("SELECT disposition FROM ReturnItem WHERE return_id=? AND id=?", (rid, item_id))
-        if old is None: raise NotFoundError("找不到退貨品項")
-        if disposition == "repair" or old["disposition"] == "repair":
-            self.repo.execute("UPDATE ReturnItem SET disposition=? WHERE return_id=?", (disposition, rid))
+        # 只改一般退貨的單一品項;整張單切換返修走 set_kind
+        session = self.repo.require_pending(rid)
+        if session["kind"] != "normal": raise ConflictError("返修單的品項不逐項選處理方式")
         self.repo.update_item("UPDATE ReturnItem SET disposition=? WHERE return_id=? AND id=?", (disposition, rid, item_id))
+        self.repo.check_kind(rid)
+        return {"ok": True}
+    def set_kind(self, rid, kind):
+        # 整張單切換:切返修時品項處理方式全部清空,切回一般時全部設回加回庫存
+        self.repo.require_pending(rid)
+        self.repo.execute("UPDATE ReturnSession SET kind=? WHERE return_id=?", (kind, rid))
+        self.repo.execute("UPDATE ReturnItem SET disposition=? WHERE return_id=?",
+                          (None if kind == "repair" else "restock", rid))
+        self.repo.check_kind(rid)
         return {"ok": True}
     def approve(self, rid):
         # 只有「加回庫存」的品項寫入庫存流水;不入庫與不同意只留在退貨單上
         session = self.repo.require_pending(rid)
-        kinds = {r["disposition"] for r in self.repo.all("SELECT disposition FROM ReturnItem WHERE return_id=?", (rid,))}
-        if "repair" in kinds:
-            if kinds != {"repair"}: raise ConflictError("返修單的品項只能全部選返修不入庫")
+        self.repo.check_kind(rid)
+        if session["kind"] == "repair":
             # 返修品項等返新進貨或結案才完成,核准當下不動庫存
             self.repo.execute("UPDATE ReturnSession SET status='repairing',approved_at=datetime('now','localtime') WHERE return_id=?", (rid,))
             return {"ok": True}
@@ -244,12 +262,12 @@ class ReturnsService:
         return {"count": self.repo.one("SELECT COUNT(*) AS n FROM ReturnSession WHERE status='pending'")["n"]}
 
 READ_ACTIONS = {"returns.list", "returns.history", "returns.detail", "returns.pending_count"}
-ADMIN_ONLY = {"returns.set_disposition", "returns.approve", "returns.pending_count", "returns.close_item", "returns.reopen_item"}
+ADMIN_ONLY = {"returns.set_disposition", "returns.set_kind", "returns.approve", "returns.pending_count", "returns.close_item", "returns.reopen_item"}
 
 class ReturnsFacade(BaseFacade):
     ACTIONS = {"returns.create", "returns.list", "returns.history", "returns.detail",
                "returns.scan", "returns.set_qty", "returns.set_sale", "returns.set_reason", "returns.remove_item",
-               "returns.close", "returns.withdraw", "returns.set_disposition", "returns.approve",
+               "returns.close", "returns.withdraw", "returns.set_disposition", "returns.set_kind", "returns.approve",
                "returns.cancel", "returns.pending_count", "returns.repair_receive", "returns.close_item", "returns.reopen_item"}
     ERROR_MESSAGE = "不支援的退貨操作"
     def __init__(self, db_path, session=None):
@@ -286,6 +304,7 @@ class ReturnsFacade(BaseFacade):
         # 管理者動作在交易內再確認一次身分(確認視窗期間可能已閒置登出)
         if not self._is_admin(): raise ForbiddenError()
         if action == "returns.set_disposition": return s.set_disposition(p["return_id"], p["item_id"], p["disposition"])
+        if action == "returns.set_kind": return s.set_kind(p["return_id"], p["kind"])
         if action == "returns.approve": return s.approve(p["return_id"])
         if action == "returns.close_item": return s.close_item(p["return_id"], p["item_id"], p["reason"])
         if action == "returns.reopen_item": return s.reopen_item(p["return_id"], p["item_id"])

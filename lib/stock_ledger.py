@@ -49,15 +49,15 @@ def post(conn, kind, source_id, qty=None, employee=None):
             return None
         return _insert(conn, kind, row["variant_id"], row["diff"], "stocktake_item_id", source_id, "盤點調整")
     if kind == "return":
-        row = _one(conn, "SELECT i.variant_id, i.qty, i.disposition, s.status FROM ReturnItem i "
+        row = _one(conn, "SELECT i.variant_id, i.qty, i.disposition, s.status, s.kind FROM ReturnItem i "
                          "JOIN ReturnSession s ON s.return_id=i.return_id WHERE i.id=?", (source_id,))
-        if row["status"] != "closed" or row["disposition"] != "restock":
+        if row["kind"] != "normal" or row["status"] != "closed" or row["disposition"] != "restock":
             raise ConflictError("退貨品項不是已核准的加回庫存")
         return _insert(conn, kind, row["variant_id"], row["qty"], "return_item_id", source_id, "退貨加回")
     if kind == "repair":
-        row = _one(conn, "SELECT i.variant_id, i.qty, i.closed_qty, i.disposition, s.status FROM ReturnItem i "
+        row = _one(conn, "SELECT i.variant_id, i.qty, i.closed_qty, s.status, s.kind FROM ReturnItem i "
                          "JOIN ReturnSession s ON s.return_id=i.return_id WHERE i.id=?", (source_id,))
-        if row["status"] != "repairing" or row["disposition"] != "repair":
+        if row["kind"] != "repair" or row["status"] != "repairing":
             raise ConflictError("退貨單不是返修中")
         left = row["qty"] - row["closed_qty"] - repaired_by_item(conn, [source_id]).get(source_id, 0)
         if not qty or qty <= 0 or qty > left:

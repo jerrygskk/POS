@@ -62,7 +62,7 @@ class StockSourcesTest(FacadeTestCase):
         self.invoke("returns.scan", {"return_id": rep, "variant_id": self.v2, "qty": 2})
         rep_item = self.return_item_id(rep, self.v2)
         self.invoke("returns.close", {"return_id": rep})
-        self.invoke("returns.set_disposition", {"return_id": rep, "item_id": rep_item, "disposition": "repair"})
+        self.invoke("returns.set_kind", {"return_id": rep, "kind": "repair"})
         self.invoke("returns.approve", {"return_id": rep})
         for n in (1, 1):  # 分批返新合法
             self.invoke("returns.repair_receive", {"return_id": rep, "employee": 6, "items": [{"item_id": rep_item, "qty": n}]})
@@ -178,7 +178,7 @@ class StockSourcesTest(FacadeTestCase):
         self.invoke("returns.scan", {"return_id": rep, "variant_id": self.v1, "qty": 3})
         rep_item = self.return_item_id(rep, self.v1)
         self.invoke("returns.close", {"return_id": rep})
-        self.invoke("returns.set_disposition", {"return_id": rep, "item_id": rep_item, "disposition": "repair"})
+        self.invoke("returns.set_kind", {"return_id": rep, "kind": "repair"})
         self.invoke("returns.approve", {"return_id": rep})
         self.invoke("returns.repair_receive", {"return_id": rep, "employee": 1, "items": [{"item_id": rep_item, "qty": 1}]})
         self.invoke("returns.close_item", {"return_id": rep, "item_id": rep_item, "reason": "廠商不換"})
@@ -252,7 +252,7 @@ class StockSourcesTest(FacadeTestCase):
             self.invoke("returns.scan", {"return_id": rep, "variant_id": vid, "qty": 1})
         items = [self.return_item_id(rep, v) for v in (self.v1, self.v2)]
         self.invoke("returns.close", {"return_id": rep})
-        self.invoke("returns.set_disposition", {"return_id": rep, "item_id": items[0], "disposition": "repair"})
+        self.invoke("returns.set_kind", {"return_id": rep, "kind": "repair"})
         self.invoke("returns.approve", {"return_id": rep})
         with self.fail_on_second_post(), self.assertRaises(RuntimeError):
             self.invoke("returns.repair_receive", {"return_id": rep, "employee": 1,
