@@ -9,6 +9,8 @@ from lib.settings_service import SettingsFacade
 from lib.product_service import ProductFacade
 from lib.stock_service import StockFacade
 from lib.sales_service import SalesFacade
+from lib.dayclose_service import DayCloseFacade
+from lib.correction_service import CorrectionFacade
 from lib.stocktake_service import StocktakeFacade
 from lib.returns_service import ReturnsFacade
 from lib.member_service import MemberFacade
@@ -28,6 +30,8 @@ class DesktopFacade:
         self.products = ProductFacade(db_path)
         self.stock = StockFacade(db_path)
         self.sales = SalesFacade(db_path)
+        self.dayclose = DayCloseFacade(db_path)
+        self.corrections = CorrectionFacade(db_path)
         self.stocktake = StocktakeFacade(db_path, session=self.session)
         self.returns = ReturnsFacade(db_path, session=self.session)
         self.printing = PrintingFacade(db_path)
@@ -46,6 +50,10 @@ class DesktopFacade:
             return self.stock.invoke(action, payload)
         if action in SalesFacade.ACTIONS:
             return self.sales.invoke(action, payload)
+        if action in CorrectionFacade.ACTIONS:
+            return self.corrections.invoke(action, payload)
+        if action in DayCloseFacade.ACTIONS:
+            return self.dayclose.invoke(action, payload)
         if action in StocktakeFacade.ACTIONS:
             return self.stocktake.invoke(action, payload)
         if action in ReturnsFacade.ACTIONS:

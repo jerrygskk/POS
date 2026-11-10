@@ -29,6 +29,7 @@ ADMIN_ACTIONS = frozenset({
     "variants.update_editor", "variants.delete", "variants.batch_create", "variants.activate", "variants.issues",
     "variants.price_list", "variants.price_save",
     "members.delete",
+    "dayclose.preview", "dayclose.close", "dayclose.list", "dayclose.set_float", "sales.void", "sales.set_payment", "corrections.set_employee",
     "sales.export", "sales.export_save", "stocktake.approve", "stocktake.return", "stocktake.pending_count",
     "returns.set_disposition", "returns.set_kind", "returns.approve", "returns.pending_count", "returns.close_item", "returns.reopen_item",
     "desktop.child_window.open",

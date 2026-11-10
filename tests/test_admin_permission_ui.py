@@ -193,7 +193,7 @@ load("static/js/records.js");
 const view=mount(context.window.PosPages["page-records"],template("records"));
 const s=view.state;await tick();
 assert.ok(!button(view.dom,"展開全部"));
-const rows={sales:["sales",[{sale_id:1,items:[]},{sale_id:2,items:[]}]],receive:["receipts",[{items:[]},{items:[]}]],
+const rows={sales:["sales",[{sale_id:1,items:[]},{sale_id:2,items:[]}]],receive:["receipts",[{receipt_id:1,items:[]},{receipt_id:2,items:[]}]],
  returns:["returns",[{return_id:1,items:[]},{return_id:2,items:[]}]],stocktake:["stocktakes",[{session_id:1,items:[]},{session_id:2,items:[]}]]};
 for(const [kind,[field,data]] of Object.entries(rows)){
  await s.selectKind(kind);await tick();s[field]=data;await tick();
@@ -210,6 +210,191 @@ const days=d=>Math.round((new Date(s.dateTo)-new Date(d))/86400000);
 for(const kind of["receive","stocktake","returns"]){await s.selectKind(kind);assert.equal(days(s.dateFrom),6,kind);}
 await s.selectKind("sales");assert.equal(s.dateFrom,s.dateTo);
 view.app.unmount();
+''')
+
+    def test_records_dayclose_admin_only_fixed_submit_and_cleared_on_logout(self):
+        self.run_js(r'''
+process.exitCode=1;
+load("static/js/records.js");
+const preview={business_date:"",today:"2026-11-10",closed:false,record:null,float_amount:3000,float_setting:3000,cash_sales:500,
+ by_payment:[{payment:"現金",count:1,total:500}],void_count:0,void_total:0,unclosed:["2026-11-08"],unclosed_count:1};
+const record={business_date:"2026-11-07",closed_at:"2026-11-07 22:00:05",employee:2,float_amount:3000,counted_total:2900,cash_sales:0,diff:-100,reason:"少找"};
+API.listPayments=async()=>[];API.listSales=async()=>[];API.salesSummary=async()=>null;
+API.dayCloseCurrent=async()=>({business_date:"2999-01-01",today:"2026-11-10"});
+API.dayClosePreview=async d=>({...preview,business_date:d});API.dayCloseList=async()=>[record];
+const sent=[],asked=[];API.dayCloseClose=async p=>{sent.push(JSON.parse(JSON.stringify(p)));};
+context.PosConfirm.ask=async m=>{asked.push(m);return true;};
+const view=mount(context.window.PosPages["page-records"],template("records"));const s=view.state;await tick();
+// 員工:選單看不到點帳,直接呼叫也進不去
+assert.ok(!/點帳/.test(text(view.dom)));
+await s.selectKind("dayclose");assert.equal(s.kind,"sales");assert.ok(errors.includes("需要管理者權限"));
+// 收銀預設迄日用目前帳日(今天已點帳時是明天)
+await s.enterKind("sales");assert.equal(s.dateTo,"2999-01-01");assert.notEqual(s.dateFrom,s.dateTo);
+s.sales=[{sale_id:1,ts:"2026-11-10 23:30:00",business_date:"2026-11-11",items:[]},{sale_id:2,ts:"2026-11-10 10:00:00",business_date:"2026-11-10",items:[]}];
+await tick();assert.equal(text(view.dom).split("計入次日帳").length-1,1);
+auth.isAdmin=true;await tick();assert.match(text(view.dom),/點帳/);
+await s.selectKind("dayclose");await tick();
+assert.equal(s.dc.preview.cash_sales,500);assert.match(text(view.dom),/尚未點帳/);assert.match(text(view.dom),/少找/);
+assert.ok(button(view.dom,"完成點帳"));assert.ok(button(view.dom,"11/08"));
+// 必填:錢櫃現金總額、有短溢要原因
+await s.dcClose();assert.ok(errors.includes("請輸入錢櫃現金總額"));
+s.dc.counted="3400";await tick();assert.equal(s.dcDiff,-100);assert.match(text(view.dom),/−100/);
+await s.dcClose();assert.ok(errors.includes("有短溢時請填寫原因"));assert.equal(sent.length,0);assert.equal(asked.length,0);
+// 確認框不放實點與短溢;送出的是按下當下那一份,不讀確認框期間被改的輸入框
+s.dc.reason=" 少找 ";const picked=s.dc.date;
+context.PosConfirm.ask=async m=>{asked.push(m);s.dc.counted="9999";s.dc.reason="改掉";return true;};
+await s.dcClose();await tick();
+assert.equal(asked.length,1);assert.ok(!/3400|9999|短溢|−/.test(asked[0]));assert.match(asked[0],/不可再作廢或更正付款方式/);
+assert.deepEqual(sent,[{business_date:picked,counted_total:3400,reason:"少找",employee:1,expected:{float_amount:3000,cash_sales:500}}]);
+assert.equal(s.dc.counted,"");
+// 已點帳的帳日:唯讀顯示當時紀錄,沒有按鈕
+API.dayClosePreview=async d=>({...preview,business_date:d,closed:true,record});
+await s.dcLoad("2026-11-07");await tick();
+assert.ok(!button(view.dom,"完成點帳"));assert.match(text(view.dom),/已點帳/);await s.dcClose();assert.equal(sent.length,1);
+// 確認框開著時管理者逾時:不送出,切回收銀紀錄並清掉點帳資料
+API.dayClosePreview=async d=>({...preview,business_date:d});await s.dcLoad("2026-11-09");s.dc.counted="3500";
+context.PosConfirm.ask=async()=>{auth.isAdmin=false;return true;};
+await s.dcClose();await tick();await tick();
+assert.equal(sent.length,1);assert.equal(s.kind,"sales");assert.equal(s.dc.preview,null);assert.equal(s.dc.records.length,0);
+assert.ok(!/完成點帳|預備金|少找/.test(text(view.dom)));
+// 晚到的預覽回應:已不是管理者就丟棄
+auth.isAdmin=true;await tick();await s.selectKind("dayclose");await tick();
+let release;API.dayClosePreview=()=>new Promise(r=>{release=r;});
+const pending=s.dcLoad("2026-11-08");auth.isAdmin=false;await tick();release({...preview,business_date:"2026-11-08"});await pending;await tick();
+assert.equal(s.dc.preview,null);assert.equal(s.kind,"sales");
+view.app.unmount();process.exitCode=0;
+''')
+
+    def test_void_dialog_required_fields_single_submit_and_failure_keeps_content(self):
+        self.run_js(r'''
+process.exitCode=1;
+load("static/js/employeepicker.js");load("static/js/doccorrect.js");
+const shared=context.window.PosEmployee;shared.id=4;auth.isAdmin=true;
+const def=context.window.PosComponents["doc-correct"];
+const doc={type:"sale",label:"銷售單",id:9,ts:"2026-11-10 10:00:00",employee:1,payment:"現金",total:200,count:1};
+const closes=[],sent=[];let fail=null,gate=null;
+API.voidSale=async p=>{sent.push(JSON.parse(JSON.stringify(p)));if(gate)await gate;if(fail)throw fail;};
+const view=mount(def,def.template,{},{mode:"void",doc,onClose:r=>closes.push(r)});const s=view.state;await tick();
+assert.match(text(view.dom),/作廢後庫存將加回/);
+// 不問是誰作廢的:框內沒有員工選擇器
+assert.equal(all(view.dom,n=>/employee-picker/.test(String(n.props.class||""))).length,0);assert.ok(!/經手人|操作員工/.test(text(view.dom)));
+// 必填:原因、選其他要說明;沒過不送出、不關框
+await s.submit();assert.equal(s.error,"請選擇作廢原因");
+const hidden=()=>all(view.dom,n=>n.tag==="label"&&/說明/.test(text(n)))[0].props.class;
+assert.match(String(hidden()),/doc-hidden/);
+s.reasonCode="other";await tick();assert.ok(!/doc-hidden/.test(String(hidden()||"")));
+await s.submit();assert.match(s.error,/請填寫說明/);assert.equal(sent.length,0);assert.equal(closes.length,0);
+// 已不是管理者:不送出
+s.reasonText=" 客人反悔 ";auth.isAdmin=false;await s.submit();assert.equal(s.error,"需要管理者權限");assert.equal(sent.length,0);
+auth.isAdmin=true;
+// 送出中連點只送一次,也不能取消
+let open;gate=new Promise(r=>{open=r;});
+const first=s.submit();await tick();s.submit();s.cancel();await tick();
+assert.equal(sent.length,1);assert.equal(closes.length,0);assert.equal(s.busy,true);
+// 一般失敗:留在框內、內容保留
+fail=Object.assign(new Error("資料庫操作失敗"),{code:"database_error"});open();await first;await tick();
+assert.equal(s.error,"資料庫操作失敗");assert.equal(s.reasonText," 客人反悔 ");assert.equal(closes.length,0);assert.equal(s.busy,false);
+// 衝突:關框並通知呼叫端重查
+gate=null;fail=Object.assign(new Error("此單已作廢"),{code:"conflict"});await s.submit();
+assert.deepEqual(closes,["conflict"]);assert.ok(errors.includes("此單已作廢"));
+// 成功
+fail=null;await s.submit();assert.deepEqual(closes,["conflict","saved"]);
+assert.deepEqual(sent.at(-1),{sale_id:9,reason_code:"other",reason_text:"客人反悔",expected_total:200});
+s.cancel();assert.equal(closes.at(-1),false);
+view.app.unmount();process.exitCode=0;
+''')
+
+    def test_correct_dialog_payment_and_employee_modes(self):
+        self.run_js(r'''
+process.exitCode=1;
+load("static/js/employeepicker.js");load("static/js/doccorrect.js");
+const shared=context.window.PosEmployee;shared.id=4;auth.isAdmin=true;
+const def=context.window.PosComponents["doc-correct"];const sent=[];
+API.setSalePayment=async p=>{sent.push(["pay",JSON.parse(JSON.stringify(p))]);};
+API.setDocEmployee=async p=>{sent.push(["emp",JSON.parse(JSON.stringify(p))]);};
+API.voidSale=async()=>assert.fail("不該呼叫作廢");
+// 更正付款方式:下拉不含目前的付款方式;沒選不送出
+let closes=[];
+let view=mount(def,def.template,{},{mode:"payment",doc:{type:"sale",label:"銷售單",id:9,ts:"2026-11-10 10:00:00",employee:1,payment:"現金",total:200,count:1},
+ payments:["現金","轉帳","行動支付"],onClose:r=>closes.push(r)});let s=view.state;await tick();
+assert.deepEqual([...s.otherPayments],["轉帳","行動支付"]);assert.match(text(view.dom),/金額會跟著變動/);assert.ok(button(view.dom,"確認更正"));
+assert.ok(!/作廢後庫存/.test(text(view.dom)));
+await s.submit();assert.equal(s.error,"請選擇新付款方式");assert.equal(sent.length,0);
+assert.equal(all(view.dom,n=>/employee-picker/.test(String(n.props.class||""))).length,0);
+s.payment="轉帳";await s.submit();
+assert.deepEqual(sent,[["pay",{sale_id:9,payment:"轉帳",expected_payment:"現金"}]]);assert.deepEqual(closes,["saved"]);
+view.app.unmount();
+// 更正員工:要選新代號、不可與目前相同;舊單員工為空時 expected 送 null;沒有警示區
+closes=[];
+view=mount(def,def.template,{},{mode:"employee",doc:{type:"stocktake",label:"盤點單",id:3,ts:"2026-11-09 09:00:00",employee:undefined},onClose:r=>closes.push(r)});
+s=view.state;await tick();
+assert.match(text(view.dom),/修正盤點操作者/);assert.match(text(view.dom),/正確操作者/);assert.ok(button(view.dom,"確認修正"));assert.ok(!all(view.dom,n=>/doc-warning/.test(String(n.props.class||""))).length);
+await s.submit();assert.equal(s.error,"請選擇正確操作者");
+const pickers=all(view.dom,n=>/employee-picker/.test(String(n.props.class||"")));assert.equal(pickers.length,1);assert.ok(!/經手人/.test(text(view.dom)));
+click(pickers[0].children.find(b=>text(b)==="2"));await tick();assert.equal(s.newEmployee,2);assert.equal(shared.id,4);   // 不回寫全店共用的選擇
+await s.submit();assert.deepEqual(sent.at(-1),["emp",{doc_type:"stocktake",doc_id:3,employee:2,expected_employee:null}]);
+assert.deepEqual(closes,["saved"]);view.app.unmount();
+view=mount(def,def.template,{},{mode:"employee",doc:{type:"sale",label:"銷售單",id:9,ts:"",employee:2},onClose:()=>{}});
+s=view.state;s.newEmployee=2;await s.submit();assert.equal(s.error,"與目前的操作者相同，不需修正");assert.equal(sent.length,2);
+view.app.unmount();process.exitCode=0;
+''')
+
+    def test_records_correct_entries_per_kind_and_history(self):
+        self.run_js(r'''
+process.exitCode=1;
+load("static/js/employeepicker.js");load("static/js/doccorrect.js");load("static/js/records.js");
+const item={name:"x",qty:1,unit_price:100,discount:0,system_qty:1,counted_qty:1,diff:0};
+const hist=[{ts:"2026-11-10 12:00:30",field:"employee",old_value:null,new_value:"2"},{ts:"2026-11-10 12:05:00",field:"payment",old_value:"現金",new_value:"轉帳"}];
+const sale=(id,extra)=>({sale_id:id,ts:"2026-11-10 10:00:00",business_date:"2026-11-10",employee:1,payment:"現金",total:100,order_discount:0,member_discount:0,day_closed:false,voided_at:null,items:[item],corrections:[],...extra});
+API.listSales=async()=>[sale(1,{corrections:hist}),sale(2,{day_closed:true}),sale(3,{voided_at:"2026-11-10 11:00:00",void_reason:"重複結帳"})];
+API.salesSummary=async()=>({count:2,total:200,by_payment:[],void_count:1,void_total:100});
+API.listReceipts=async()=>[{receipt_id:7,ts:"2026-11-10 09:00:00",employee:1,items:[item],corrections:[]},{receipt_id:8,ts:"2026-11-10 09:30:00",employee:2,items:[item],corrections:[]}];
+API.returnHistory=async()=>[{return_id:4,started_at:"2026-11-10 13:00:00",status:"closed",employee:3,items:[item],corrections:[]}];
+API.stocktakeHistory=async()=>[{session_id:5,started_at:"2026-11-10 14:00:00",status:"closed",approved_at:"x",employee:4,diff_count:0,items:[item],corrections:[]}];
+const view=mount(context.window.PosPages["page-records"],template("records"));const s=view.state;s.payments=["現金","轉帳"];
+const count=label=>buttons(view.dom).filter(b=>text(b)===label).length;
+await s.reload();s.expandAll();await tick();
+assert.equal(count("修正操作者")+count("更正付款方式")+count("作廢"),0);   // 員工看不到任何入口
+s.openCorrect("employee","sale",s.sales[0]);assert.equal(s.correct,null);
+assert.match(text(view.dom),/2026-11-10 12:00　操作者：— → 2/);assert.match(text(view.dom),/付款方式：現金 → 轉帳/);assert.ok(!/經手人/.test(text(view.dom)));
+auth.isAdmin=true;await tick();
+// 收銀:更正員工不限期限(三張都有);作廢與更正付款方式只有未作廢、未點帳那一張
+assert.deepEqual([count("修正操作者"),count("更正付款方式"),count("作廢")],[3,1,1]);
+click(button(view.dom,"更正付款方式"));await tick();
+assert.equal(s.correct.mode,"payment");assert.equal(s.correct.doc.payment,"現金");assert.ok(button(view.dom,"確認更正"));
+await s.correctClosed(false);
+for(const [kind,type,id,emp] of [["receive","receipt",7,1],["returns","return",4,3],["stocktake","stocktake",5,4]]){
+ await s.enterKind(kind);s.expandAll();await tick();
+ assert.ok(count("修正操作者")>=1,kind);click(button(view.dom,"修正操作者"));await tick();
+ assert.deepEqual([s.correct.mode,s.correct.doc.type,s.correct.doc.id,s.correct.doc.employee],["employee",type,id,emp],kind);
+ // 更正後重查,展開狀態保留(進貨以單號當鍵)
+ await s.correctClosed("saved");assert.ok(s.isOpen(id),kind);
+}
+view.app.unmount();process.exitCode=0;
+''')
+
+    def test_records_void_button_conditions_and_marks(self):
+        self.run_js(r'''
+process.exitCode=1;
+load("static/js/employeepicker.js");load("static/js/doccorrect.js");load("static/js/records.js");
+const mk=(id,extra)=>({sale_id:id,ts:"2026-11-10 10:00:00",business_date:"2026-11-10",employee:1,payment:"現金",total:100,order_discount:0,member_discount:0,day_closed:false,voided_at:null,items:[{name:"x",qty:1,unit_price:100,discount:0}],...extra});
+const list=[mk(1),mk(2,{day_closed:true}),mk(3,{voided_at:"2026-11-10 11:00:00",void_reason:"重複結帳"})];
+let loads=0;API.listSales=async()=>{loads++;return list;};
+API.salesSummary=async()=>({count:2,total:200,by_payment:[],void_count:1,void_total:100});
+const view=mount(context.window.PosPages["page-records"],template("records"));const s=view.state;
+await s.reload();s.expandAll();await tick();
+assert.match(text(view.dom),/合計 2 筆，共 200 元（已作廢 1 筆 100 元）/);
+assert.match(text(view.dom),/原因：重複結帳/);assert.equal(text(view.dom).split("已作廢").length-1,3);
+assert.ok(!button(view.dom,"作廢"));s.openVoid(list[0]);assert.equal(s.correct,null);assert.ok(errors.includes("需要管理者權限"));
+auth.isAdmin=true;await tick();
+assert.equal(buttons(view.dom).filter(b=>text(b)==="作廢").length,1);   // 已點帳、已作廢的單沒有按鈕
+click(button(view.dom,"作廢"));await tick();assert.equal(s.correct.doc.id,1);assert.equal(s.correct.mode,"void");assert.ok(button(view.dom,"確認作廢"));
+// 成功後重查並保留展開;取消不重查
+const before=loads;await s.correctClosed(false);assert.equal(loads,before);assert.equal(s.correct,null);
+s.openVoid(list[0]);await s.correctClosed("saved");assert.equal(loads,before+1);assert.ok(s.isOpen(1)&&s.isOpen(3));
+// 開著框時登出:框關掉
+s.openVoid(list[0]);auth.isAdmin=false;await tick();assert.equal(s.correct,null);
+view.app.unmount();process.exitCode=0;
 ''')
 
     def test_password_dialog_thrown_validation_restores_cancel_and_sync_success_resolves_once(self):

@@ -23,6 +23,7 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 | `lib/child_window.py` | 子視窗協調器：唯一子視窗、頁面白名單、傳入脈絡、關閉通知 |
 | `lib/db_schema.py` | 現行 schema DDL 唯一來源、`MIN_SUPPORTED_VERSION` 與 migration 清單 |
 | `lib/stock_ledger.py` | 庫存異動唯一入帳入口 `post()` |
+| `lib/dayclose_service.py`／`lib/correction_service.py` | 每日點帳／單據更正紀錄與修正操作者 |
 | `lib/product_rules.py` | 共用商品規則（欄位型別驗證、自取碼取號、員工代號檢查） |
 | `lib/variant_batch_service.py` | 子產品批次建立與唯讀預檢 |
 | `lib/label_printer.py`／`lib/label_layout.py` | 標籤機協定／標籤版面（純函式） |
@@ -37,10 +38,10 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 
 ### 資料模型
 
-- **Schema**：`SCHEMA` 是唯一定義。`MIN_SUPPORTED_VERSION` 以前的升級步驟全部移除（目前等於 v27，`MIGRATIONS` 為空清單），較舊的資料庫一律拒絕開啟，改用母版工具轉出的新版標準資料庫。尚未上線期間，改結構直接改 `SCHEMA` 並重產母版；上線後再改結構才在 `MIGRATIONS` 加步驟：搬表要明確開交易、保留原編號與流水號，失敗完整回復，不可關閉外鍵檢查。
+- **Schema**：`SCHEMA` 是唯一定義。`MIN_SUPPORTED_VERSION` 以前的升級步驟全部移除（目前等於 v27），較舊的資料庫一律拒絕開啟，改用母版工具轉出的新版標準資料庫。現行為 **v28**，`MIGRATIONS` 只有 v27→v28 一步（`_to_v28`：原名重建 `Sale`／`StockMovement`、補帳日；升級與種子在同一交易，commit 前跑外鍵檢查，失敗整個回復）；來源結構凍結在 `tests/fixtures/schema_v27.sql`。出 1.0.0 時把這一步連同該 fixture 與 `tests/test_migration_v28.py` 移除，`BASE_VERSION`、`MIN_SUPPORTED_VERSION` 改成當時版號。尚未上線期間，改結構直接改 `SCHEMA` 並重產母版；上線後再改結構才在 `MIGRATIONS` 加步驟：搬表要明確開交易、保留原編號與流水號，失敗完整回復，不可關閉外鍵檢查。
 - **資料庫限制分兩層**：單筆能判斷的寫成 CHECK、複合外鍵、部分唯一索引；跨表規則放程式，在同一交易內檢查（`product_data.check_variant_attributes`、`returns_service.check_kind`、`product_data.check_field_name`）。
 - **金額與數量**：一律 int（新台幣元，無小數）。
-- **庫存採異動流水制**：不存目前庫存，一律由 `StockMovement` 加總（`product_data.stock_of`）。`kind`：`purchase`＋、`sale`－、`adjust`±、`return`＋、`repair`＋（返新）。
+- **庫存採異動流水制**：不存目前庫存，一律由 `StockMovement` 加總（`product_data.stock_of`）。`kind`：`purchase`＋、`sale`－、`adjust`±、`return`＋、`repair`＋（返新）、`void`＋（作廢銷售單沖回，schema v28；與 `sale` 指向同一筆銷售明細，一筆明細各只能有一筆 `sale` 與一筆 `void`）。
 - **異動來源（schema v26）**：每筆異動恰好指向一個來源明細（`receipt_item_id`／`sale_item_id`／`stocktake_item_id`／`return_item_id`），CHECK 限定來源與 kind、正負一致；複合外鍵保證來源與異動同款式；部分唯一索引防同一明細入帳兩次（返新可分批，不套用）。`employee` 只有返新記，其他看各自單據。
 - **入帳唯一入口** `stock_ledger.post(conn, kind, source_id, qty=None, employee=None)`：數量一律由來源明細算出（返新除外），同交易檢查單據狀態與返新上限。進貨、結帳、盤點核准、退貨核准、返新五個寫入點都走它，不直接寫 `StockMovement`。
 - **已入帳鎖定**：有異動指向的明細，被鎖欄位真的改值（`OLD.x IS NOT NEW.x`）或刪除時由 trigger 擋；`StockMovement` 全表不可改刪。⚠️ 另有新增前與更新前檢查擋 `INSERT／UPDATE OR REPLACE`：撞鍵時的隱含刪除不會觸發刪除 trigger（PITFALLS SQL-5）。返修結案／撤回、退貨原因、盤點備註、單據狀態不在鎖定範圍。
@@ -74,6 +75,17 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 - **進貨批次**：清單在 `window.PosReceiveDraft`，以 `stock.receive` 同一交易全有全無寫入，一次確認建一張進貨單（`Receipt`／`ReceiptItem`，同款式多列各自保留數量），回傳 `receipt_id`。⚠️ 確認／清空流程期間以 `locked` 鎖定（掃描、改數量、刪列、加標籤、重按都在方法內擋），另有世代編號 `generation`：掃描回來時編號不同就拒絕。只看鎖定擋不住「入庫完成、解鎖後才回來的舊掃描」，它會進下一批而重複入庫。數量欄不用 `v-model`（會直接改資料，方法擋不住）。
 - **適用機型欄**：收銀、進貨、退貨明細用 `display_models_by_variant`，種類 `model_mode` 不是 `required` 時顯示「—」，資料不動。
 
+### 點帳、作廢與更正（schema v28）
+
+- **帳日** `Sale.business_date`：結帳時在 INSERT 同一句決定，當天已點帳就算隔天，否則算當天；結帳先 `BEGIN IMMEDIATE`，避免與點帳交錯。紀錄查詢的日期條件、合計、匯出一律看帳日，不看結帳時間；帳日與結帳日期不同的單在列表標「計入次日帳」。
+- **每日點帳**（`dayclose_service`，限管理者，入口在紀錄查詢「點帳」）：`DayClose` 一個帳日一筆，記預備金、錢櫃現金總額、現金銷售、短溢、原因與員工代號。短溢＝錢櫃總額－預備金－現金銷售（不含已作廢），不為 0 時原因必填。`dayclose.close` 要帶預覽當下看到的現金銷售，後端同交易比對，不同就回衝突。不可點未來的帳日；預備金存 `Setting.cash_float`。
+- **鎖帳**：帳日點帳後，該帳日的銷售單不可新增、改金額／付款方式／會員／帳日、作廢、刪除，由 trigger 擋（含兩種 REPLACE）；`DayClose` 本身不可改刪。點帳後要沖帳只能走退貨。
+- **作廢銷售單**（`sales.void`，限管理者）：只限帳日未點帳、尚無退貨單、未作廢的單。原單保留，寫 `voided_at`、`void_reason`（原因代碼對應的文字；選「其他」必填說明），同交易以 `stock_ledger.post('void', …)` 沖回庫存，並同步進行中盤點單的系統庫存量。已作廢的單不可再改、不可退貨，合計與點帳的現金銷售都不計入，另列「已作廢 N 筆」。要重開就重新結一張。
+- **更正付款方式**（`sales.set_payment`，限管理者）：只限帳日未點帳、未作廢；金額不動。**修正操作者**（`corrections.set_employee`，限管理者）：銷售、進貨、退貨、盤點四種單據的員工代號，不受點帳限制。兩者都寫一筆 `Correction`（單據種類、編號、欄位、原值、新值、時間），`Correction` 不可改刪，紀錄查詢展開後列出更正歷程。
+- **不記是誰做的**（維護者 2026-11-10 裁示）：作廢、更正付款方式、修正操作者三個框都不問員工代號，資料庫沒有對應欄位；只有點帳記員工代號。前端用語固定為「修正操作者」，框標題依單據為「修正結帳／進貨／退貨／盤點操作者」。
+- **防舊畫面**：三個動作都帶畫面上看到的原值（`expected_total`／`expected_payment`／`expected_employee`），後端同交易比對，不同回衝突。
+- **前端**：三個框共用元件 `static/js/doccorrect.js`（`doc-correct`，`mode` 為 `void`／`payment`／`employee`）。管理者登出或閒置逾時時若停在點帳頁，切回收銀紀錄並清掉已載入的金額。
+
 ### 權限（管理者／員工）
 
 | 操作 | 員工 | 管理者 |
@@ -85,6 +97,8 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 | 盤點退回重盤、選退貨處理方式、核准、查待核准數量 | 不可 | 可 |
 | 作廢待核准的盤點單／退貨單 | 不可 | 可 |
 | 銷售紀錄匯出 CSV | 不可 | 可 |
+| 每日點帳、預備金設定、點帳紀錄查詢 | 不可 | 可 |
+| 作廢銷售單、更正付款方式、修正單據操作者 | 不可 | 可 |
 | 商品新增、修改、停用／啟用、刪除、待處理管理及編輯子視窗 | 不可 | 可 |
 | 設定頁與管理者密碼變更 | 不可 | 可 |
 
@@ -219,10 +233,10 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 - **轉換**：`CategoryField` 併入 `AttributeField`（啟用取兩者皆啟用），保留原主鍵與 `sqlite_sequence`。單一交易寫入、`defer_foreign_keys`，commit 前跑外鍵檢查，再以 `check_variant_attributes` 核對單選單值與欄型別。⚠️ 每張資料表與設定鍵都要歸在「複製」或「不複製」清單，未歸類就停止；`next_store_barcode` 必須帶，否則新條碼會撞號。
 - **對帳**：轉完逐表比對資料列、設定鍵與流水號，經正式 `init_db` 再開一次，最後核對來源雜湊值未變。任一步失敗都刪掉輸出檔（含 `-journal`）。
 - **來源結構凍結**在 `tests/fixtures/schema_v24.sql`，測試用它造 v24 來源。
-- **母版**：v24 原始檔 `docs/standard_db/pos_standard.db`（轉換來源，不要刪）與轉出的 `pos_standard_v27.db`（`docs/` 不入庫，換機器要自行複製）。結構有改就重新轉出：
+- **母版**：v24 原始檔 `docs/standard_db/pos_standard.db`（轉換來源，不要刪）與轉出的 `pos_standard_v28.db`（`docs/` 不入庫，換機器要自行複製）。`DayClose`、`Correction` 屬營業紀錄，不複製。結構有改就重新轉出：
 
 ```
-python tools/make_standard_db.py --source docs/standard_db/pos_standard.db --output docs/standard_db/pos_standard_v27_new.db
+python tools/make_standard_db.py --source docs/standard_db/pos_standard.db --output docs/standard_db/pos_standard_v28_new.db
 ```
 
 - **清乾淨 `pos.db`**：關掉 POS，複製母版換名成 `pos.db`。

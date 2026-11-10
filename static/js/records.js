@@ -9,27 +9,49 @@ function defaultRange(kind) {
   const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (kind === "sales" ? 0 : 6));
   return { dateFrom: localDateText(from), dateTo: localDateText(now) };
 }
+// 點帳頁的畫面資料;管理者登出或逾時時整份換掉,金額不留在畫面上
+function emptyDayClose() {
+  return { date: "", today: "", counted: "", reason: "", floatInput: "", preview: null, records: [], busy: false };
+}
 window.PosPages["page-records"] = {
   template: "#tpl-records",
   inject: ["showError"],
   data() {
-    return { kinds: [["sales", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"], ["returns", "退貨"], ["members", "資料設定"]], kind: "sales",
+    return { kinds: [["sales", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"], ["returns", "退貨"], ["dayclose", "點帳"], ["members", "資料設定"]], kind: "sales",
+             dc: emptyDayClose(), correct: null,
              ...defaultRange("sales"), payment: "", payments: [],
              sales: [], summary: null, receipts: [], stocktakes: [], returns: [], returnKind: "normal", expanded: new Set(),
              memberPhone: "", memberQuery: "", members: [], memberPopup: null, salesQuery: null };
   },
   computed: {
     isAdmin() { return window.PosAuth.isAdmin; },
+    // 點帳只有管理者看得到
+    shownKinds() { return this.kinds.filter(([key]) => key !== "dayclose" || this.isAdmin); },
+    // 短溢＝錢櫃現金總額 − 預備金 − 現金銷售;還沒輸入數字時為 null
+    dcDiff() {
+      const p = this.dc.preview, text = this.dc.counted.trim();
+      return p && /^\d+$/.test(text) ? Number(text) - p.float_amount - p.cash_sales : null;
+    },
     // 目前類別每一列的開合鍵,與範本的 isOpen／toggle 共用
     rowKeys() {
       if (this.kind === "sales") return this.sales.map(s => s.sale_id);
-      if (this.kind === "receive") return this.receipts.map((_, i) => i);
+      if (this.kind === "receive") return this.receipts.map(r => r.receipt_id);
       if (this.kind === "returns") return this.returns.map(t => t.return_id);
-      if (this.kind === "members") return [];
+      if (this.kind === "members" || this.kind === "dayclose") return [];
       return this.stocktakes.map(t => t.session_id);
     },
   },
+  watch: {
+    // 只隱藏選單不夠:管理者登出或閒置逾時時若停在點帳,切回收銀紀錄並清掉已載入的點帳資料
+    isAdmin(now) {
+      if (!now) this.correct = null;
+      if (now || this.kind !== "dayclose") return;
+      this.clearDayClose();
+      this.enterKind("sales");
+    },
+  },
   async mounted() {
+    Object.assign(this, await this.salesRange());
     await this.guard(async () => {
       this.payments = await API.listPayments();
       await this.reload();
@@ -38,9 +60,105 @@ window.PosPages["page-records"] = {
   methods: {
     async selectKind(kind) {
       if (this.kind === kind) return;
+      if (kind === "dayclose" && !this.isAdmin) { this.showError("需要管理者權限"); return; }
+      await this.enterKind(kind);
+    },
+    async enterKind(kind) {
       this.kind = kind;
       Object.assign(this, defaultRange(kind));
+      if (kind === "sales") Object.assign(this, await this.salesRange());
+      if (this.kind !== kind) return;
       await this.reload();
+      if (kind === "dayclose") await this.dcLoad(localDateText(new Date()));
+    },
+    // 收銀預設:起＝今天,迄＝目前帳日(今天已點帳時是明天,才看得到點帳後結的單)
+    async salesRange() {
+      const range = defaultRange("sales");
+      try {
+        const current = await API.dayCloseCurrent();
+        if (current.business_date > range.dateTo) range.dateTo = current.business_date;
+      } catch (e) { /* 查不到就用今天;查詢本身失敗會由 reload 顯示 */ }
+      return range;
+    },
+    // 帳日與結帳日期不同:當天點帳後才結的單
+    nextDayBook(s) { return !!s.business_date && s.business_date !== String(s.ts || "").slice(0, 10); },
+    // 作廢:限管理者;框內送出前會再查一次身分
+    openVoid(s) { this.openCorrect("void", "sale", s); },
+    // 作廢、更正付款方式、更正員工共用一個框;type:sale／return／receipt／stocktake
+    openCorrect(mode, type, row) {
+      if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
+      const doc = {
+        sale: () => ({ label: "銷售單", id: row.sale_id, ts: row.ts, payment: row.payment, total: row.total, count: row.items.length }),
+        return: () => ({ label: "退貨單", id: row.return_id, ts: row.started_at }),
+        receipt: () => ({ label: "進貨單", id: row.receipt_id, ts: row.ts }),
+        stocktake: () => ({ label: "盤點單", id: row.session_id, ts: row.started_at }),
+      }[type]();
+      this.correct = { mode, doc: { type, employee: row.employee, ...doc } };
+    },
+    correctionText(c) {
+      const field = c.field === "payment" ? "付款方式" : "操作者";
+      return `${this.minuteText(c.ts)}　${field}：${c.old_value ?? "—"} → ${c.new_value}`;
+    },
+    // 成功或單據已被改過都重查,並保留展開狀態
+    async correctClosed(result) {
+      this.correct = null;
+      if (!result) return;
+      const keep = new Set(this.expanded);
+      await this.reload();
+      this.expanded = keep;
+    },
+    signedText(n) { return n > 0 ? "+" + n : n < 0 ? "−" + (-n) : "0"; },
+    shortDate(d) { return d.slice(5).replace("-", "/"); },
+    clearDayClose() {
+      this._dcSeq = (this._dcSeq || 0) + 1;
+      this.dc = emptyDayClose();
+    },
+    // 讀某個帳日的點帳預覽;晚到的回應若已換日期、已離開或已不是管理者就丟棄
+    async dcLoad(date) {
+      if (date) this.dc.date = date;
+      const seq = this._dcSeq = (this._dcSeq || 0) + 1;
+      this.dc.preview = null; this.dc.counted = ""; this.dc.reason = "";
+      if (!this.dc.date) return;
+      await this.guard(async () => {
+        const preview = await API.dayClosePreview(this.dc.date);
+        if (seq !== this._dcSeq || !this.isAdmin || this.kind !== "dayclose") return;
+        this.dc.preview = preview; this.dc.today = preview.today;
+        this.dc.floatInput = String(preview.float_setting);
+        // 初始焦點放在錢櫃現金總額,不可停在日期欄
+        this.$nextTick(() => { if (this.$refs.dcCounted) this.$refs.dcCounted.focus(); });
+      });
+    },
+    async dcSaveFloat() {
+      if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
+      const text = this.dc.floatInput.trim();
+      if (!/^\d+$/.test(text)) { this.showError("預備金請輸入 0 以上的整數"); return; }
+      await this.guard(async () => { await API.dayCloseSetFloat(Number(text)); });
+      await this.dcLoad();
+    },
+    async dcClose() {
+      if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
+      const p = this.dc.preview;
+      if (!p || p.closed || this.dc.busy) return;
+      if (this.dcDiff === null) { this.showError("請輸入錢櫃現金總額"); return; }
+      const employee = window.PosEmployee.id;
+      if (!employee) { this.showError("請選擇員工代號（1～6）"); return; }
+      const reason = this.dc.reason.trim();
+      if (this.dcDiff !== 0 && !reason) { this.showError("有短溢時請填寫原因"); return; }
+      // 按下當下把內容固定成一份:確認框回來後送出的是同一份,不讀輸入框當下的值
+      const body = { business_date: p.business_date, counted_total: Number(this.dc.counted.trim()), reason, employee,
+                     expected: { float_amount: p.float_amount, cash_sales: p.cash_sales } };
+      // 確認框掛在頁面最外層,管理者逾時後清不掉:只放帳日,不放實點與短溢
+      if (!await PosConfirm.ask(`確定完成 ${p.business_date} 的點帳？點帳後此帳日的銷售單不可再作廢或更正付款方式。`)) return;
+      if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
+      if (this.dc.busy) return;
+      this.dc.busy = true;
+      try {
+        await this.guard(async () => { await API.dayCloseClose(body); });
+      } finally {
+        this.dc.busy = false;
+        // 成敗都重讀:失敗可能是金額已變動或已被點帳,不可留舊數字
+        if (this.isAdmin && this.kind === "dayclose") { await this.dcLoad(body.business_date); await this.reload(); }
+      }
     },
     isOpen(key) { return this.expanded.has(key); },
     toggle(key) {
@@ -66,7 +184,7 @@ window.PosPages["page-records"] = {
     },
     specText(row) { return this.attrText(row).replaceAll("｜", "・"); },
     async reload() {
-      // 查詢後資料可能換了;進貨舊紀錄只能用列序當鍵,保留展開會開到別筆
+      // 查詢後資料可能換了,一律收合;更正後要保留展開的由呼叫端自己貼回
       this.collapseAll();
       await this.guard(async () => {
         const range = {date_from: this.dateFrom, date_to: this.dateTo};
@@ -82,6 +200,10 @@ window.PosPages["page-records"] = {
           this.sales = sales; this.summary = summary; this.salesQuery = filters;
         } else if (this.kind === "members") {
           this.members = await API.listMembers(this.memberQuery.trim());
+        } else if (this.kind === "dayclose") {
+          const records = await API.dayCloseList(range);
+          if (!this.isAdmin || this.kind !== "dayclose") return;
+          this.dc.records = records;
         } else if (this.kind === "receive") {
           this.receipts = await API.listReceipts(range);
         } else if (this.kind === "returns") {

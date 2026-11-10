@@ -127,11 +127,20 @@ def init_db(db_path, require_existing=False):
     is_new = version is None
     conn = get_conn(db_path)
     try:
-        conn.executescript(SCHEMA)  # 建缺少的表(IF NOT EXISTS)
-        if is_new:
-            _set_schema_version(conn, db_schema.SCHEMA_VERSION)
-        elif version < db_schema.SCHEMA_VERSION:
-            _run_migrations(conn, version)
+        if is_new or version == db_schema.SCHEMA_VERSION:
+            conn.executescript(SCHEMA)  # 建缺少的表(IF NOT EXISTS)
+            if is_new:
+                _set_schema_version(conn, db_schema.SCHEMA_VERSION)
+        else:
+            # 升級:全程同一交易,任何一步失敗整個回復。不可先 executescript(SCHEMA):
+            # 新結構的索引、trigger 對舊表會失敗,而且 executescript 會自行提交、收不回來。
+            conn.execute("BEGIN IMMEDIATE")
+            version = _get_schema_version(conn)  # 上鎖後重讀:等鎖期間可能已被別的程序升級
+            check_supported_version(version)
+            if version < db_schema.SCHEMA_VERSION:
+                _run_migrations(conn, version)
+            for statement in db_schema.statements():
+                conn.execute(statement)
         db_seed.seed(conn, fresh=is_new)
         violations = conn.execute("PRAGMA foreign_key_check").fetchall()
         if violations:

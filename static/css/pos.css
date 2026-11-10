@@ -723,6 +723,25 @@ tr.stocktake-row-returned > td { background: rgba(220, 38, 38, 0.08); color: var
 .records-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
 .records-bar .pay-panel { flex: 1 1 auto; min-width: 0; margin: 0; flex-direction: column; align-items: flex-start; gap: 4px; }
 .records-bar .pay-breakdown { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+/* 收銀紀錄「計入次日帳」:沿用 .tag,只縮小並與時間拉開 */
+.records-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; font-size: 12px; white-space: nowrap; }
+/* 已作廢的銷售單:整列刪除線(標籤是 inline-block,不會被劃掉) */
+tr.sale-void > td { text-decoration: line-through; color: var(--text-2); }
+.records-ops { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+/* 單據更正框:鎖定資訊兩欄排版(沿用停用欄位的底色與字色);操作員工那列與其他欄位同一條標籤線 */
+.doc-correct { --label-w: 84px; max-width: 440px; }
+.doc-locked { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 4px 10px; padding: 10px 12px;
+  border-radius: 8px; background: var(--hover); color: var(--text-2); font-size: 14px; }
+.doc-field { display: grid; grid-template-columns: var(--label-w) 1fr; align-items: center; gap: 8px; }
+.doc-field > span:first-child { text-align: right; }
+.doc-hidden { visibility: hidden; }
+.doc-correct .doc-warning { margin: 0; }
+/* 點帳:文字與輸入框同一水平線,原因欄吃剩餘寬度,預備金設定靠右 */
+.dayclose-row { align-items: center; flex-wrap: wrap; white-space: nowrap; }
+.dayclose-float { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.dayclose-reason { flex: 1 1 120px; min-width: 80px; }
+.dayclose-reason-text { flex: 0 1 auto; min-width: 0; white-space: normal; }
+.dayclose-breakdown { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: -4px 0 12px; color: var(--text-2); font-size: 14px; }
 .records-bar-actions { display: flex; gap: 8px; flex: 0 0 auto; margin-left: auto; }
 /* 紀錄查詢列表:只留橫線,數字靠右;品名＋規格中位數約 30 個半形字、最長 67,明細品名欄佔剩餘寬度並允許折行 */
 .col-w56 { width: 56px; } .col-w64 { width: 64px; } .col-w72 { width: 72px; } .col-w88 { width: 88px; }

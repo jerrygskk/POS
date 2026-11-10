@@ -261,6 +261,7 @@ class TestStocktake(FacadeTestCase):
         for h in history:
             expected = self.invoke("stocktake.detail", {"session_id": h["session_id"]})
             expected["diff_count"] = sum(1 for item in expected["items"] if item["diff"])
+            expected["corrections"] = []
             self.assertEqual(h, expected)
         self.assertEqual([h["diff_count"] for h in history], [0, 2, 1])
 

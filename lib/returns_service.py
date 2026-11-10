@@ -1,4 +1,4 @@
-from lib import product_data, stock_ledger
+from lib import correction_service, product_data, stock_ledger
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from lib.product_rules import allow_keys as _allow, date_range, date_sql, is_int as _is_int, require_employee
@@ -113,8 +113,13 @@ class ReturnsRepository(BaseRepository):
                          "WHERE return_id=? AND status='repairing'", (rid,))
         return not left
     def require_sale(self, sale_id):
-        if sale_id is not None and self.one("SELECT 1 FROM Sale WHERE sale_id=?", (sale_id,)) is None:
+        if sale_id is None:
+            return
+        row = self.one("SELECT voided_at FROM Sale WHERE sale_id=?", (sale_id,))
+        if row is None:
             raise NotFoundError("找不到銷售單編號")
+        if row["voided_at"] is not None:
+            raise ConflictError("此銷售單已作廢，不可填為原銷售單")
     def require_variant(self, vid):
         if self.one("SELECT 1 FROM Variant WHERE variant_id=?", (vid,)) is None:
             raise NotFoundError("找不到子產品")
@@ -165,7 +170,8 @@ class ReturnsService:
         done = stock_ledger.repaired_by_item(self.repo.connection, [r["id"] for r in all_rows])
         grouped = {rid: [] for rid in rids}
         for r in all_rows: grouped[r["return_id"]].append(r)
-        return [self._shape(sessions[rid], grouped[rid], attrs, disp, models, done, codes) for rid in rids]
+        out = [self._shape(sessions[rid], grouped[rid], attrs, disp, models, done, codes) for rid in rids]
+        return correction_service.attach(self.repo.connection, "return", out, "return_id")
     @staticmethod
     def _shape(session, rows, attrs, disp, models, repaired, codes):
         items = [{"id": r["id"], "variant_id": r["variant_id"], "name": r["name"], "attributes": attrs.get(r["variant_id"], {}),

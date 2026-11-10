@@ -39,6 +39,13 @@ def post(conn, kind, source_id, qty=None, employee=None):
     if kind == "sale":
         row = _one(conn, "SELECT variant_id, qty FROM SaleItem WHERE item_id=?", (source_id,))
         return _insert(conn, kind, row["variant_id"], -row["qty"], "sale_item_id", source_id)
+    if kind == "void":
+        # 作廢沖回:先把銷售單標成作廢再逐筆入帳;同一明細只能沖回一次(唯一索引)
+        row = _one(conn, "SELECT i.variant_id, i.qty, s.voided_at FROM SaleItem i "
+                         "JOIN Sale s ON s.sale_id=i.sale_id WHERE i.item_id=?", (source_id,))
+        if row["voided_at"] is None:
+            raise ConflictError("銷售單尚未作廢，不可沖回庫存")
+        return _insert(conn, kind, row["variant_id"], row["qty"], "sale_item_id", source_id, "作廢沖回")
     if kind == "adjust":
         row = _one(conn, "SELECT i.variant_id, i.counted_qty - i.system_qty AS diff, s.status "
                          "FROM StocktakeItem i JOIN StocktakeSession s ON s.session_id=i.session_id WHERE i.id=?",

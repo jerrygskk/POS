@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 
-from lib import product_data, stock_ledger
+from lib import correction_service, product_data, stock_ledger
 from lib.db import stock_map
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import NotFoundError, ValidationError
@@ -62,7 +62,8 @@ class StockRepository(BaseRepository):
             "SELECT m.move_id,m.variant_id,m.qty,m.kind,m.note,m.ts,"
             "m.receipt_item_id,m.sale_item_id,m.stocktake_item_id,m.return_item_id,"
             "ri.receipt_id,si.sale_id,sti.session_id AS stocktake_id,rti.return_id,"
-            "COALESCE(m.employee,r.employee,s.employee,ss.employee,rs.employee) AS employee "
+            "COALESCE(m.employee,r.employee,CASE WHEN m.kind='void' THEN NULL ELSE s.employee END,"
+            "ss.employee,rs.employee) AS employee "
             "FROM StockMovement m "
             "LEFT JOIN ReceiptItem ri ON ri.receipt_item_id=m.receipt_item_id "
             "LEFT JOIN Receipt r ON r.receipt_id=ri.receipt_id "
@@ -106,7 +107,7 @@ class StockService:
             receipt["items"].append({"variant_id": row["variant_id"], "name": row["name"],
                 "attributes": attrs.get(row["variant_id"], {}), "attr_display": display.get(row["variant_id"], ""),
                 "qty": row["qty"], "stock": stocks.get(row["variant_id"], 0)})
-        return list(out.values())
+        return correction_service.attach(self.repo.connection, "receipt", list(out.values()), "receipt_id")
 
     def detail(self, variant_id):
         self.repo.require_variant(variant_id)

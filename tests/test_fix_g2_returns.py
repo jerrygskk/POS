@@ -63,7 +63,8 @@ class TestFixG2Returns(ReturnsBase):
             conn = get_conn(self.db)
             try:
                 svc = ReturnsService(ReturnsRepository(conn))
-                old = [_old_detail(svc, r["return_id"]) for r in got]
+                # 舊寫法沒有更正歷程;這裡的單都沒更正過,補上空清單再比
+                old = [{**_old_detail(svc, r["return_id"]), "corrections": []} for r in got]
             finally: conn.close()
             self.assertEqual(got, old)
             for r in got:

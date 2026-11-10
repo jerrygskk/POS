@@ -144,7 +144,7 @@ class StockSourcesTest(FacadeTestCase):
         for table, key, row_id, cols in locked:
             for col, value in cols.items():
                 if table == "SaleItem" and col == "sale_id":
-                    value = conn.execute("INSERT INTO Sale(payment,total,paid) VALUES('現金',0,0)").lastrowid
+                    value = conn.execute("INSERT INTO Sale(payment,total,paid,business_date) VALUES('現金',0,0,'2026-01-01')").lastrowid
                 with self.subTest(f"{table}.{col}"), self.assertRaises(sqlite3.IntegrityError):
                     conn.execute(f"UPDATE {table} SET {col}=? WHERE {key}=?", (value, row_id))
             if table != "Sale":
@@ -199,7 +199,7 @@ class StockSourcesTest(FacadeTestCase):
         conn.execute("PRAGMA foreign_keys=ON")
         receipt = conn.execute("INSERT INTO Receipt(employee) VALUES(1)").lastrowid
         free_receipt_item = conn.execute("INSERT INTO ReceiptItem(receipt_id,variant_id,qty) VALUES(?,?,1)", (receipt, self.v1)).lastrowid
-        free_sale = conn.execute("INSERT INTO Sale(payment,total,paid) VALUES('現金',0,0)").lastrowid
+        free_sale = conn.execute("INSERT INTO Sale(payment,total,paid,business_date) VALUES('現金',0,0,'2026-01-01')").lastrowid
         free_sale_item = conn.execute("INSERT INTO SaleItem(sale_id,variant_id,qty,unit_price) VALUES(?,?,1,1)", (free_sale, self.v1)).lastrowid
         sid = conn.execute("SELECT session_id FROM StocktakeItem WHERE id=?", (ids["stocktake_item"],)).fetchone()[0]
         free_take = conn.execute("INSERT INTO StocktakeItem(session_id,variant_id,system_qty,counted_qty) VALUES(?,?,0,0)", (sid, self.v1)).lastrowid

@@ -117,9 +117,9 @@ CREATE TABLE IF NOT EXISTS VariantModel(
 CREATE TABLE IF NOT EXISTS StockMovement(
   move_id INTEGER PRIMARY KEY AUTOINCREMENT,
   variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
-  qty INTEGER NOT NULL,           -- 進貨+/銷售-/盤點±/退貨加回+/返新進貨+
-  kind TEXT NOT NULL CHECK(kind IN ('purchase','sale','adjust','return','repair')),
-  -- 來源明細:恰一個非 NULL,且須符合 kind(purchase→進貨明細、sale→銷售明細、
+  qty INTEGER NOT NULL,           -- 進貨+/銷售-/盤點±/退貨加回+/返新進貨+/作廢沖回+
+  kind TEXT NOT NULL CHECK(kind IN ('purchase','sale','adjust','return','repair','void')),
+  -- 來源明細:恰一個非 NULL,且須符合 kind(purchase→進貨明細、sale／void→銷售明細、
   -- adjust→盤點明細、return/repair→退貨品項)。複合外鍵保證來源與異動同款式。
   receipt_item_id INTEGER,
   sale_item_id INTEGER,
@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS StockMovement(
         + (stocktake_item_id IS NOT NULL) + (return_item_id IS NOT NULL) = 1),
   CHECK((kind='purchase' AND receipt_item_id IS NOT NULL AND qty > 0)
      OR (kind='sale' AND sale_item_id IS NOT NULL AND qty < 0)
+     OR (kind='void' AND sale_item_id IS NOT NULL AND qty > 0)
      OR (kind='adjust' AND stocktake_item_id IS NOT NULL AND qty <> 0)
      OR (kind IN ('return','repair') AND return_item_id IS NOT NULL AND qty > 0)),
   CHECK((kind='repair') = (employee IS NOT NULL)),
@@ -141,9 +142,10 @@ CREATE TABLE IF NOT EXISTS StockMovement(
   FOREIGN KEY(return_item_id, variant_id) REFERENCES ReturnItem(id, variant_id)
 );
 CREATE INDEX IF NOT EXISTS idx_move_variant ON StockMovement(variant_id);
--- 同一明細只能入帳一次;返新(repair)可分批,不套用
+-- 同一明細只能入帳一次;返新(repair)可分批,不套用。銷售明細可各有一筆銷售與一筆作廢沖回
 CREATE UNIQUE INDEX IF NOT EXISTS idx_move_receipt_item ON StockMovement(receipt_item_id) WHERE receipt_item_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_move_sale_item ON StockMovement(sale_item_id) WHERE sale_item_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_move_sale_item ON StockMovement(sale_item_id) WHERE kind='sale';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_move_void_item ON StockMovement(sale_item_id) WHERE kind='void';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_move_stocktake_item ON StockMovement(stocktake_item_id) WHERE stocktake_item_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_move_return_item ON StockMovement(return_item_id) WHERE kind='return';
 CREATE INDEX IF NOT EXISTS idx_move_repair ON StockMovement(return_item_id) WHERE kind='repair';
@@ -170,8 +172,15 @@ CREATE TABLE IF NOT EXISTS Sale(
   paid INTEGER NOT NULL,          -- 實收
   change INTEGER NOT NULL DEFAULT 0,
   employee INTEGER CHECK(employee BETWEEN 1 AND 6),  -- 結帳員工代號;舊單為 NULL
-  member_id INTEGER REFERENCES Member(member_id)  -- 會員;一般客人與舊單為 NULL
+  member_id INTEGER REFERENCES Member(member_id),  -- 會員;一般客人與舊單為 NULL
+  -- 帳日:當天已點帳後才結的單算隔天的帳,由結帳的 INSERT 同一句決定
+  business_date TEXT NOT NULL
+    CHECK(business_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  voided_at TEXT,                 -- 作廢時間;NULL＝有效
+  void_reason TEXT,               -- 不記是誰作廢的(維護者 2026-11-10 裁示),只記時間與原因
+  CHECK((voided_at IS NULL) = (void_reason IS NULL))
 );
+CREATE INDEX IF NOT EXISTS idx_sale_business_date ON Sale(business_date);
 CREATE TABLE IF NOT EXISTS SaleItem(
   item_id INTEGER PRIMARY KEY AUTOINCREMENT,
   sale_id INTEGER NOT NULL REFERENCES Sale(sale_id),
@@ -264,6 +273,38 @@ CREATE TABLE IF NOT EXISTS MemberPhone(
   PRIMARY KEY(member_id, phone)  -- 多對多:同一支電話可屬於多位會員
 );
 CREATE INDEX IF NOT EXISTS idx_memberphone_phone ON MemberPhone(phone);
+CREATE TABLE IF NOT EXISTS DayClose(           -- 每日點帳:一個帳日一筆,不可改刪
+  business_date TEXT PRIMARY KEY NOT NULL   -- TEXT 主鍵不寫 NOT NULL 可塞多筆 NULL
+    CHECK(business_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  closed_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  employee INTEGER NOT NULL CHECK(employee BETWEEN 1 AND 6),
+  float_amount INTEGER NOT NULL CHECK(float_amount >= 0),    -- 點帳當下的預備金
+  counted_total INTEGER NOT NULL CHECK(counted_total >= 0),  -- 輸入的錢櫃總額(含預備金)
+  cash_sales INTEGER NOT NULL CHECK(cash_sales >= 0),        -- 點帳當下的現金銷售(不含作廢)
+  diff INTEGER NOT NULL,                                     -- 短溢,負＝短
+  reason TEXT,
+  CHECK(diff = counted_total - float_amount - cash_sales),
+  CHECK(diff = 0 OR (reason IS NOT NULL AND length(trim(reason)) > 0))
+);
+CREATE TABLE IF NOT EXISTS Correction(         -- 更正紀錄(付款方式、員工):恰一個來源單據,不可改刪
+  correction_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  sale_id INTEGER REFERENCES Sale(sale_id),
+  return_id INTEGER REFERENCES ReturnSession(return_id),
+  receipt_id INTEGER REFERENCES Receipt(receipt_id),
+  stocktake_id INTEGER REFERENCES StocktakeSession(session_id),
+  field TEXT NOT NULL CHECK(field IN ('payment','employee')),
+  old_value TEXT,                    -- 舊銷售單的員工可能是 NULL
+  new_value TEXT NOT NULL,           -- 不記是誰更正的,只記時間與改前改後
+  CHECK((sale_id IS NOT NULL) + (return_id IS NOT NULL)
+        + (receipt_id IS NOT NULL) + (stocktake_id IS NOT NULL) = 1),
+  CHECK(field <> 'payment' OR sale_id IS NOT NULL),
+  CHECK(old_value IS NOT new_value)
+);
+CREATE INDEX IF NOT EXISTS idx_correction_sale ON Correction(sale_id) WHERE sale_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_correction_return ON Correction(return_id) WHERE return_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_correction_receipt ON Correction(receipt_id) WHERE receipt_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_correction_stocktake ON Correction(stocktake_id) WHERE stocktake_id IS NOT NULL;
 -- 已入帳明細鎖定:有庫存異動指向的明細,只擋被鎖欄位真的改值(OLD.x IS NOT NEW.x)與刪除。
 -- 返修結案／撤回結案、退貨原因、盤點備註、needs_recount、單據狀態不在鎖定範圍。
 CREATE TRIGGER IF NOT EXISTS trg_receiptitem_lock_update BEFORE UPDATE ON ReceiptItem
@@ -293,7 +334,8 @@ CREATE TRIGGER IF NOT EXISTS trg_returnitem_lock_delete BEFORE DELETE ON ReturnI
 CREATE TRIGGER IF NOT EXISTS trg_sale_lock_update BEFORE UPDATE ON Sale
   WHEN EXISTS(SELECT 1 FROM SaleItem si JOIN StockMovement m ON m.sale_item_id=si.item_id WHERE si.sale_id=OLD.sale_id)
    AND (OLD.order_discount IS NOT NEW.order_discount OR OLD.member_discount IS NOT NEW.member_discount
-        OR OLD.total IS NOT NEW.total OR OLD.paid IS NOT NEW.paid OR OLD.change IS NOT NEW.change)
+        OR OLD.total IS NOT NEW.total OR OLD.paid IS NOT NEW.paid OR OLD.change IS NOT NEW.change
+        OR OLD.business_date IS NOT NEW.business_date)
   BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
 -- INSERT OR REPLACE 撞到既有列時會先隱含刪除,刪除觸發器不會觸發(未開 recursive_triggers):
 -- 新增前若會撞到已入帳的列(主鍵或任一唯一鍵)就擋下
@@ -337,7 +379,8 @@ CREATE TRIGGER IF NOT EXISTS trg_returnitem_lock_update_replace BEFORE UPDATE ON
   BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_replace BEFORE INSERT ON StockMovement
   WHEN EXISTS(SELECT 1 FROM StockMovement WHERE move_id=NEW.move_id
-              OR receipt_item_id=NEW.receipt_item_id OR sale_item_id=NEW.sale_item_id
+              OR receipt_item_id=NEW.receipt_item_id
+              OR (sale_item_id=NEW.sale_item_id AND kind=NEW.kind)
               OR stocktake_item_id=NEW.stocktake_item_id
               OR (kind='return' AND NEW.kind='return' AND return_item_id=NEW.return_item_id))
   BEGIN SELECT RAISE(ABORT, '庫存異動不可修改或刪除'); END;
@@ -345,15 +388,132 @@ CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_update BEFORE UPDATE ON StockM
   BEGIN SELECT RAISE(ABORT, '庫存異動不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_delete BEFORE DELETE ON StockMovement
   BEGIN SELECT RAISE(ABORT, '庫存異動不可修改或刪除'); END;
+-- 鎖帳:帳日已點帳的銷售單,員工代號以外一律不可新增、修改、刪除(只看帳日,不看有沒有庫存異動)。
+-- 連同兩種 REPLACE 撞上已點帳單的主鍵一併擋下
+CREATE TRIGGER IF NOT EXISTS trg_sale_closed_insert BEFORE INSERT ON Sale
+  WHEN EXISTS(SELECT 1 FROM DayClose WHERE business_date=NEW.business_date)
+    OR EXISTS(SELECT 1 FROM Sale s JOIN DayClose d ON d.business_date=s.business_date WHERE s.sale_id=NEW.sale_id)
+  BEGIN SELECT RAISE(ABORT, '此帳日已點帳，銷售單不可新增或修改'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sale_closed_update BEFORE UPDATE ON Sale
+  WHEN (EXISTS(SELECT 1 FROM DayClose WHERE business_date=OLD.business_date)
+        OR EXISTS(SELECT 1 FROM DayClose WHERE business_date=NEW.business_date))
+   AND (OLD.sale_id IS NOT NEW.sale_id OR OLD.ts IS NOT NEW.ts OR OLD.payment IS NOT NEW.payment
+        OR OLD.order_discount IS NOT NEW.order_discount OR OLD.member_discount IS NOT NEW.member_discount
+        OR OLD.total IS NOT NEW.total OR OLD.paid IS NOT NEW.paid OR OLD.change IS NOT NEW.change
+        OR OLD.member_id IS NOT NEW.member_id OR OLD.business_date IS NOT NEW.business_date
+        OR OLD.voided_at IS NOT NEW.voided_at OR OLD.void_reason IS NOT NEW.void_reason)
+  BEGIN SELECT RAISE(ABORT, '此帳日已點帳，銷售單不可新增或修改'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sale_closed_update_replace BEFORE UPDATE ON Sale
+  WHEN NEW.sale_id IS NOT OLD.sale_id
+   AND EXISTS(SELECT 1 FROM Sale s JOIN DayClose d ON d.business_date=s.business_date WHERE s.sale_id=NEW.sale_id)
+  BEGIN SELECT RAISE(ABORT, '此帳日已點帳，銷售單不可新增或修改'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sale_closed_delete BEFORE DELETE ON Sale
+  WHEN EXISTS(SELECT 1 FROM DayClose WHERE business_date=OLD.business_date)
+  BEGIN SELECT RAISE(ABORT, '此帳日已點帳，銷售單不可新增或修改'); END;
+-- 作廢不可取消:作廢欄位寫入後不可再變,已作廢的單不可改付款方式、不可刪除、
+-- 不可被 REPLACE 蓋掉(員工代號仍可更正)
+CREATE TRIGGER IF NOT EXISTS trg_sale_void_final BEFORE UPDATE ON Sale
+  WHEN OLD.voided_at IS NOT NULL
+   AND (OLD.voided_at IS NOT NEW.voided_at OR OLD.void_reason IS NOT NEW.void_reason)
+  BEGIN SELECT RAISE(ABORT, '已作廢的銷售單不可恢復或修改'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sale_void_payment BEFORE UPDATE ON Sale
+  WHEN OLD.voided_at IS NOT NULL AND OLD.payment IS NOT NEW.payment
+  BEGIN SELECT RAISE(ABORT, '已作廢的銷售單不可恢復或修改'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sale_void_keep_delete BEFORE DELETE ON Sale
+  WHEN OLD.voided_at IS NOT NULL
+  BEGIN SELECT RAISE(ABORT, '已作廢的銷售單不可恢復或修改'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sale_void_keep_insert BEFORE INSERT ON Sale
+  WHEN EXISTS(SELECT 1 FROM Sale WHERE sale_id=NEW.sale_id AND voided_at IS NOT NULL)
+  BEGIN SELECT RAISE(ABORT, '已作廢的銷售單不可恢復或修改'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sale_void_keep_update BEFORE UPDATE ON Sale
+  WHEN NEW.sale_id IS NOT OLD.sale_id
+   AND EXISTS(SELECT 1 FROM Sale WHERE sale_id=NEW.sale_id AND voided_at IS NOT NULL)
+  BEGIN SELECT RAISE(ABORT, '已作廢的銷售單不可恢復或修改'); END;
+-- 點帳紀錄與更正紀錄:不可修改、不可刪除,新增撞主鍵(INSERT OR REPLACE)也擋
+CREATE TRIGGER IF NOT EXISTS trg_dayclose_no_replace BEFORE INSERT ON DayClose
+  WHEN EXISTS(SELECT 1 FROM DayClose WHERE business_date=NEW.business_date)
+  BEGIN SELECT RAISE(ABORT, '點帳紀錄不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_dayclose_no_update BEFORE UPDATE ON DayClose
+  BEGIN SELECT RAISE(ABORT, '點帳紀錄不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_dayclose_no_delete BEFORE DELETE ON DayClose
+  BEGIN SELECT RAISE(ABORT, '點帳紀錄不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_correction_no_replace BEFORE INSERT ON Correction
+  WHEN EXISTS(SELECT 1 FROM Correction WHERE correction_id=NEW.correction_id)
+  BEGIN SELECT RAISE(ABORT, '更正紀錄不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_correction_no_update BEFORE UPDATE ON Correction
+  BEGIN SELECT RAISE(ABORT, '更正紀錄不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_correction_no_delete BEFORE DELETE ON Correction
+  BEGIN SELECT RAISE(ABORT, '更正紀錄不可修改或刪除'); END;
 """
+
+import sqlite3
+
+
+def statements():
+    """把 SCHEMA 拆成單句,供升級時在同一交易內逐句執行(executescript 會自行提交)。
+
+    trigger 內有分號,不能直接用分號切;以 sqlite3.complete_statement 逐行累積判斷。
+    """
+    out, buf = [], ""
+    for line in SCHEMA.splitlines(keepends=True):
+        buf += line
+        if sqlite3.complete_statement(buf):
+            out.append(buf.strip())
+            buf = ""
+    if any(l.strip() and not l.strip().startswith("--") for l in buf.splitlines()):
+        raise RuntimeError("SCHEMA 結尾有不完整的語句")
+    return out
+
+
+def _table_ddl(table):
+    prefix = f"CREATE TABLE IF NOT EXISTS {table}("
+    for stmt in statements():
+        start = stmt.find(prefix)  # 語句前面可能帶著註解行;表內的註解原樣保留,與全新資料庫存下的定義一致
+        if start >= 0 and all(l.strip().startswith("--") for l in stmt[:start].splitlines()):
+            return stmt[start:]
+    raise RuntimeError(f"SCHEMA 找不到資料表 {table}")
+
+
+_SALE_V27_COLUMNS = "sale_id,ts,payment,order_discount,member_discount,total,paid,change,employee,member_id"
+_MOVE_V27_COLUMNS = ("move_id,variant_id,qty,kind,receipt_item_id,sale_item_id,stocktake_item_id,"
+                     "return_item_id,note,employee,ts")
+
+
+def _to_v28(conn):
+    """v27→v28:Sale 加帳日與作廢欄位、StockMovement 加 void 種類。出 1.0.0 時移除。
+
+    用「原名直接重建」:資料先搬到暫存表,原表丟掉後用原名建新結構再搬回,保留主鍵與流水號。
+    不用「建新表再改名」:改名前新表不算子表的父表,延後的外鍵違規消不掉;改名也會被其他表上
+    引用 StockMovement 的 trigger 擋下。掛在兩張表上的 trigger 與索引隨 DROP 消失,由呼叫端
+    接著逐句執行 SCHEMA 重建;DayClose、Correction 同樣由 SCHEMA 建立。
+    """
+    bad = [str(r[0]) for r in conn.execute("SELECT sale_id FROM Sale WHERE date(ts) IS NULL ORDER BY sale_id")]
+    if bad:
+        shown = "、".join(bad[:20]) + ("…" if len(bad) > 20 else "")
+        raise RuntimeError(f"資料庫升級中止：{len(bad)} 張銷售單的時間無法判斷帳日（單號 {shown}）")
+    conn.execute("PRAGMA defer_foreign_keys=ON")  # 外鍵檢查不關,延到提交前整體檢查
+    for table, columns, extra_cols, extra_exprs in (
+            ("Sale", _SALE_V27_COLUMNS, ",business_date", ",date(ts)"),
+            ("StockMovement", _MOVE_V27_COLUMNS, "", "")):
+        seq = conn.execute("SELECT seq FROM sqlite_sequence WHERE name=?", (table,)).fetchone()
+        conn.execute(f"CREATE TEMP TABLE _old AS SELECT * FROM {table}")
+        conn.execute(f"DROP TABLE {table}")
+        conn.execute(_table_ddl(table))
+        conn.execute(f"INSERT INTO {table}({columns}{extra_cols}) SELECT {columns}{extra_exprs} FROM _old")
+        conn.execute("DROP TABLE _old")
+        if seq is not None:
+            conn.execute("DELETE FROM sqlite_sequence WHERE name=?", (table,))
+            conn.execute("INSERT INTO sqlite_sequence(name,seq) VALUES(?,?)", (table, seq[0]))
+
 
 # 版號規則:新結構第一版為 BASE_VERSION;MIGRATIONS 為之後的升級步驟,
 # 第 N 筆將 DB 由 BASE_VERSION+N-1 升至 BASE_VERSION+N。callable 只用 conn.execute,
 # 勿自行 commit/executescript(runner 已包在同一交易裡)。
 # 舊版(v24 以前)的升級步驟已移除:低於 MIN_SUPPORTED_VERSION 的資料庫一律拒絕開啟,
 # 主檔改由 tools/make_standard_db.py 唯讀轉出新母版。
+# v27→v28 是上線前唯一保留的升級步驟(維護者 2026-11-10 裁示),出 1.0.0 時移除。
 BASE_VERSION = 27
-MIGRATIONS = []
+MIGRATIONS = [(28, _to_v28)]
 
 # 最新版號 = 新結構第一版 + 升級步驟筆數;全新 DB 建 SCHEMA 即為此版
 SCHEMA_VERSION = BASE_VERSION + len(MIGRATIONS)

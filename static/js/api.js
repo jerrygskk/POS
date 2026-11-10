@@ -30,7 +30,8 @@ const API = {
       "barcodes.scan", "stock.receive", "stock.detail", "stock.receipts",
       "stocktake.create", "stocktake.list", "stocktake.history", "stocktake.detail", "stocktake.scan", "stocktake.set_counted", "stocktake.remove_item", "stocktake.close", "stocktake.withdraw", "stocktake.return", "stocktake.approve", "stocktake.pending_count", "stocktake.set_note", "stocktake.cancel",
       "returns.create", "returns.list", "returns.history", "returns.detail", "returns.scan", "returns.set_qty", "returns.set_sale", "returns.set_reason", "returns.remove_item", "returns.close", "returns.withdraw", "returns.set_disposition", "returns.set_kind", "returns.approve", "returns.cancel", "returns.pending_count", "returns.repair_receive", "returns.close_item", "returns.reopen_item",
-      "payments.list", "sales.checkout", "sales.list", "sales.recent", "sales.summary", "sales.export_save", "printing.barcode", "printing.preview", "printing.check",
+      "payments.list", "sales.checkout", "sales.list", "sales.recent", "sales.summary", "sales.export_save", "sales.void", "sales.set_payment", "corrections.set_employee",
+      "dayclose.current", "dayclose.preview", "dayclose.close", "dayclose.list", "dayclose.set_float", "printing.barcode", "printing.preview", "printing.check",
       "members.lookup", "members.list", "members.create", "members.update", "members.phone_owners", "members.delete",
       "desktop.child_window.open", "desktop.child_window.context", "desktop.child_window.close",
       "desktop.update.check", "desktop.update.start", "desktop.update.status", "desktop.update.restart", "desktop.update.busy"
@@ -101,6 +102,11 @@ const API = {
   receiveStock: p => API.invoke("stock.receive", p), stockDetail: variant_id => API.invoke("stock.detail", {variant_id}),
   createStocktake: p => API.invoke("stocktake.create", p), listStocktakes: () => API.invoke("stocktake.list", {}), stocktakeDetail: session_id => API.invoke("stocktake.detail", {session_id}), stocktakeScan: p => API.invoke("stocktake.scan", p), setStocktakeCounted: p => API.invoke("stocktake.set_counted", p), closeStocktake: session_id => API.invoke("stocktake.close", {session_id}),
   listPayments: () => API.invoke("payments.list", {}), checkout: p => API.invoke("sales.checkout", p), listSales: p => API.invoke("sales.list", p), recentSales: () => API.invoke("sales.recent", {}), salesSummary: p => API.invoke("sales.summary", p),
+  voidSale: p => API.invoke("sales.void", p), setSalePayment: p => API.invoke("sales.set_payment", p),
+  setDocEmployee: p => API.invoke("corrections.set_employee", p),
+  dayCloseCurrent: () => API.invoke("dayclose.current", {}), dayClosePreview: business_date => API.invoke("dayclose.preview", {business_date}),
+  dayCloseClose: p => API.invoke("dayclose.close", p), dayCloseList: p => API.invoke("dayclose.list", p),
+  dayCloseSetFloat: amount => API.invoke("dayclose.set_float", {amount}),
   updateVariantDetails(id, fields, modelIds) {
     return this.invoke("variants.update_details", {
       id, fields, model_ids: modelIds

@@ -13,6 +13,7 @@ DEFAULT_PAYMENTS = ["現金", "轉帳", "行動支付"]
 def seed(conn, fresh=False):
     conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('payments',?)",
                  (json.dumps(DEFAULT_PAYMENTS, ensure_ascii=False),))
+    conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('cash_float','0')")  # 點帳預備金
     if conn.execute("SELECT 1 FROM Setting WHERE key='admin_password_hash'").fetchone() is None:
         conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('admin_password_hash',?)",
                      (hash_password("admin"),))

@@ -1,6 +1,6 @@
 import sqlite3
 
-from lib import product_data, stock_ledger
+from lib import correction_service, product_data, stock_ledger
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from lib.product_rules import allow_keys as _allow, date_range, date_sql, is_int as _is_int, require_employee
@@ -92,7 +92,7 @@ class StocktakeService:
         for session in sessions:
             items = grouped[session["session_id"]]
             out.append({**dict(session), "items": items, "diff_count": sum(1 for item in items if item["diff"])})
-        return out
+        return correction_service.attach(self.repo.connection, "stocktake", out, "session_id")
     def scan(self, sid, vid, qty):
         self.repo.require_open(sid)
         self.repo.require_variant(vid)

@@ -9,7 +9,7 @@ v24 的規格欄經 CategoryField 掛種類；新格式規格欄直接隸屬種�
 CategoryField 的種類、排序、必填、預設選項併入 AttributeField，啟用取兩者皆啟用。
 
 用法（從專案根目錄執行）：
-    python tools/make_standard_db.py --source docs/standard_db/pos_standard.db --output docs/standard_db/pos_standard_v27_new.db
+    python tools/make_standard_db.py --source docs/standard_db/pos_standard.db --output docs/standard_db/pos_standard_v28_new.db
 
 來源只以唯讀連線開啟；輸出檔已存在就停止，不覆寫任何既有檔案。
 任何檢查不過就中止、刪掉未完成的輸出檔，來源檔內容不變。
@@ -40,7 +40,7 @@ COPY_TABLES = [  # 欄位與來源相同，原樣複製（保留主鍵）
 CONVERT_TABLES = ["AttributeField"]  # 由來源 AttributeField＋CategoryField 轉換
 SOURCE_ONLY_TABLES = ["CategoryField"]  # 只存在來源，已併入 AttributeField
 SKIP_TABLES = ["Sale", "SaleItem", "StockMovement", "StocktakeSession", "StocktakeItem",
-               "ReturnSession", "ReturnItem", "Receipt", "ReceiptItem"]
+               "ReturnSession", "ReturnItem", "Receipt", "ReceiptItem", "DayClose", "Correction"]
 # Setting 逐鍵處理：schema_version 由本工具寫入最新版號，密碼依種子預設（不複製來源密碼）。
 SETTING_COPY_KEYS = ["payments", "next_store_barcode"]
 SETTING_SKIP_KEYS = ["schema_version", "admin_password_hash"]

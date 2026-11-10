@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>膜型機門市管理系統</title>
-<link rel="stylesheet" href="css/pos.css?v=330">
+<link rel="stylesheet" href="css/pos.css?v=336">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=330" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=336" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -93,8 +93,8 @@
   <transition name="collapse"><div v-if="recentOpen">
   <table>
     <thead><tr><th>編號</th><th>時間</th><th>員工</th><th>商品</th><th>應收</th></tr></thead>
-    <tbody><tr v-for="s in recent" :key="s.sale_id">
-      <td>{{ s.sale_id }}</td><td>{{ s.ts }}</td><td>{{ s.employee }}</td>
+    <tbody><tr v-for="s in recent" :key="s.sale_id" :class="{'sale-void': s.voided_at}">
+      <td>{{ s.sale_id }}</td><td>{{ s.ts }}<span v-if="s.voided_at" class="tag records-tag">已作廢</span></td><td>{{ s.employee }}</td>
       <td>{{ itemsText(s) }}</td><td>{{ s.total }}</td>
     </tr></tbody>
   </table>
@@ -345,7 +345,7 @@
   <div class="prod-settings">
     <aside class="cat-list">
       <div class="cat-list-title">紀錄</div>
-      <template v-for="[key, label] in kinds" :key="key">
+      <template v-for="[key, label] in shownKinds" :key="key">
         <div v-if="key==='members'" class="cat-list-title cat-list-group">會員</div>
         <div class="cat-item" :class="{active: kind===key}" @click="selectKind(key)">
           <span class="cat-name">{{ label }}</span>
@@ -358,7 +358,7 @@
         <button class="primary" @click="reload">查詢</button>
         <button @click="newMember">新增會員</button>
       </div>
-      <div v-else class="scan-row">
+      <div v-else-if="kind!=='dayclose'" class="scan-row">
         <label>起 <input type="date" v-model="dateFrom"></label>
         <label>迄 <input type="date" v-model="dateTo"></label>
         <select v-if="kind==='sales'" v-model="payment"><option value="">全部付款方式</option>
@@ -373,7 +373,7 @@
       </div>
       <div v-if="(kind==='sales' && summary) || rowKeys.length" class="records-bar">
         <div v-if="kind==='sales' && summary" class="pay-panel">
-          <div>合計 {{ summary.count }} 筆，共 {{ summary.total }} 元</div>
+          <div>合計 {{ summary.count }} 筆，共 {{ summary.total }} 元<template v-if="summary.void_count">（已作廢 {{ summary.void_count }} 筆 {{ summary.void_total }} 元）</template></div>
           <div class="pay-breakdown"><span v-for="b in summary.by_payment" :key="b.payment">{{ b.payment }}：{{ b.count }} 筆 {{ b.total }} 元</span></div>
         </div>
         <div v-if="rowKeys.length" class="records-bar-actions">
@@ -381,19 +381,72 @@
           <button @click="collapseAll">收合全部</button>
         </div>
       </div>
+      <template v-if="kind==='dayclose' && isAdmin">
+        <div v-if="dc.preview && dc.preview.unclosed.length" class="notice-bar">
+          <span>尚未點帳：</span>
+          <button v-for="d in dc.preview.unclosed" :key="d" type="button" class="btn-sm" @click="dcLoad(d)">{{ shortDate(d) }}</button>
+          <span v-if="dc.preview.unclosed_count > dc.preview.unclosed.length">（共 {{ dc.preview.unclosed_count }} 個帳日，僅列最近 {{ dc.preview.unclosed.length }} 個）</span>
+        </div>
+        <div class="scan-row dayclose-row">
+          <label>帳日 <input type="date" v-model="dc.date" :max="dc.today" @change="dcLoad()"></label>
+          <span v-if="dc.preview">現金銷售 <b>{{ dc.preview.cash_sales }}</b></span>
+          <span v-if="dc.preview">預備金 <b>{{ dc.preview.float_amount }}</b></span>
+          <span class="dayclose-float">
+            <label>預備金設定 <input class="w100" inputmode="numeric" v-model="dc.floatInput" @keydown.enter="dcSaveFloat"></label>
+            <button @click="dcSaveFloat">儲存</button>
+          </span>
+        </div>
+        <div v-if="dc.preview" class="pay-breakdown dayclose-breakdown">
+          <span v-for="b in dc.preview.by_payment" :key="b.payment">{{ b.payment }}：{{ b.count }} 筆 {{ b.total }} 元</span>
+          <span v-if="dc.preview.void_count">已作廢：{{ dc.preview.void_count }} 筆 {{ dc.preview.void_total }} 元</span>
+        </div>
+        <div v-if="dc.preview && !dc.preview.closed" class="scan-row dayclose-row">
+          <label>錢櫃現金總額 <input ref="dcCounted" class="w100" inputmode="numeric" v-model="dc.counted" @keydown.enter="dcClose"></label>
+          <span>短溢 <b :class="{neg: dcDiff}">{{ dcDiff === null ? '—' : signedText(dcDiff) }}</b></span>
+          <input class="dayclose-reason" v-model="dc.reason" maxlength="60" placeholder="短溢原因（有短溢必填）">
+          <employee-picker></employee-picker>
+          <button class="primary" :disabled="dc.busy" @click="dcClose">完成點帳</button>
+        </div>
+        <div v-if="dc.preview && dc.preview.closed" class="scan-row dayclose-row">
+          <span class="tag">已點帳</span>
+          <span>錢櫃現金總額 <b>{{ dc.preview.record.counted_total }}</b></span>
+          <span>短溢 <b :class="{neg: dc.preview.record.diff}">{{ signedText(dc.preview.record.diff) }}</b></span>
+          <span v-if="dc.preview.record.reason" class="dayclose-reason-text">原因：{{ dc.preview.record.reason }}</span>
+          <span>員工 {{ dc.preview.record.employee }}</span>
+          <span>{{ minuteText(dc.preview.record.closed_at) }}</span>
+        </div>
+        <div class="grp-title">點帳紀錄</div>
+        <div class="scan-row">
+          <label>起 <input type="date" v-model="dateFrom"></label>
+          <label>迄 <input type="date" v-model="dateTo"></label>
+          <button class="primary" @click="reload">查詢</button>
+        </div>
+        <table class="records-table">
+          <colgroup><col class="col-w110"><col class="col-w160"><col class="col-w56"><col class="col-w80"><col class="col-w88"><col class="col-w88"><col class="col-w80"><col></colgroup>
+          <thead><tr><th>帳日</th><th>點帳時間</th><th>員工</th><th class="num">預備金</th><th class="num">錢櫃總額</th><th class="num">現金銷售</th><th class="num">短溢</th><th>原因</th></tr></thead>
+          <tbody>
+            <tr v-for="r in dc.records" :key="r.business_date">
+              <td>{{ r.business_date }}</td><td>{{ minuteText(r.closed_at) }}</td><td>{{ r.employee }}</td>
+              <td class="num">{{ r.float_amount }}</td><td class="num">{{ r.counted_total }}</td><td class="num">{{ r.cash_sales }}</td>
+              <td class="num" :class="{neg: r.diff}">{{ signedText(r.diff) }}</td><td>{{ r.reason || '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
       <table v-if="kind==='sales'" class="records-table">
-        <colgroup><col class="col-w80"><col class="col-w170"><col class="col-w56"><col><col class="col-w96"><col class="col-w96"><col class="col-w88"><col class="col-w92"></colgroup>
+        <colgroup><col class="col-w80"><col class="col-w240"><col class="col-w56"><col><col class="col-w80"><col class="col-w80"><col class="col-w88"><col class="col-w92"></colgroup>
         <thead><tr><th>編號</th><th>時間</th><th>員工</th><th>付款</th><th class="num">整單折抵</th><th class="num">會員折扣</th><th class="num">應收</th><th></th></tr></thead>
         <tbody>
           <template v-for="s in sales" :key="s.sale_id">
-            <tr>
-              <td>{{ s.sale_id }}</td><td>{{ minuteText(s.ts) }}</td><td>{{ s.employee }}</td><td>{{ s.payment }}</td>
+            <tr :class="{'sale-void': s.voided_at}">
+              <td>{{ s.sale_id }}</td><td>{{ minuteText(s.ts) }}<span v-if="s.voided_at" class="tag records-tag">已作廢</span><span v-if="!s.voided_at && nextDayBook(s)" class="tag records-tag">計入次日帳</span></td><td>{{ s.employee }}</td><td>{{ s.payment }}</td>
               <td class="num">{{ amountText(s.order_discount) }}</td><td class="num">{{ amountText(s.member_discount) }}</td>
               <td class="num records-total">{{ s.total }}</td>
               <td class="records-action"><button class="records-toggle" :class="{on: isOpen(s.sale_id)}" :aria-expanded="isOpen(s.sale_id)" @click="toggle(s.sale_id)">{{ s.items.length }} 項 {{ isOpen(s.sale_id) ? '▴' : '▾' }}</button></td>
             </tr>
             <tr v-if="isOpen(s.sale_id)"><td colspan="8" class="records-detail-cell">
               <div v-if="s.member_name" class="records-member">會員：{{ s.member_name }} {{ s.member_phones || '' }}</div>
+              <div v-if="s.voided_at" class="records-member">已作廢：{{ minuteText(s.voided_at) }}　原因：{{ s.void_reason }}　帳日 {{ s.business_date }}</div>
               <table class="records-detail">
                 <colgroup><col><col class="col-w56"><col class="col-w72"><col class="col-w64"><col class="col-w72"></colgroup>
                 <thead><tr><th>商品</th><th class="num">數量</th><th class="num">原價</th><th class="num">實售價</th><th class="num">小計</th></tr></thead>
@@ -404,6 +457,12 @@
                 </tr></tbody>
                 <tfoot><tr><td colspan="5" class="records-formula">{{ formulaText(s) }}</td></tr></tfoot>
               </table>
+              <div v-for="c in (s.corrections || [])" class="records-member">更正　{{ correctionText(c) }}</div>
+              <div v-if="isAdmin" class="records-ops">
+                <button v-if="!s.voided_at && !s.day_closed" class="btn-sm convert" @click="openVoid(s)">作廢</button>
+                <button v-if="!s.voided_at && !s.day_closed" class="btn-sm subtle" @click="openCorrect('payment', 'sale', s)">更正付款方式</button>
+                <button class="btn-sm subtle" @click="openCorrect('employee', 'sale', s)">修正操作者</button>
+              </div>
             </td></tr>
           </template>
         </tbody>
@@ -412,12 +471,12 @@
         <colgroup><col class="col-w180"><col><col class="col-w92"></colgroup>
         <thead><tr><th>時間</th><th>員工</th><th></th></tr></thead>
         <tbody>
-          <template v-for="(r, i) in receipts" :key="r.receipt_id">
+          <template v-for="r in receipts" :key="r.receipt_id">
             <tr>
               <td>{{ r.ts }}</td><td>{{ r.employee ?? '—' }}</td>
-              <td class="records-action"><button class="records-toggle" :class="{on: isOpen(i)}" :aria-expanded="isOpen(i)" @click="toggle(i)">{{ r.items.length }} 項 {{ isOpen(i) ? '▴' : '▾' }}</button></td>
+              <td class="records-action"><button class="records-toggle" :class="{on: isOpen(r.receipt_id)}" :aria-expanded="isOpen(r.receipt_id)" @click="toggle(r.receipt_id)">{{ r.items.length }} 項 {{ isOpen(r.receipt_id) ? '▴' : '▾' }}</button></td>
             </tr>
-            <tr v-if="isOpen(i)"><td colspan="3" class="records-detail-cell">
+            <tr v-if="isOpen(r.receipt_id)"><td colspan="3" class="records-detail-cell">
               <table class="records-detail">
                 <colgroup><col><col class="col-w88"><col class="col-w88"></colgroup>
                 <thead><tr><th>商品</th><th class="num">進貨數量</th><th class="num">目前庫存</th></tr></thead>
@@ -426,6 +485,10 @@
                   <td class="num">{{ it.qty }}</td><td class="num">{{ it.stock }}</td>
                 </tr></tbody>
               </table>
+              <div v-for="c in (r.corrections || [])" class="records-member">更正　{{ correctionText(c) }}</div>
+              <div v-if="isAdmin" class="records-ops">
+                <button class="btn-sm subtle" @click="openCorrect('employee', 'receipt', r)">修正操作者</button>
+              </div>
             </td></tr>
           </template>
         </tbody>
@@ -474,6 +537,10 @@
                   <td>{{ ['open','pending'].includes(t.status) ? '—' : dispositionText(it.disposition) }}</td><td>{{ it.reason || '—' }}</td>
                 </tr></tbody>
               </table>
+              <div v-for="c in (t.corrections || [])" class="records-member">更正　{{ correctionText(c) }}</div>
+              <div v-if="isAdmin" class="records-ops">
+                <button class="btn-sm subtle" @click="openCorrect('employee', 'return', t)">修正操作者</button>
+              </div>
             </td></tr>
           </template>
         </tbody>
@@ -499,6 +566,10 @@
                   <td class="num">{{ it.diff > 0 ? '+' + it.diff : it.diff }}</td><td>{{ it.note || '—' }}</td>
                 </tr></tbody>
               </table>
+              <div v-for="c in (t.corrections || [])" class="records-member">更正　{{ correctionText(c) }}</div>
+              <div v-if="isAdmin" class="records-ops">
+                <button class="btn-sm subtle" @click="openCorrect('employee', 'stocktake', t)">修正操作者</button>
+              </div>
             </td></tr>
           </template>
         </tbody>
@@ -520,6 +591,7 @@
 
   <!-- 會員新增／修改(單層) -->
   <member-editor v-if="memberPopup" :member="memberPopup" @close="memberEditorClosed"></member-editor>
+  <doc-correct v-if="correct" :mode="correct.mode" :doc="correct.doc" :payments="payments" @close="correctClosed"></doc-correct>
 </div>
 </template>
     </tbody>
@@ -965,28 +1037,29 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=330"></script>
-<script src="js/api.js?v=330"></script>
-<script src="js/confirm.js?v=330"></script>
-<script src="js/auth.js?v=330"></script>
-<script src="js/pos_shared.js?v=330"></script>
-<script src="js/catalogfields.js?v=330"></script>
-<script src="js/checkout.js?v=330"></script>
-<script src="js/receive.js?v=330"></script>
-<script src="js/stocktake.js?v=330"></script>
-<script src="js/returns.js?v=330"></script>
-<script src="js/records.js?v=330"></script>
-<script src="js/catalog.js?v=330"></script>
-<script src="js/sortable.js?v=330"></script>
-<script src="js/combobox.js?v=330"></script>
-<script src="js/optpicker.js?v=330"></script>
-<script src="js/modelpicker.js?v=330"></script>
-<script src="js/employeepicker.js?v=330"></script>
-<script src="js/membereditor.js?v=330"></script>
-<script src="js/attrfields.js?v=330"></script>
-<script src="js/settings.js?v=330"></script>
-<script src="js/labels.js?v=330"></script>
-<script src="js/app_update.js?v=330"></script>
-<script src="js/app.js?v=330"></script>
+<script src="js/vue.global.prod.js?v=336"></script>
+<script src="js/api.js?v=336"></script>
+<script src="js/confirm.js?v=336"></script>
+<script src="js/auth.js?v=336"></script>
+<script src="js/pos_shared.js?v=336"></script>
+<script src="js/catalogfields.js?v=336"></script>
+<script src="js/checkout.js?v=336"></script>
+<script src="js/receive.js?v=336"></script>
+<script src="js/stocktake.js?v=336"></script>
+<script src="js/returns.js?v=336"></script>
+<script src="js/records.js?v=336"></script>
+<script src="js/catalog.js?v=336"></script>
+<script src="js/sortable.js?v=336"></script>
+<script src="js/combobox.js?v=336"></script>
+<script src="js/optpicker.js?v=336"></script>
+<script src="js/modelpicker.js?v=336"></script>
+<script src="js/employeepicker.js?v=336"></script>
+<script src="js/membereditor.js?v=336"></script>
+<script src="js/doccorrect.js?v=336"></script>
+<script src="js/attrfields.js?v=336"></script>
+<script src="js/settings.js?v=336"></script>
+<script src="js/labels.js?v=336"></script>
+<script src="js/app_update.js?v=336"></script>
+<script src="js/app.js?v=336"></script>
 </body>
 </html>
