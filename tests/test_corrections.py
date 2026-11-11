@@ -1,4 +1,4 @@
-"""更正付款方式與更正操作員工:條件、歷程、與點帳／作廢的交互。"""
+"""更正付款方式與更正操作員工:條件、歷程、與立帳／作廢的交互。"""
 import datetime
 import unittest
 
@@ -78,7 +78,7 @@ class CorrectionsTest(FacadeTestCase):
                                    "expected_total": 100})
         self.assertIn("已作廢", self.payment_error("conflict", voided).message)
         self.close_today()
-        self.assertIn("已點帳", self.payment_error("conflict", sale).message)
+        self.assertIn("已立帳", self.payment_error("conflict", sale).message)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Correction").fetchone()[0], 0)
 
     # ---- 員工 ----
@@ -111,7 +111,7 @@ class CorrectionsTest(FacadeTestCase):
         self.invoke("sales.void", {"sale_id": voided, "reason_code": "duplicate", "reason_text": "",
                                    "expected_total": 100})
         self.close_today()
-        self.set_employee("sale", sale, 3, 1)       # 點帳後
+        self.set_employee("sale", sale, 3, 1)       # 立帳後
         self.set_employee("sale", voided, 3, 1)     # 已作廢的單
         self.assertEqual((self.sale_row(sale)["employee"], self.sale_row(voided)["employee"]), (3, 3))
 

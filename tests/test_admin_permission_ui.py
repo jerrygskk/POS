@@ -225,17 +225,17 @@ API.dayClosePreview=async d=>({...preview,business_date:d});API.dayCloseList=asy
 const sent=[],asked=[];API.dayCloseClose=async p=>{sent.push(JSON.parse(JSON.stringify(p)));};
 context.PosConfirm.ask=async m=>{asked.push(m);return true;};
 const view=mount(context.window.PosPages["page-records"],template("records"));const s=view.state;await tick();
-// 員工:選單看不到點帳,直接呼叫也進不去
-assert.ok(!/點帳/.test(text(view.dom)));
+// 員工:選單看不到立帳,直接呼叫也進不去
+assert.ok(!/立帳/.test(text(view.dom)));
 await s.selectKind("dayclose");assert.equal(s.kind,"sales");assert.ok(errors.includes("需要管理者權限"));
-// 收銀預設迄日用目前帳日(今天已點帳時是明天)
+// 收銀預設迄日用目前帳日(今天已立帳時是明天)
 await s.enterKind("sales");assert.equal(s.dateTo,"2999-01-01");assert.notEqual(s.dateFrom,s.dateTo);
 s.sales=[{sale_id:1,ts:"2026-11-10 23:30:00",business_date:"2026-11-11",items:[]},{sale_id:2,ts:"2026-11-10 10:00:00",business_date:"2026-11-10",items:[]}];
 await tick();assert.equal(text(view.dom).split("計入次日帳").length-1,1);
-auth.isAdmin=true;await tick();assert.match(text(view.dom),/點帳/);
+auth.isAdmin=true;await tick();assert.match(text(view.dom),/立帳/);
 await s.selectKind("dayclose");await tick();
-assert.equal(s.dc.preview.cash_sales,500);assert.match(text(view.dom),/尚未點帳/);assert.match(text(view.dom),/少找/);
-assert.ok(button(view.dom,"完成點帳"));assert.ok(button(view.dom,"11/08"));
+assert.equal(s.dc.preview.cash_sales,500);assert.match(text(view.dom),/尚未立帳/);assert.match(text(view.dom),/少找/);
+assert.ok(button(view.dom,"完成立帳"));assert.ok(button(view.dom,"11/08"));
 // 必填:錢櫃現金總額、有短溢要原因
 await s.dcClose();assert.ok(errors.includes("請輸入錢櫃現金總額"));
 s.dc.counted="3400";await tick();assert.equal(s.dcDiff,-100);assert.match(text(view.dom),/−100/);
@@ -247,16 +247,16 @@ await s.dcClose();await tick();
 assert.equal(asked.length,1);assert.ok(!/3400|9999|短溢|−/.test(asked[0]));assert.match(asked[0],/不可再作廢或更正付款方式/);
 assert.deepEqual(sent,[{business_date:picked,counted_total:3400,reason:"少找",employee:1,expected:{float_amount:3000,cash_sales:500}}]);
 assert.equal(s.dc.counted,"");
-// 已點帳的帳日:唯讀顯示當時紀錄,沒有按鈕
+// 已立帳的帳日:唯讀顯示當時紀錄,沒有按鈕
 API.dayClosePreview=async d=>({...preview,business_date:d,closed:true,record});
 await s.dcLoad("2026-11-07");await tick();
-assert.ok(!button(view.dom,"完成點帳"));assert.match(text(view.dom),/已點帳/);await s.dcClose();assert.equal(sent.length,1);
-// 確認框開著時管理者逾時:不送出,切回收銀紀錄並清掉點帳資料
+assert.ok(!button(view.dom,"完成立帳"));assert.match(text(view.dom),/已立帳/);await s.dcClose();assert.equal(sent.length,1);
+// 確認框開著時管理者逾時:不送出,切回收銀紀錄並清掉立帳資料
 API.dayClosePreview=async d=>({...preview,business_date:d});await s.dcLoad("2026-11-09");s.dc.counted="3500";
 context.PosConfirm.ask=async()=>{auth.isAdmin=false;return true;};
 await s.dcClose();await tick();await tick();
 assert.equal(sent.length,1);assert.equal(s.kind,"sales");assert.equal(s.dc.preview,null);assert.equal(s.dc.records.length,0);
-assert.ok(!/完成點帳|預備金|少找/.test(text(view.dom)));
+assert.ok(!/完成立帳|預備金|少找/.test(text(view.dom)));
 // 晚到的預覽回應:已不是管理者就丟棄
 auth.isAdmin=true;await tick();await s.selectKind("dayclose");await tick();
 let release;API.dayClosePreview=()=>new Promise(r=>{release=r;});
@@ -358,7 +358,7 @@ assert.equal(count("修正操作者")+count("更正付款方式")+count("作廢"
 s.openCorrect("employee","sale",s.sales[0]);assert.equal(s.correct,null);
 assert.match(text(view.dom),/2026-11-10 12:00　操作者：— → 2/);assert.match(text(view.dom),/付款方式：現金 → 轉帳/);assert.ok(!/經手人/.test(text(view.dom)));
 auth.isAdmin=true;await tick();
-// 收銀:更正員工不限期限(三張都有);作廢與更正付款方式只有未作廢、未點帳那一張
+// 收銀:更正員工不限期限(三張都有);作廢與更正付款方式只有未作廢、未立帳那一張
 assert.deepEqual([count("修正操作者"),count("更正付款方式"),count("作廢")],[3,1,1]);
 click(button(view.dom,"更正付款方式"));await tick();
 assert.equal(s.correct.mode,"payment");assert.equal(s.correct.doc.payment,"現金");assert.ok(button(view.dom,"確認更正"));
@@ -387,7 +387,7 @@ assert.match(text(view.dom),/合計 2 筆，共 200 元（已作廢 1 筆 100 �
 assert.match(text(view.dom),/原因：重複結帳/);assert.equal(text(view.dom).split("已作廢").length-1,3);
 assert.ok(!button(view.dom,"作廢"));s.openVoid(list[0]);assert.equal(s.correct,null);assert.ok(errors.includes("需要管理者權限"));
 auth.isAdmin=true;await tick();
-assert.equal(buttons(view.dom).filter(b=>text(b)==="作廢").length,1);   // 已點帳、已作廢的單沒有按鈕
+assert.equal(buttons(view.dom).filter(b=>text(b)==="作廢").length,1);   // 已立帳、已作廢的單沒有按鈕
 click(button(view.dom,"作廢"));await tick();assert.equal(s.correct.doc.id,1);assert.equal(s.correct.mode,"void");assert.ok(button(view.dom,"確認作廢"));
 // 成功後重查並保留展開;取消不重查
 const before=loads;await s.correctClosed(false);assert.equal(loads,before);assert.equal(s.correct,null);

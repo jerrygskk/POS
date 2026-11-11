@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>膜型機門市管理系統</title>
-<link rel="stylesheet" href="css/pos.css?v=336">
+<link rel="stylesheet" href="css/pos.css?v=337">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=336" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=337" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -383,7 +383,7 @@
       </div>
       <template v-if="kind==='dayclose' && isAdmin">
         <div v-if="dc.preview && dc.preview.unclosed.length" class="notice-bar">
-          <span>尚未點帳：</span>
+          <span>尚未立帳：</span>
           <button v-for="d in dc.preview.unclosed" :key="d" type="button" class="btn-sm" @click="dcLoad(d)">{{ shortDate(d) }}</button>
           <span v-if="dc.preview.unclosed_count > dc.preview.unclosed.length">（共 {{ dc.preview.unclosed_count }} 個帳日，僅列最近 {{ dc.preview.unclosed.length }} 個）</span>
         </div>
@@ -405,17 +405,17 @@
           <span>短溢 <b :class="{neg: dcDiff}">{{ dcDiff === null ? '—' : signedText(dcDiff) }}</b></span>
           <input class="dayclose-reason" v-model="dc.reason" maxlength="60" placeholder="短溢原因（有短溢必填）">
           <employee-picker></employee-picker>
-          <button class="primary" :disabled="dc.busy" @click="dcClose">完成點帳</button>
+          <button class="primary" :disabled="dc.busy" @click="dcClose">完成立帳</button>
         </div>
         <div v-if="dc.preview && dc.preview.closed" class="scan-row dayclose-row">
-          <span class="tag">已點帳</span>
+          <span class="tag">已立帳</span>
           <span>錢櫃現金總額 <b>{{ dc.preview.record.counted_total }}</b></span>
           <span>短溢 <b :class="{neg: dc.preview.record.diff}">{{ signedText(dc.preview.record.diff) }}</b></span>
           <span v-if="dc.preview.record.reason" class="dayclose-reason-text">原因：{{ dc.preview.record.reason }}</span>
           <span>員工 {{ dc.preview.record.employee }}</span>
           <span>{{ minuteText(dc.preview.record.closed_at) }}</span>
         </div>
-        <div class="grp-title">點帳紀錄</div>
+        <div class="grp-title">立帳紀錄</div>
         <div class="scan-row">
           <label>起 <input type="date" v-model="dateFrom"></label>
           <label>迄 <input type="date" v-model="dateTo"></label>
@@ -423,7 +423,7 @@
         </div>
         <table class="records-table">
           <colgroup><col class="col-w110"><col class="col-w160"><col class="col-w56"><col class="col-w80"><col class="col-w88"><col class="col-w88"><col class="col-w80"><col></colgroup>
-          <thead><tr><th>帳日</th><th>點帳時間</th><th>員工</th><th class="num">預備金</th><th class="num">錢櫃總額</th><th class="num">現金銷售</th><th class="num">短溢</th><th>原因</th></tr></thead>
+          <thead><tr><th>帳日</th><th>立帳時間</th><th>員工</th><th class="num">預備金</th><th class="num">錢櫃總額</th><th class="num">現金銷售</th><th class="num">短溢</th><th>原因</th></tr></thead>
           <tbody>
             <tr v-for="r in dc.records" :key="r.business_date">
               <td>{{ r.business_date }}</td><td>{{ minuteText(r.closed_at) }}</td><td>{{ r.employee }}</td>
@@ -1037,29 +1037,29 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=336"></script>
-<script src="js/api.js?v=336"></script>
-<script src="js/confirm.js?v=336"></script>
-<script src="js/auth.js?v=336"></script>
-<script src="js/pos_shared.js?v=336"></script>
-<script src="js/catalogfields.js?v=336"></script>
-<script src="js/checkout.js?v=336"></script>
-<script src="js/receive.js?v=336"></script>
-<script src="js/stocktake.js?v=336"></script>
-<script src="js/returns.js?v=336"></script>
-<script src="js/records.js?v=336"></script>
-<script src="js/catalog.js?v=336"></script>
-<script src="js/sortable.js?v=336"></script>
-<script src="js/combobox.js?v=336"></script>
-<script src="js/optpicker.js?v=336"></script>
-<script src="js/modelpicker.js?v=336"></script>
-<script src="js/employeepicker.js?v=336"></script>
-<script src="js/membereditor.js?v=336"></script>
-<script src="js/doccorrect.js?v=336"></script>
-<script src="js/attrfields.js?v=336"></script>
-<script src="js/settings.js?v=336"></script>
-<script src="js/labels.js?v=336"></script>
-<script src="js/app_update.js?v=336"></script>
-<script src="js/app.js?v=336"></script>
+<script src="js/vue.global.prod.js?v=337"></script>
+<script src="js/api.js?v=337"></script>
+<script src="js/confirm.js?v=337"></script>
+<script src="js/auth.js?v=337"></script>
+<script src="js/pos_shared.js?v=337"></script>
+<script src="js/catalogfields.js?v=337"></script>
+<script src="js/checkout.js?v=337"></script>
+<script src="js/receive.js?v=337"></script>
+<script src="js/stocktake.js?v=337"></script>
+<script src="js/returns.js?v=337"></script>
+<script src="js/records.js?v=337"></script>
+<script src="js/catalog.js?v=337"></script>
+<script src="js/sortable.js?v=337"></script>
+<script src="js/combobox.js?v=337"></script>
+<script src="js/optpicker.js?v=337"></script>
+<script src="js/modelpicker.js?v=337"></script>
+<script src="js/employeepicker.js?v=337"></script>
+<script src="js/membereditor.js?v=337"></script>
+<script src="js/doccorrect.js?v=337"></script>
+<script src="js/attrfields.js?v=337"></script>
+<script src="js/settings.js?v=337"></script>
+<script src="js/labels.js?v=337"></script>
+<script src="js/app_update.js?v=337"></script>
+<script src="js/app.js?v=337"></script>
 </body>
 </html>

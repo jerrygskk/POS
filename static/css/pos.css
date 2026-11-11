@@ -736,7 +736,7 @@ tr.sale-void > td { text-decoration: line-through; color: var(--text-2); }
 .doc-field > span:first-child { text-align: right; }
 .doc-hidden { visibility: hidden; }
 .doc-correct .doc-warning { margin: 0; }
-/* 點帳:文字與輸入框同一水平線,原因欄吃剩餘寬度,預備金設定靠右 */
+/* 立帳:文字與輸入框同一水平線,原因欄吃剩餘寬度,預備金設定靠右 */
 .dayclose-row { align-items: center; flex-wrap: wrap; white-space: nowrap; }
 .dayclose-float { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .dayclose-reason { flex: 1 1 120px; min-width: 80px; }

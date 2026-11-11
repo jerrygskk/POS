@@ -173,7 +173,7 @@ CREATE TABLE IF NOT EXISTS Sale(
   change INTEGER NOT NULL DEFAULT 0,
   employee INTEGER CHECK(employee BETWEEN 1 AND 6),  -- 結帳員工代號;舊單為 NULL
   member_id INTEGER REFERENCES Member(member_id),  -- 會員;一般客人與舊單為 NULL
-  -- 帳日:當天已點帳後才結的單算隔天的帳,由結帳的 INSERT 同一句決定
+  -- 帳日:當天已立帳後才結的單算隔天的帳,由結帳的 INSERT 同一句決定
   business_date TEXT NOT NULL
     CHECK(business_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
   voided_at TEXT,                 -- 作廢時間;NULL＝有效
@@ -273,14 +273,14 @@ CREATE TABLE IF NOT EXISTS MemberPhone(
   PRIMARY KEY(member_id, phone)  -- 多對多:同一支電話可屬於多位會員
 );
 CREATE INDEX IF NOT EXISTS idx_memberphone_phone ON MemberPhone(phone);
-CREATE TABLE IF NOT EXISTS DayClose(           -- 每日點帳:一個帳日一筆,不可改刪
+CREATE TABLE IF NOT EXISTS DayClose(           -- 每日立帳:一個帳日一筆,不可改刪
   business_date TEXT PRIMARY KEY NOT NULL   -- TEXT 主鍵不寫 NOT NULL 可塞多筆 NULL
     CHECK(business_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
   closed_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   employee INTEGER NOT NULL CHECK(employee BETWEEN 1 AND 6),
-  float_amount INTEGER NOT NULL CHECK(float_amount >= 0),    -- 點帳當下的預備金
+  float_amount INTEGER NOT NULL CHECK(float_amount >= 0),    -- 立帳當下的預備金
   counted_total INTEGER NOT NULL CHECK(counted_total >= 0),  -- 輸入的錢櫃總額(含預備金)
-  cash_sales INTEGER NOT NULL CHECK(cash_sales >= 0),        -- 點帳當下的現金銷售(不含作廢)
+  cash_sales INTEGER NOT NULL CHECK(cash_sales >= 0),        -- 立帳當下的現金銷售(不含作廢)
   diff INTEGER NOT NULL,                                     -- 短溢,負＝短
   reason TEXT,
   CHECK(diff = counted_total - float_amount - cash_sales),
@@ -388,12 +388,12 @@ CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_update BEFORE UPDATE ON StockM
   BEGIN SELECT RAISE(ABORT, '庫存異動不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_delete BEFORE DELETE ON StockMovement
   BEGIN SELECT RAISE(ABORT, '庫存異動不可修改或刪除'); END;
--- 鎖帳:帳日已點帳的銷售單,員工代號以外一律不可新增、修改、刪除(只看帳日,不看有沒有庫存異動)。
--- 連同兩種 REPLACE 撞上已點帳單的主鍵一併擋下
+-- 鎖帳:帳日已立帳的銷售單,員工代號以外一律不可新增、修改、刪除(只看帳日,不看有沒有庫存異動)。
+-- 連同兩種 REPLACE 撞上已立帳單的主鍵一併擋下
 CREATE TRIGGER IF NOT EXISTS trg_sale_closed_insert BEFORE INSERT ON Sale
   WHEN EXISTS(SELECT 1 FROM DayClose WHERE business_date=NEW.business_date)
     OR EXISTS(SELECT 1 FROM Sale s JOIN DayClose d ON d.business_date=s.business_date WHERE s.sale_id=NEW.sale_id)
-  BEGIN SELECT RAISE(ABORT, '此帳日已點帳，銷售單不可新增或修改'); END;
+  BEGIN SELECT RAISE(ABORT, '此帳日已立帳，銷售單不可新增或修改'); END;
 CREATE TRIGGER IF NOT EXISTS trg_sale_closed_update BEFORE UPDATE ON Sale
   WHEN (EXISTS(SELECT 1 FROM DayClose WHERE business_date=OLD.business_date)
         OR EXISTS(SELECT 1 FROM DayClose WHERE business_date=NEW.business_date))
@@ -402,14 +402,14 @@ CREATE TRIGGER IF NOT EXISTS trg_sale_closed_update BEFORE UPDATE ON Sale
         OR OLD.total IS NOT NEW.total OR OLD.paid IS NOT NEW.paid OR OLD.change IS NOT NEW.change
         OR OLD.member_id IS NOT NEW.member_id OR OLD.business_date IS NOT NEW.business_date
         OR OLD.voided_at IS NOT NEW.voided_at OR OLD.void_reason IS NOT NEW.void_reason)
-  BEGIN SELECT RAISE(ABORT, '此帳日已點帳，銷售單不可新增或修改'); END;
+  BEGIN SELECT RAISE(ABORT, '此帳日已立帳，銷售單不可新增或修改'); END;
 CREATE TRIGGER IF NOT EXISTS trg_sale_closed_update_replace BEFORE UPDATE ON Sale
   WHEN NEW.sale_id IS NOT OLD.sale_id
    AND EXISTS(SELECT 1 FROM Sale s JOIN DayClose d ON d.business_date=s.business_date WHERE s.sale_id=NEW.sale_id)
-  BEGIN SELECT RAISE(ABORT, '此帳日已點帳，銷售單不可新增或修改'); END;
+  BEGIN SELECT RAISE(ABORT, '此帳日已立帳，銷售單不可新增或修改'); END;
 CREATE TRIGGER IF NOT EXISTS trg_sale_closed_delete BEFORE DELETE ON Sale
   WHEN EXISTS(SELECT 1 FROM DayClose WHERE business_date=OLD.business_date)
-  BEGIN SELECT RAISE(ABORT, '此帳日已點帳，銷售單不可新增或修改'); END;
+  BEGIN SELECT RAISE(ABORT, '此帳日已立帳，銷售單不可新增或修改'); END;
 -- 作廢不可取消:作廢欄位寫入後不可再變,已作廢的單不可改付款方式、不可刪除、
 -- 不可被 REPLACE 蓋掉(員工代號仍可更正)
 CREATE TRIGGER IF NOT EXISTS trg_sale_void_final BEFORE UPDATE ON Sale
@@ -429,14 +429,14 @@ CREATE TRIGGER IF NOT EXISTS trg_sale_void_keep_update BEFORE UPDATE ON Sale
   WHEN NEW.sale_id IS NOT OLD.sale_id
    AND EXISTS(SELECT 1 FROM Sale WHERE sale_id=NEW.sale_id AND voided_at IS NOT NULL)
   BEGIN SELECT RAISE(ABORT, '已作廢的銷售單不可恢復或修改'); END;
--- 點帳紀錄與更正紀錄:不可修改、不可刪除,新增撞主鍵(INSERT OR REPLACE)也擋
+-- 立帳紀錄與更正紀錄:不可修改、不可刪除,新增撞主鍵(INSERT OR REPLACE)也擋
 CREATE TRIGGER IF NOT EXISTS trg_dayclose_no_replace BEFORE INSERT ON DayClose
   WHEN EXISTS(SELECT 1 FROM DayClose WHERE business_date=NEW.business_date)
-  BEGIN SELECT RAISE(ABORT, '點帳紀錄不可修改或刪除'); END;
+  BEGIN SELECT RAISE(ABORT, '立帳紀錄不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_dayclose_no_update BEFORE UPDATE ON DayClose
-  BEGIN SELECT RAISE(ABORT, '點帳紀錄不可修改或刪除'); END;
+  BEGIN SELECT RAISE(ABORT, '立帳紀錄不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_dayclose_no_delete BEFORE DELETE ON DayClose
-  BEGIN SELECT RAISE(ABORT, '點帳紀錄不可修改或刪除'); END;
+  BEGIN SELECT RAISE(ABORT, '立帳紀錄不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_correction_no_replace BEFORE INSERT ON Correction
   WHEN EXISTS(SELECT 1 FROM Correction WHERE correction_id=NEW.correction_id)
   BEGIN SELECT RAISE(ABORT, '更正紀錄不可修改或刪除'); END;

@@ -45,7 +45,7 @@
 - **SQL-5**: **已入帳明細被 `INSERT OR REPLACE`／`UPDATE OR REPLACE` 改掉，刪除 trigger 卻沒擋** → 撞鍵時 SQLite 先隱含刪除舊列，未開 `recursive_triggers` 時不觸發刪除 trigger；若新列與舊列同款式，複合外鍵也不報錯。鎖定表除了更新／刪除 trigger，還要加「新增前」與「更新前」檢查：會撞上已入帳列（主鍵或任一唯一鍵）就 `RAISE(ABORT)`。測試用原生 SQLite 直接下 REPLACE 驗證。
 - **SQL-6**: **讀到的版號不是數字，啟動直接當掉並寫 error.log** → `int()` 拋 `ValueError` 走了一般失敗流程。讀不出數字的版號視同讀不到版號（`UNKNOWN_VERSION`），走舊庫拒絕流程，不寫任何檔。
 - **SQL-7**: **作廢銷售單寫沖回異動時被「庫存異動不可修改或刪除」擋下** → 作廢的 `void` 異動與原本的 `sale` 異動指向同一筆銷售明細，`trg_stockmovement_no_replace` 若只比 `sale_item_id` 會把它當成重複入帳。該條件與唯一索引都要連 `kind` 一起比（`sale_item_id=NEW.sale_item_id AND kind=NEW.kind`；`idx_move_sale_item` 限 `kind='sale'`、`idx_move_void_item` 限 `kind='void'`）。往後再加「同一來源明細可有第二種異動」時照此處理。
-- **SQL-8**: **查某天營業額，數字和點帳對不起來** → 點帳後才結的單算隔天的帳。日期條件、合計、匯出、點帳一律用 `Sale.business_date`，不可用 `date(ts)`；帳日在結帳的 INSERT 同一句決定，不要先查再寫（會與點帳交錯）。已作廢的單（`voided_at` 非 NULL）不計入合計與現金銷售。
+- **SQL-8**: **查某天營業額，數字和立帳對不起來** → 立帳後才結的單算隔天的帳。日期條件、合計、匯出、立帳一律用 `Sale.business_date`，不可用 `date(ts)`；帳日在結帳的 INSERT 同一句決定，不要先查再寫（會與立帳交錯）。已作廢的單（`voided_at` 非 NULL）不計入合計與現金銷售。
 - **SQL-4**: **migration 報 `incomplete input`，資料表定義被切斷** → `_schema_ddl` 依半形分號從 `SCHEMA` 切出各表定義，schema 字串內的註解寫了半形「;」就會從中間斷開。註解改用全形標點。
 
 #### TEST：測試環境

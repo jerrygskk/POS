@@ -1,4 +1,4 @@
-"""每日點帳:帳日判定、應有現金、短溢與原因、鎖帳。資料庫限制以原生 SQLite 直接寫入驗證。"""
+"""每日立帳:帳日判定、應有現金、短溢與原因、鎖帳。資料庫限制以原生 SQLite 直接寫入驗證。"""
 import datetime
 import sqlite3
 import unittest
@@ -16,8 +16,8 @@ def day(offset=0):
 class DayCloseTest(FacadeTestCase):
     def setUp(self):
         super().setUp()
-        cid = self.create_category("點帳種類")
-        made = self.invoke("products.create", {"name": "點帳商品", "category_id": cid,
+        cid = self.create_category("立帳種類")
+        made = self.invoke("products.create", {"name": "立帳商品", "category_id": cid,
                                                "variants": [{"price": 100, "barcodes": [{"barcode": "DC-1"}]}]})
         self.vid = made["variant_ids"][0]
         self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": self.vid, "qty": 50}]})
@@ -101,7 +101,7 @@ class DayCloseTest(FacadeTestCase):
         record = self.close(day(-3), 0)
         self.assertEqual((record["cash_sales"], record["diff"], record["reason"]), (0, 0, None))
 
-    # ---- 點帳 ----
+    # ---- 立帳 ----
     def test_diff_formula_and_reason_required(self):
         self.invoke("dayclose.set_float", {"amount": 3000})
         d = day(-1)
@@ -205,9 +205,9 @@ class DayCloseTest(FacadeTestCase):
                 continue   # 原本就是 NULL,改成同值不算變動
             self.blocked(f"UPDATE Sale SET {column}=? WHERE sale_id=?", (value, locked))
         self.blocked("UPDATE Sale SET voided_at='2026-01-01',void_reason='x' WHERE sale_id=?", (locked,))
-        self.blocked("UPDATE Sale SET business_date=? WHERE sale_id=?", (d, free))   # 把別張單移進已點帳帳日
+        self.blocked("UPDATE Sale SET business_date=? WHERE sale_id=?", (d, free))   # 把別張單移進已立帳帳日
         self.blocked("DELETE FROM Sale WHERE sale_id=?", (locked,))
-        # 兩種 REPLACE 撞上已點帳單的主鍵
+        # 兩種 REPLACE 撞上已立帳單的主鍵
         self.blocked("INSERT OR REPLACE INTO Sale(sale_id,payment,total,paid,business_date) VALUES(?,'現金',1,1,?)",
                      (locked, other))
         self.blocked("UPDATE OR REPLACE Sale SET sale_id=? WHERE sale_id=?", (locked, free))
@@ -216,7 +216,7 @@ class DayCloseTest(FacadeTestCase):
         self.conn.commit()
         row = self.conn.execute("SELECT employee,payment,total,business_date FROM Sale WHERE sale_id=?", (locked,)).fetchone()
         self.assertEqual(tuple(row), (5, "現金", 100, d))
-        # 未點帳的單不受影響
+        # 未立帳的單不受影響
         self.conn.execute("UPDATE Sale SET payment='轉帳' WHERE sale_id=?", (free,))
         self.conn.execute("DELETE FROM Sale WHERE sale_id=?", (free,))
         self.conn.commit()

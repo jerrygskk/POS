@@ -64,7 +64,7 @@ def _validate(payload):
 
 
 def set_employee(conn, body):
-    """更正單據的操作員工:不限期限,不看單據狀態、是否點帳、是否作廢。"""
+    """更正單據的操作員工:不限期限,不看單據狀態、是否立帳、是否作廢。"""
     conn.execute("BEGIN IMMEDIATE")
     table, key, _source = DOCS[body["doc_type"]]
     row = conn.execute(f"SELECT employee FROM {table} WHERE {key}=?", (body["doc_id"],)).fetchone()

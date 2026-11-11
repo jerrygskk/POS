@@ -9,7 +9,7 @@ function defaultRange(kind) {
   const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (kind === "sales" ? 0 : 6));
   return { dateFrom: localDateText(from), dateTo: localDateText(now) };
 }
-// 點帳頁的畫面資料;管理者登出或逾時時整份換掉,金額不留在畫面上
+// 立帳頁的畫面資料;管理者登出或逾時時整份換掉,金額不留在畫面上
 function emptyDayClose() {
   return { date: "", today: "", counted: "", reason: "", floatInput: "", preview: null, records: [], busy: false };
 }
@@ -17,7 +17,7 @@ window.PosPages["page-records"] = {
   template: "#tpl-records",
   inject: ["showError"],
   data() {
-    return { kinds: [["sales", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"], ["returns", "退貨"], ["dayclose", "點帳"], ["members", "資料設定"]], kind: "sales",
+    return { kinds: [["sales", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"], ["returns", "退貨"], ["dayclose", "立帳"], ["members", "資料設定"]], kind: "sales",
              dc: emptyDayClose(), correct: null,
              ...defaultRange("sales"), payment: "", payments: [],
              sales: [], summary: null, receipts: [], stocktakes: [], returns: [], returnKind: "normal", expanded: new Set(),
@@ -25,7 +25,7 @@ window.PosPages["page-records"] = {
   },
   computed: {
     isAdmin() { return window.PosAuth.isAdmin; },
-    // 點帳只有管理者看得到
+    // 立帳只有管理者看得到
     shownKinds() { return this.kinds.filter(([key]) => key !== "dayclose" || this.isAdmin); },
     // 短溢＝錢櫃現金總額 − 預備金 − 現金銷售;還沒輸入數字時為 null
     dcDiff() {
@@ -42,7 +42,7 @@ window.PosPages["page-records"] = {
     },
   },
   watch: {
-    // 只隱藏選單不夠:管理者登出或閒置逾時時若停在點帳,切回收銀紀錄並清掉已載入的點帳資料
+    // 只隱藏選單不夠:管理者登出或閒置逾時時若停在立帳,切回收銀紀錄並清掉已載入的立帳資料
     isAdmin(now) {
       if (!now) this.correct = null;
       if (now || this.kind !== "dayclose") return;
@@ -71,7 +71,7 @@ window.PosPages["page-records"] = {
       await this.reload();
       if (kind === "dayclose") await this.dcLoad(localDateText(new Date()));
     },
-    // 收銀預設:起＝今天,迄＝目前帳日(今天已點帳時是明天,才看得到點帳後結的單)
+    // 收銀預設:起＝今天,迄＝目前帳日(今天已立帳時是明天,才看得到立帳後結的單)
     async salesRange() {
       const range = defaultRange("sales");
       try {
@@ -80,7 +80,7 @@ window.PosPages["page-records"] = {
       } catch (e) { /* 查不到就用今天;查詢本身失敗會由 reload 顯示 */ }
       return range;
     },
-    // 帳日與結帳日期不同:當天點帳後才結的單
+    // 帳日與結帳日期不同:當天立帳後才結的單
     nextDayBook(s) { return !!s.business_date && s.business_date !== String(s.ts || "").slice(0, 10); },
     // 作廢:限管理者;框內送出前會再查一次身分
     openVoid(s) { this.openCorrect("void", "sale", s); },
@@ -113,7 +113,7 @@ window.PosPages["page-records"] = {
       this._dcSeq = (this._dcSeq || 0) + 1;
       this.dc = emptyDayClose();
     },
-    // 讀某個帳日的點帳預覽;晚到的回應若已換日期、已離開或已不是管理者就丟棄
+    // 讀某個帳日的立帳預覽;晚到的回應若已換日期、已離開或已不是管理者就丟棄
     async dcLoad(date) {
       if (date) this.dc.date = date;
       const seq = this._dcSeq = (this._dcSeq || 0) + 1;
@@ -148,7 +148,7 @@ window.PosPages["page-records"] = {
       const body = { business_date: p.business_date, counted_total: Number(this.dc.counted.trim()), reason, employee,
                      expected: { float_amount: p.float_amount, cash_sales: p.cash_sales } };
       // 確認框掛在頁面最外層,管理者逾時後清不掉:只放帳日,不放實點與短溢
-      if (!await PosConfirm.ask(`確定完成 ${p.business_date} 的點帳？點帳後此帳日的銷售單不可再作廢或更正付款方式。`)) return;
+      if (!await PosConfirm.ask(`確定完成 ${p.business_date} 的立帳？立帳後此帳日的銷售單不可再作廢或更正付款方式。`)) return;
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
       if (this.dc.busy) return;
       this.dc.busy = true;
@@ -156,7 +156,7 @@ window.PosPages["page-records"] = {
         await this.guard(async () => { await API.dayCloseClose(body); });
       } finally {
         this.dc.busy = false;
-        // 成敗都重讀:失敗可能是金額已變動或已被點帳,不可留舊數字
+        // 成敗都重讀:失敗可能是金額已變動或已被立帳,不可留舊數字
         if (this.isAdmin && this.kind === "dayclose") { await this.dcLoad(body.business_date); await this.reload(); }
       }
     },

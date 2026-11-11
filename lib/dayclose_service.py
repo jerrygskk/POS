@@ -1,7 +1,7 @@
-"""每日點帳:管理者輸入錢櫃現金總額,扣預備金後與該帳日現金銷售比對,點完鎖帳。
+"""每日立帳:管理者輸入錢櫃現金總額,扣預備金後與該帳日現金銷售比對,立帳後鎖帳。
 
-帳日以 00:00 為界;當天已點帳後才結的單算隔天的帳(由結帳的 INSERT 決定)。
-點帳後該帳日的銷售單由資料庫 trigger 鎖住,所以現金銷售與預備金存當下的快照。
+帳日以 00:00 為界;當天已立帳後才結的單算隔天的帳(由結帳的 INSERT 決定)。
+立帳後該帳日的銷售單由資料庫 trigger 鎖住,所以現金銷售與預備金存當下的快照。
 """
 from collections.abc import Mapping
 
@@ -12,7 +12,7 @@ from lib.sales_service import CASH_PAYMENT, SalesRepository
 
 REASON_MAX = 60
 AMOUNT_MAX = 99_999_999
-UNCLOSED_SHOWN = 7  # 「尚未點帳」提示最多列出最近幾個帳日
+UNCLOSED_SHOWN = 7  # 「尚未立帳」提示最多列出最近幾個帳日
 
 
 def today(conn):
@@ -24,7 +24,7 @@ def is_closed(conn, business_date):
 
 
 def current_business_date(conn):
-    """現在結帳會記到哪個帳日:今天,今天已點帳則明天。"""
+    """現在結帳會記到哪個帳日:今天,今天已立帳則明天。"""
     return conn.execute(
         "SELECT CASE WHEN EXISTS(SELECT 1 FROM DayClose WHERE business_date=date('now','localtime')) "
         "THEN date('now','localtime','+1 day') ELSE date('now','localtime') END").fetchone()[0]
@@ -56,7 +56,7 @@ def _validate(action, payload):
                "dayclose.close": {"business_date", "counted_total", "reason", "employee", "expected"},
                "dayclose.list": {"date_from", "date_to"}, "dayclose.set_float": {"amount"}}[action]
     if set(payload) - allowed:
-        raise ValidationError("點帳資料格式不正確")
+        raise ValidationError("立帳資料格式不正確")
     if action == "dayclose.preview":
         return {"business_date": _business_date(payload)}
     if action == "dayclose.list":
@@ -76,7 +76,7 @@ def _validate(action, payload):
             raise ValidationError(f"短溢原因最多 {REASON_MAX} 字")
         expected = payload.get("expected")
         if not isinstance(expected, Mapping) or set(expected) != {"float_amount", "cash_sales"}:
-            raise ValidationError("點帳資料格式不正確")
+            raise ValidationError("立帳資料格式不正確")
         return {"business_date": _business_date(payload),
                 "counted_total": _amount(payload.get("counted_total"), "錢櫃現金總額"),
                 "reason": reason, "employee": payload["employee"],
@@ -120,7 +120,7 @@ class DayCloseService:
             "AND NOT EXISTS(SELECT 1 FROM DayClose d WHERE d.business_date=s.business_date) "
             "ORDER BY business_date DESC", (day,))]
         return {"business_date": business_date, "today": day, "closed": record is not None, "record": record,
-                # 已點帳的帳日顯示當時的快照,不拿現在的設定值
+                # 已立帳的帳日顯示當時的快照,不拿現在的設定值
                 "float_amount": record["float_amount"] if record else cash_float(self.conn),
                 "float_setting": cash_float(self.conn),
                 "cash_sales": record["cash_sales"] if record else self._cash_sales(business_date),
@@ -133,9 +133,9 @@ class DayCloseService:
         self.conn.execute("BEGIN IMMEDIATE")
         business_date = body["business_date"]
         if business_date > today(self.conn):
-            raise ValidationError("不可點未來的帳日")
+            raise ValidationError("不可替未來的帳日立帳")
         if is_closed(self.conn, business_date):
-            raise ConflictError("此帳日已點帳")
+            raise ConflictError("此帳日已立帳")
         float_amount, cash_sales = cash_float(self.conn), self._cash_sales(business_date)
         if body["expected"] != {"float_amount": float_amount, "cash_sales": cash_sales}:
             raise ConflictError("金額已變動，請重新確認")
@@ -165,7 +165,7 @@ class DayCloseService:
 class DayCloseFacade(BaseFacade):
     ACTIONS = {"dayclose.current", "dayclose.preview", "dayclose.close", "dayclose.list", "dayclose.set_float"}
 
-    ERROR_MESSAGE = "點帳操作不正確"
+    ERROR_MESSAGE = "立帳操作不正確"
 
     def _prepare_payload(self, action, payload):
         return _validate(action, payload)

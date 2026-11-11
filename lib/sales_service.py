@@ -12,7 +12,7 @@ from lib.member_service import phone_pattern
 from lib.product_rules import is_int as _is_int, require_employee
 
 
-CASH_PAYMENT = "現金"  # 只有現金找零、計入點帳的應有現金
+CASH_PAYMENT = "現金"  # 只有現金找零、計入立帳的應有現金
 # 作廢原因:代碼→存進資料庫的顯示文字;「其他」須另填說明
 VOID_REASONS = {"duplicate": "重複結帳", "item": "品項錯誤", "qty": "數量錯誤", "amount": "金額錯誤", "other": "其他"}
 VOID_TEXT_MAX = 30
@@ -142,7 +142,7 @@ class SalesRepository(BaseRepository):
 
     def create_sale(self, payment, order_discount, member_discount, total, paid, employee, member_id):
         return self.connection.execute(
-            # 帳日在同一句內決定(不先查再寫,免得查完還沒寫別人剛好點帳):今天已點帳就算明天的帳
+            # 帳日在同一句內決定(不先查再寫,免得查完還沒寫別人剛好立帳):今天已立帳就算明天的帳
             "INSERT INTO Sale(payment,order_discount,member_discount,total,paid,change,employee,member_id,business_date) "
             "VALUES(?,?,?,?,?,?,?,?,CASE WHEN EXISTS(SELECT 1 FROM DayClose WHERE business_date=date('now','localtime')) "
             "THEN date('now','localtime','+1 day') ELSE date('now','localtime') END)",
@@ -253,7 +253,7 @@ class SalesService:
         if sale["voided_at"] is not None:
             raise ConflictError("此單已作廢")
         if sale["closed"]:
-            raise ConflictError("此帳日已點帳，請改走退貨")
+            raise ConflictError("此帳日已立帳，請改走退貨")
         if conn.execute("SELECT 1 FROM ReturnItem i JOIN ReturnSession s ON s.return_id=i.return_id "
                         "WHERE i.sale_id=? AND s.status<>'cancelled' LIMIT 1", (body["sale_id"],)).fetchone():
             raise ConflictError("此單已有退貨單，不可作廢")
@@ -287,7 +287,7 @@ class SalesService:
         if sale["voided_at"] is not None:
             raise ConflictError("此單已作廢，不可更正付款方式")
         if sale["closed"]:
-            raise ConflictError("此帳日已點帳，不可更正付款方式")
+            raise ConflictError("此帳日已立帳，不可更正付款方式")
         if body["payment"] not in self.repo.payments():
             raise ValidationError("付款方式未在設定中")
         if body["payment"] == sale["payment"]:

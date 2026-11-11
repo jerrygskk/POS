@@ -1,4 +1,4 @@
-"""作廢銷售單:庫存沖回、合計排除、與點帳／退貨／盤點的交互。"""
+"""作廢銷售單:庫存沖回、合計排除、與立帳／退貨／盤點的交互。"""
 import datetime
 import unittest
 
@@ -98,9 +98,9 @@ class SalesVoidTest(FacadeTestCase):
         sale = self.checkout()
         self.invoke("dayclose.close", {"business_date": TODAY, "counted_total": 200, "reason": "", "employee": 1,
                                        "expected": {"float_amount": 0, "cash_sales": 200}})
-        self.assertIn("已點帳", self.void_error("conflict", sale).message)
+        self.assertIn("已立帳", self.void_error("conflict", sale).message)
         self.assertEqual(self.stock(self.v1), 8)
-        later = self.checkout()   # 點帳後結的單算明天的帳,仍可作廢
+        later = self.checkout()   # 立帳後結的單算明天的帳,仍可作廢
         self.void(later)
 
     def test_sale_with_return_cannot_be_voided_until_return_cancelled(self):
