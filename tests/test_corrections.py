@@ -2,7 +2,7 @@
 import datetime
 import unittest
 
-from base import FacadeTestCase
+from base import FacadeTestCase, PAY
 from lib.db import get_conn
 from lib.desktop_application import DesktopFacade
 from lib.desktop_bridge import DesktopBridge
@@ -22,16 +22,16 @@ class CorrectionsTest(FacadeTestCase):
         self.addCleanup(self.conn.close)
 
     def checkout(self, payment="現金"):
-        return self.invoke("sales.checkout", {"payment": payment, "paid": 100, "employee": 1,
+        return self.invoke("sales.checkout", {"payment_id": PAY[payment], "paid": 100, "employee": 1,
                                               "items": [{"variant_id": self.vid, "qty": 1, "unit_price": 100}]})["sale_id"]
 
     def set_payment(self, sale, payment, expected="現金"):
-        return self.invoke("sales.set_payment", {"sale_id": sale, "payment": payment,
-                                                 "expected_payment": expected})
+        return self.invoke("sales.set_payment", {"sale_id": sale, "payment_id": PAY[payment],
+                                                 "expected_payment_id": PAY[expected]})
 
     def payment_error(self, code, sale, payment="轉帳", expected="現金"):
         return self.assert_application_error(code, "sales.set_payment", {
-            "sale_id": sale, "payment": payment, "expected_payment": expected})
+            "sale_id": sale, "payment_id": PAY.get(payment, 9999), "expected_payment_id": PAY[expected]})
 
     def set_employee(self, doc_type, doc_id, employee, expected):
         return self.invoke("corrections.set_employee", {"doc_type": doc_type, "doc_id": doc_id, "employee": employee,
@@ -70,7 +70,8 @@ class CorrectionsTest(FacadeTestCase):
         sale = self.checkout()
         self.assertIn("內容已變更", self.payment_error("conflict", sale, expected="轉帳").message)
         self.payment_error("validation_error", sale, payment="現金")       # 與目前相同
-        self.payment_error("validation_error", sale, payment="刷卡")       # 不在設定清單
+        self.payment_error("validation_error", sale, payment="刷卡")       # 不存在的編號
+        self.payment_error("validation_error", sale, payment="台灣Pay")    # 已停用
         self.payment_error("not_found", 99999)
         self.assertEqual(self.sale_row(sale)["corrections"], [])
         voided = self.checkout()
@@ -116,7 +117,7 @@ class CorrectionsTest(FacadeTestCase):
         self.assertEqual((self.sale_row(sale)["employee"], self.sale_row(voided)["employee"]), (3, 3))
 
     def test_employee_correction_from_null(self):
-        self.conn.execute("INSERT INTO Sale(sale_id,payment,total,paid,business_date) VALUES(500,'現金',1,1,'2026-01-01')")
+        self.conn.execute("INSERT INTO Sale(sale_id,payment_id,payment,total,paid,business_date) VALUES(500,1,'現金',1,1,'2026-01-01')")
         self.conn.commit()
         self.set_employee("sale", 500, 2, None)
         row = self.conn.execute("SELECT old_value,new_value FROM Correction WHERE sale_id=500").fetchone()
@@ -141,7 +142,7 @@ class CorrectionsTest(FacadeTestCase):
         sale = self.checkout()
         bridge = DesktopBridge(facade=DesktopFacade(self.db))
         for action, payload in (
-                ("sales.set_payment", {"sale_id": sale, "payment": "轉帳", "expected_payment": "現金"}),
+                ("sales.set_payment", {"sale_id": sale, "payment_id": 2, "expected_payment_id": 1}),
                 ("corrections.set_employee", {"doc_type": "sale", "doc_id": sale, "employee": 2, "expected_employee": 1})):
             self.assertEqual(bridge.invoke(action, payload)["error"]["code"], "forbidden", action)
         row = self.sale_row(sale)

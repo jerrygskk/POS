@@ -115,7 +115,7 @@ class TestReturns(ReturnsBase):
     def test_sale_id_per_item_optional_but_must_exist(self):
         self.fill()
         self.assert_application_error("not_found", "returns.set_sale", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "sale_id": 999})
-        sale = self.invoke("sales.checkout", {"payment": self.invoke("payments.list")[0], "paid": 0, "employee": 1,
+        sale = self.invoke("sales.checkout", {"payment_id": self.invoke("payments.list")[0]["payment_id"], "paid": 0, "employee": 1,
                                               "items": [{"variant_id": self.v1, "qty": 1, "unit_price": 0}]})
         self.invoke("returns.set_sale", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "sale_id": sale["sale_id"]})
         items = {i["variant_id"]: i for i in self.invoke("returns.detail", {"return_id": self.rid})["items"]}

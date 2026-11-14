@@ -2,7 +2,7 @@
 import datetime
 import unittest
 
-from base import FacadeTestCase
+from base import FacadeTestCase, PAY
 from lib.db import get_conn
 from lib.desktop_application import DesktopFacade
 from lib.desktop_bridge import DesktopBridge
@@ -25,7 +25,7 @@ class SalesVoidTest(FacadeTestCase):
     def checkout(self, payment="現金", items=None):
         items = items or [{"variant_id": self.v1, "qty": 2, "unit_price": 100}]
         total = sum(i["qty"] * i["unit_price"] for i in items)
-        return self.invoke("sales.checkout", {"payment": payment, "paid": total, "employee": 1, "items": items})["sale_id"]
+        return self.invoke("sales.checkout", {"payment_id": PAY[payment], "paid": total, "employee": 1, "items": items})["sale_id"]
 
     def void(self, sale_id, total=200, code="duplicate", text=""):
         return self.invoke("sales.void", {"sale_id": sale_id, "reason_code": code, "reason_text": text,
@@ -63,7 +63,7 @@ class SalesVoidTest(FacadeTestCase):
         self.void(gone)
         summary = self.invoke("sales.summary", {})
         self.assertEqual((summary["count"], summary["total"], summary["void_count"], summary["void_total"]), (2, 400, 1, 200))
-        self.assertEqual(summary["by_payment"][0], {"payment": "現金", "count": 1, "total": 200})
+        self.assertEqual(summary["by_payment"][0], {"payment_id": 1, "payment": "現金", "count": 1, "total": 200})
         self.assertEqual([s["sale_id"] for s in self.invoke("sales.list", {})][-2:], [gone, keep])   # 作廢單照樣列出
         lines = self.invoke("sales.export", {})["content"].lstrip("﻿").splitlines()
         self.assertTrue(lines[0].endswith("總額,帳日,狀態,作廢原因"))

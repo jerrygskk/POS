@@ -14,7 +14,7 @@ class TestSales(FacadeTestCase):
         self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": self.vid, "qty": 10}]})
 
     def _sale(self, **kw):
-        body = {"payment": "現金", "paid": 1000, "employee": 1,
+        body = {"payment_id": 1, "paid": 1000, "employee": 1,
                 "items": [{"variant_id": self.vid, "qty": 2, "unit_price": 500}]}
         body.update(kw)
         return self.invoke("sales.checkout", body)
@@ -63,7 +63,7 @@ class TestSales(FacadeTestCase):
 
     def test_item_discount_cannot_exceed_subtotal(self):
         error = self.assert_application_error("validation_error", "sales.checkout", {"employee": 1,
-            "payment": "現金", "paid": 1000, "items": [
+            "payment_id": 1, "paid": 1000, "items": [
             {"variant_id": self.vid, "qty": 1,
              "unit_price": 500, "discount": 501},
             {"variant_id": self.vid, "qty": 2,
@@ -74,7 +74,7 @@ class TestSales(FacadeTestCase):
 
     def test_negative_total_rejected(self):
         error = self.assert_application_error("validation_error", "sales.checkout", {"employee": 1,
-            "payment": "現金", "paid": 1000, "order_discount": 99999,
+            "payment_id": 1, "paid": 1000, "order_discount": 99999,
             "items": [{"variant_id": self.vid, "qty": 2, "unit_price": 500}],
         })
         self.assertIn("折扣後總額不可為負數", error.message)
@@ -82,52 +82,52 @@ class TestSales(FacadeTestCase):
         self.assertEqual(self._stock(), 10)
 
     def test_unknown_payment_rejected(self):
-        self.assertIn("現金", self.invoke("payments.list"))
+        self.assertIn("現金", [p["name"] for p in self.invoke("payments.list")])
         error = self.assert_application_error("validation_error", "sales.checkout", {"employee": 1,
-            "payment": "不存在的付款方式", "paid": 1000,
+            "payment_id": 999, "paid": 1000,
             "items": [{"variant_id": self.vid, "qty": 2, "unit_price": 500}],
         })
-        self.assertIn("付款方式未在設定中", error.message)
+        self.assertIn("付款方式不存在或已停用", error.message)
         self.assertEqual(self._stock(), 10)
 
     def test_disabled_payment_not_selectable(self):
-        # 停用的付款方式:結帳清單不列、結帳與更正付款方式都擋;報表仍有一欄(見 test_summary)
-        self.assertEqual(self.invoke("payments.list"), ["現金", "轉帳", "LINE Pay"])
+        # 停用的付款方式:清單標成停用(畫面的結帳、更正不列),結帳與更正付款方式後端都擋;報表仍有一欄(見 test_summary)
+        self.assertEqual([p["name"] for p in self.invoke("payments.list") if p["active"]], ["現金", "轉帳", "LINE Pay"])
         error = self.assert_application_error("validation_error", "sales.checkout", {"employee": 1,
-            "payment": "台灣Pay", "paid": 1000, "items": [{"variant_id": self.vid, "qty": 2, "unit_price": 500}]})
-        self.assertIn("付款方式未在設定中", error.message)
+            "payment_id": 4, "paid": 1000, "items": [{"variant_id": self.vid, "qty": 2, "unit_price": 500}]})
+        self.assertIn("付款方式不存在或已停用", error.message)
         sale = self._sale()
         self.assert_application_error("validation_error", "sales.set_payment", {
-            "sale_id": sale["sale_id"], "payment": "台灣Pay", "expected_payment": "現金"})
+            "sale_id": sale["sale_id"], "payment_id": 4, "expected_payment_id": 1})
         self.assertEqual(self._stock(), 8)
 
     def test_non_cash_paid_forced_to_total(self):
-        r = self._sale(payment="LINE Pay", paid=2000)
+        r = self._sale(payment_id=3, paid=2000)
         self.assertEqual(r["change"], 0)
         with db_conn(self.db) as conn:
             row = conn.execute("SELECT paid,change FROM Sale WHERE sale_id=?", (r["sale_id"],)).fetchone()
         self.assertEqual(tuple(row), (1000, 0))
 
     def test_summary(self):
-        self._sale(); self._sale(payment="轉帳")
+        self._sale(); self._sale(payment_id=2)
         today = datetime.date.today().isoformat()
         s = self.invoke("sales.summary", {"date": today})
         self.assertEqual(s["count"], 2)
-        self.assertEqual(s["by_payment"], [{"payment": "現金", "count": 1, "total": 1000},
-                                           {"payment": "轉帳", "count": 1, "total": 1000},
-                                           {"payment": "LINE Pay", "count": 0, "total": 0},
-                                           {"payment": "台灣Pay", "count": 0, "total": 0}])
+        self.assertEqual(s["by_payment"], [{"payment_id": 1, "payment": "現金", "count": 1, "total": 1000},
+                                           {"payment_id": 2, "payment": "轉帳", "count": 1, "total": 1000},
+                                           {"payment_id": 3, "payment": "LINE Pay", "count": 0, "total": 0},
+                                           {"payment_id": 4, "payment": "台灣Pay", "count": 0, "total": 0}])
 
     def test_summary_date_range_and_payment(self):
         # 小結支援 date_from/date_to 區間與付款方式過濾(與明細清單一致)
-        self._sale(); self._sale(payment="轉帳")
+        self._sale(); self._sale(payment_id=2)
         today = datetime.date.today().isoformat()
         tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
         s = self.invoke("sales.summary", {"date_from": today, "date_to": tomorrow})
         self.assertEqual(s["count"], 2)
         # 只算現金
         s2 = self.invoke("sales.summary", {
-            "date_from": today, "date_to": tomorrow, "payment": "現金",
+            "date_from": today, "date_to": tomorrow, "payment_id": 1,
         })
         self.assertEqual(s2["count"], 1)
         self.assertEqual(s2["total"], 1000)
@@ -154,9 +154,9 @@ class TestSales(FacadeTestCase):
         self.assertIn("銷售編號", exported["content"])
 
     def test_export_filters_by_payment(self):
-        self._sale(payment="現金")
-        self._sale(payment="轉帳")
-        content = self.invoke("sales.export", {"payment": "現金"})["content"]
+        self._sale(payment_id=1)
+        self._sale(payment_id=2)
+        content = self.invoke("sales.export", {"payment_id": 1})["content"]
         self.assertIn("現金", content)
         self.assertNotIn("轉帳", content)
 
@@ -165,7 +165,7 @@ class TestSales(FacadeTestCase):
             conn.execute("UPDATE Variant SET price=500 WHERE variant_id=?", (self.vid,))
             conn.commit()
         error = self.assert_application_error("validation_error", "sales.checkout", {"employee": 1,
-            "payment": "現金", "paid": 1000,
+            "payment_id": 1, "paid": 1000,
             "items": [{"variant_id": self.vid, "qty": 1, "unit_price": 499}],
         })
         self.assertIn("售價與系統不符", error.message)

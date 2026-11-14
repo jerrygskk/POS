@@ -1,10 +1,9 @@
 import csv
 import io
-import json
 from datetime import date as calendar_date
 from collections.abc import Mapping
 
-from lib import correction_service, product_data, stock_ledger
+from lib import correction_service, payment_service, product_data, stock_ledger
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, NotFoundError, ValidationError
 from lib.db import stock_map
@@ -12,7 +11,6 @@ from lib.member_service import phone_pattern
 from lib.product_rules import is_int as _is_int, require_employee
 
 
-CASH_PAYMENT = "現金"  # 只有現金找零、計入立帳的應有現金
 # 作廢原因:代碼→存進資料庫的顯示文字;「其他」須另填說明
 VOID_REASONS = {"duplicate": "重複結帳", "item": "品項錯誤", "qty": "數量錯誤", "amount": "金額錯誤", "other": "其他"}
 VOID_TEXT_MAX = 30
@@ -24,10 +22,14 @@ def _strict_mapping(payload, allowed):
 
 
 def _filters(payload, legacy_date=False):
-    _strict_mapping(payload, {"date_from", "date_to", "payment", "member_phone", "date"} if legacy_date
-                    else {"date_from", "date_to", "payment", "member_phone"})
-    values = {key: payload.get(key, "") for key in ("date_from", "date_to", "payment", "member_phone")}
+    _strict_mapping(payload, {"date_from", "date_to", "payment_id", "member_phone", "date"} if legacy_date
+                    else {"date_from", "date_to", "payment_id", "member_phone"})
+    values = {key: payload.get(key, "") for key in ("date_from", "date_to", "member_phone")}
     if any(not isinstance(value, str) for value in values.values()):
+        raise ValidationError("篩選條件格式不正確")
+    # 付款方式用編號篩:改名前後的單都要篩得到;沒給或 None＝不篩
+    values["payment_id"] = payload.get("payment_id")
+    if values["payment_id"] is not None and not _is_int(values["payment_id"]):
         raise ValidationError("篩選條件格式不正確")
     date = payload.get("date", "") if legacy_date else ""
     if not isinstance(date, str):
@@ -51,12 +53,12 @@ def _filters(payload, legacy_date=False):
 
 
 def _checkout_payload(payload):
-    _strict_mapping(payload, {"payment", "order_discount", "member_discount", "paid", "items", "employee", "member_id"})
+    _strict_mapping(payload, {"payment_id", "order_discount", "member_discount", "paid", "items", "employee", "member_id"})
     member_id = payload.get("member_id")
     if member_id is not None and not _is_int(member_id):
         raise ValidationError("會員資料格式不正確")
     require_employee(payload.get("employee"))
-    if not isinstance(payload.get("payment"), str) or not payload["payment"]:
+    if not _is_int(payload.get("payment_id")):
         raise ValidationError("付款方式不正確")
     for key in ("order_discount", "member_discount", "paid"):
         if not _is_int(payload.get(key, 0)) or payload.get(key, 0) < 0:
@@ -78,7 +80,7 @@ def _checkout_payload(payload):
         if row["discount"] > row["qty"] * row["unit_price"]:
             raise ValidationError("單項折扣不可超過該項金額")
         clean.append(row)
-    return {"payment": payload["payment"], "order_discount": payload.get("order_discount", 0),
+    return {"payment_id": payload["payment_id"], "order_discount": payload.get("order_discount", 0),
             "member_discount": payload.get("member_discount", 0),
             "paid": payload.get("paid", 0), "items": clean, "employee": payload["employee"], "member_id": member_id}
 
@@ -107,13 +109,13 @@ def _void_payload(payload):
 
 
 def _payment_payload(payload):
-    _strict_mapping(payload, {"sale_id", "payment", "expected_payment"})
+    _strict_mapping(payload, {"sale_id", "payment_id", "expected_payment_id"})
     if not _is_int(payload.get("sale_id")):
         raise ValidationError("銷售單編號格式不正確")
-    for key in ("payment", "expected_payment"):
-        if not isinstance(payload.get(key), str) or not payload[key].strip():
+    for key in ("payment_id", "expected_payment_id"):
+        if not _is_int(payload.get(key)):
             raise ValidationError("付款方式不正確")
-    return {key: payload[key] for key in ("sale_id", "payment", "expected_payment")}
+    return {key: payload[key] for key in ("sale_id", "payment_id", "expected_payment_id")}
 
 
 def _csv_text(value):
@@ -123,22 +125,18 @@ def _csv_text(value):
 
 
 class SalesRepository(BaseRepository):
-    def _setting_json(self, key, default):
-        row = self.connection.execute("SELECT value FROM Setting WHERE key=?", (key,)).fetchone()
-        return json.loads(row["value"]) if row else default
-
     def payments(self):
-        """全部付款方式(含停用):報表的欄位順序用這份。"""
-        return self._setting_json("payments", [])
+        """全部付款方式(含停用),依設定順序:報表欄位、紀錄篩選用這份;結帳與更正只取 active 的。"""
+        return [dict(row) for row in self.connection.execute(
+            "SELECT payment_id, name, active, fee_rate, is_cash FROM PaymentMethod ORDER BY sort, payment_id")]
 
-    def enabled_payments(self):
-        """結帳與更正付款方式可選的清單:扣掉停用的。"""
-        disabled = set(self._setting_json("payments_disabled", []))
-        return [p for p in self.payments() if p not in disabled]
-
-    def payment_fees(self):
-        """付款方式 → 手續費率(百分比);沒列的視為 0。"""
-        return self._setting_json("payment_fees", {})
+    def usable_payment(self, payment_id):
+        """結帳、更正可用的付款方式(存在且啟用);要在寫入的同一交易內呼叫,設定被改才擋得到。"""
+        row = self.connection.execute(
+            "SELECT payment_id, name, is_cash FROM PaymentMethod WHERE payment_id=? AND active=1", (payment_id,)).fetchone()
+        if row is None:
+            raise ValidationError("付款方式不存在或已停用")
+        return row
 
     def variant_is_active(self, variant_id):
         # 種類、產品、款式都須啟用;缺必填值只是待補提醒,不擋銷售,
@@ -156,10 +154,11 @@ class SalesRepository(BaseRepository):
     def create_sale(self, payment, order_discount, member_discount, total, paid, employee, member_id):
         return self.connection.execute(
             # 帳日在同一句內決定(不先查再寫,免得查完還沒寫別人剛好立帳):今天已立帳就算明天的帳
-            "INSERT INTO Sale(payment,order_discount,member_discount,total,paid,change,employee,member_id,business_date) "
-            "VALUES(?,?,?,?,?,?,?,?,CASE WHEN EXISTS(SELECT 1 FROM DayClose WHERE business_date=date('now','localtime')) "
+            "INSERT INTO Sale(payment_id,payment,order_discount,member_discount,total,paid,change,employee,member_id,business_date) "
+            "VALUES(?,?,?,?,?,?,?,?,?,CASE WHEN EXISTS(SELECT 1 FROM DayClose WHERE business_date=date('now','localtime')) "
             "THEN date('now','localtime','+1 day') ELSE date('now','localtime') END)",
-            (payment, order_discount, member_discount, total, paid, paid - total, employee, member_id)).lastrowid
+            (payment["payment_id"], payment["name"], order_discount, member_discount, total, paid, paid - total,
+             employee, member_id)).lastrowid
 
     def member_is_active(self, member_id):
         return self.connection.execute("SELECT 1 FROM Member WHERE member_id=? AND active=1", (member_id,)).fetchone() is not None
@@ -178,9 +177,9 @@ class SalesRepository(BaseRepository):
             if filters[key]:
                 sql += f" AND {prefix}business_date{operator}?"
                 args.append(filters[key])
-        if filters["payment"]:
-            sql += f" AND {prefix}payment=?"
-            args.append(filters["payment"])
+        if filters["payment_id"] is not None:
+            sql += f" AND {prefix}payment_id=?"
+            args.append(filters["payment_id"])
         if filters["member_phone"]:
             sql += f" AND EXISTS (SELECT 1 FROM MemberPhone mp WHERE mp.member_id={prefix or "Sale."}member_id AND mp.phone LIKE ?)"
             args.append(filters["member_phone"])
@@ -204,7 +203,7 @@ class SalesRepository(BaseRepository):
     def summary_rows(self, filters):
         suffix, args = self.filter_sql(filters, "")
         return self.connection.execute(
-            "SELECT payment,COUNT(*) c,SUM(total) t FROM Sale WHERE voided_at IS NULL" + suffix + " GROUP BY payment", args).fetchall()
+            "SELECT payment_id,COUNT(*) c,SUM(total) t FROM Sale WHERE voided_at IS NULL" + suffix + " GROUP BY payment_id", args).fetchall()
 
     def void_summary(self, filters):
         suffix, args = self.filter_sql(filters, "")
@@ -217,12 +216,11 @@ class SalesService:
         self.repo = repository
 
     def checkout(self, body):
-        if body["payment"] not in self.repo.enabled_payments():
-            raise ValidationError("付款方式未在設定中")
         if body["member_id"] is not None and not self.repo.member_is_active(body["member_id"]):
             raise ValidationError("會員不存在或已刪除，請重新查詢")
         # 讀庫存前先上鎖:否則兩筆同時結最後一件都會通過庫存檢查
         self.repo.connection.execute("BEGIN IMMEDIATE")
+        payment = self.repo.usable_payment(body["payment_id"])
         required = {}
         variant_rows = {}
         for item in body["items"]:
@@ -243,11 +241,11 @@ class SalesService:
         total = sum(i["qty"] * i["unit_price"] - i["discount"] for i in body["items"]) - body["order_discount"] - body["member_discount"]
         if total < 0:
             raise ValidationError("折扣後總額不可為負數")
-        if body["payment"] != CASH_PAYMENT:
+        if not payment["is_cash"]:
             body["paid"] = total  # 非現金不找零,實收即應收
         elif body["paid"] < total:
             raise ValidationError("實收金額不足，請確認實收金額")
-        sale_id = self.repo.create_sale(body["payment"], body["order_discount"], body["member_discount"], total, body["paid"],
+        sale_id = self.repo.create_sale(payment, body["order_discount"], body["member_discount"], total, body["paid"],
                                        body["employee"], body["member_id"])
         for item in body["items"]:
             self.repo.add_item(sale_id, item)
@@ -286,27 +284,28 @@ class SalesService:
         return {"ok": True}
 
     def set_payment(self, body):
-        """更正付款方式:只改 payment 並留紀錄。實收與找零保留原值(已入帳鎖定,也不該改);
+        """更正付款方式:編號與名稱同一句改,並留紀錄(記改前改後的名稱)。實收與找零保留原值(已入帳鎖定,也不該改);
         應有現金一律以應收計算,所以不影響帳。"""
         conn = self.repo.connection
         conn.execute("BEGIN IMMEDIATE")
         sale = conn.execute(
-            "SELECT s.payment, s.voided_at, EXISTS(SELECT 1 FROM DayClose d WHERE d.business_date=s.business_date) closed "
+            "SELECT s.payment, s.payment_id, s.voided_at, EXISTS(SELECT 1 FROM DayClose d WHERE d.business_date=s.business_date) closed "
             "FROM Sale s WHERE s.sale_id=?", (body["sale_id"],)).fetchone()
         if sale is None:
             raise NotFoundError("找不到銷售單")
-        if sale["payment"] != body["expected_payment"]:
+        # 比編號不比名稱:同一個名稱日後可能換成別的付款方式在用
+        if sale["payment_id"] != body["expected_payment_id"]:
             raise ConflictError("銷售單內容已變更，請重新確認")
         if sale["voided_at"] is not None:
             raise ConflictError("此單已作廢，不可更正付款方式")
         if sale["closed"]:
             raise ConflictError("此帳日已立帳，不可更正付款方式")
-        if body["payment"] not in self.repo.enabled_payments():
-            raise ValidationError("付款方式未在設定中")
-        if body["payment"] == sale["payment"]:
+        if body["payment_id"] == sale["payment_id"]:
             raise ValidationError("新付款方式與目前相同")
-        conn.execute("UPDATE Sale SET payment=? WHERE sale_id=?", (body["payment"], body["sale_id"]))
-        correction_service.record(conn, "sale", body["sale_id"], "payment", sale["payment"], body["payment"])
+        payment = self.repo.usable_payment(body["payment_id"])
+        conn.execute("UPDATE Sale SET payment_id=?, payment=? WHERE sale_id=?",
+                     (payment["payment_id"], payment["name"], body["sale_id"]))
+        correction_service.record(conn, "sale", body["sale_id"], "payment", sale["payment"], payment["name"])
         return {"ok": True}
 
     def list_sales(self, filters, load_attrs=True):
@@ -324,7 +323,7 @@ class SalesService:
         out = {}
         for row in rows:
             sale = out.setdefault(row["sale_id"], {"sale_id": row["sale_id"], "ts": row["ts"],
-                "payment": row["payment"], "order_discount": row["order_discount"], "member_discount": row["member_discount"],
+                "payment": row["payment"], "payment_id": row["payment_id"], "order_discount": row["order_discount"], "member_discount": row["member_discount"],
                 "total": row["total"], "employee": row["employee"],
                 "business_date": row["business_date"], "day_closed": bool(row["day_closed"]),
                 "voided_at": row["voided_at"], "void_reason": row["void_reason"],
@@ -342,11 +341,12 @@ class SalesService:
         return {"count": sum(row["c"] for row in rows), "total": sum(row["t"] or 0 for row in rows),
                 "by_payment": self._by_payment(rows), "void_count": void["c"], "void_total": void["t"]}
 
-    # 依設定清單順序固定列出每種付款方式(沒交易的列 0);清單外的舊付款方式排在後面
+    # 依設定順序固定列出每種付款方式(含停用;沒交易的列 0),名稱用現在的
     def _by_payment(self, rows):
-        found = {row["payment"]: (row["c"], row["t"] or 0) for row in rows}
-        names = self.repo.payments() + [p for p in found if p not in self.repo.payments()]
-        return [{"payment": p, "count": found.get(p, (0, 0))[0], "total": found.get(p, (0, 0))[1]} for p in names]
+        found = {row["payment_id"]: (row["c"], row["t"] or 0) for row in rows}
+        return [{"payment_id": p["payment_id"], "payment": p["name"],
+                 "count": found.get(p["payment_id"], (0, 0))[0], "total": found.get(p["payment_id"], (0, 0))[1]}
+                for p in self.repo.payments()]
 
     def export(self, filters):
         rows = self.repo.sale_rows(filters)
@@ -364,7 +364,7 @@ class SalesService:
 
 
 class SalesFacade(BaseFacade):
-    ACTIONS = {"payments.list", "sales.checkout", "sales.list", "sales.recent", "sales.summary", "sales.export", "sales.void", "sales.set_payment"}
+    ACTIONS = {"payments.list", "payments.create", "payments.update", "payments.sort", "payments.delete", "sales.checkout", "sales.list", "sales.recent", "sales.summary", "sales.export", "sales.void", "sales.set_payment"}
 
     ERROR_MESSAGE = "銷售操作不正確"
 
@@ -375,6 +375,8 @@ class SalesFacade(BaseFacade):
             return _void_payload(payload)
         if action == "sales.set_payment":
             return _payment_payload(payload)
+        if action in {"payments.create", "payments.update", "payments.sort", "payments.delete"}:
+            return payment_service.prepare(action, payload)
         if action in {"payments.list", "sales.recent"}:
             _strict_mapping(payload, set())
             return payload
@@ -382,7 +384,15 @@ class SalesFacade(BaseFacade):
 
     def _dispatch(self, action, payload, connection):
         service = SalesService(SalesRepository(connection))
-        if action == "payments.list": return service.repo.enabled_payments()
+        if action == "payments.list":
+            used = payment_service.used_ids(connection)   # used:設定頁只在沒用過的列上給刪除鈕
+            return [{"payment_id": p["payment_id"], "name": p["name"], "active": bool(p["active"]),
+                     "fee_rate": p["fee_rate"], "is_cash": bool(p["is_cash"]), "used": p["payment_id"] in used}
+                    for p in service.repo.payments()]
+        if action == "payments.create": return payment_service.create(connection, payload)
+        if action == "payments.update": return payment_service.update(connection, payload)
+        if action == "payments.sort": return payment_service.sort(connection, payload)
+        if action == "payments.delete": return payment_service.delete(connection, payload)
         if action == "sales.checkout": return service.checkout(payload)
         if action == "sales.void": return service.void(payload)
         if action == "sales.set_payment": return service.set_payment(payload)

@@ -237,6 +237,14 @@ tr.inactive > td { opacity: 0.55; }
 .add-before-list { justify-content: flex-start; }
 .add-before-list > input:not(.w60):not(.w120) { flex: 0 1 220px; }
 .add-before-list > input.w60 { flex: 0 0 58px; width: 58px; }
+/* 輸入框後面的單位字(%):新增列沒有設垂直置中,自己對齊到輸入框中線 */
+.pay-unit { align-self: center; }
+.btn-x:disabled { filter: none; cursor: default; }
+/* 付款方式列右側的控制項:包成一組,每列同寬 */
+.pay-ctl { position: relative; display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.pay-ctl.locked > :not(.pay-note) { visibility: hidden; }
+.pay-note { position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  font-size: 13px; color: var(--text-3); white-space: nowrap; }
 /* 自訂規格列:名稱吃剩餘寬,其餘控制項固定寬不換行 */
 .maint-row select { min-width: 92px; }
 .maint-row .switch-label { font-size: 12px; }

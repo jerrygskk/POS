@@ -175,13 +175,13 @@ class TestCatalog(FacadeTestCase):
     def test_inactive_variant_cannot_sell(self):
         result = self._create(); vid = result["variant_ids"][0]
         self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": vid, "qty": 10}]}); self.invoke("variants.update", {"id": vid, "fields": {"active": 0}})
-        self.assert_application_error("validation_error", "sales.checkout", {"employee": 1, "payment": "cash", "paid": 1000, "items": [{"variant_id": vid, "qty": 1, "unit_price": 590}]})
+        self.assert_application_error("validation_error", "sales.checkout", {"employee": 1, "payment_id": 1, "paid": 1000, "items": [{"variant_id": vid, "qty": 1, "unit_price": 590}]})
         self.assertEqual(self.invoke("stock.detail", {"variant_id": vid})["stock"], 10)
 
     def test_inactive_product_cannot_sell(self):
         result = self._create(); vid = result["variant_ids"][0]
         self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": vid, "qty": 10}]}); self.invoke("products.update", {"id": result["product_id"], "fields": {"active": 0}})
-        self.assert_application_error("validation_error", "sales.checkout", {"employee": 1, "payment": "cash", "paid": 1000, "items": [{"variant_id": vid, "qty": 1, "unit_price": 590}]})
+        self.assert_application_error("validation_error", "sales.checkout", {"employee": 1, "payment_id": 1, "paid": 1000, "items": [{"variant_id": vid, "qty": 1, "unit_price": 590}]})
         self.assertEqual(self.invoke("stock.detail", {"variant_id": vid})["stock"], 10)
 
     def test_inactive_hidden_in_search(self):

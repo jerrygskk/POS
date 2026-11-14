@@ -7,7 +7,7 @@ window.PosPages["page-checkout"] = {
   inject: ["showError"],
   data() {
     return { scanCode: "", searchQ: "", searchResults: [], draft: window.PosCheckoutDraft,
-             payments: [], payment: "現金", paid: null, memberQuery: "", memberEdit: null, doneMsg: "", recent: [], recentOpen: false,
+             payments: [], payment: null, paid: null, memberQuery: "", memberEdit: null, doneMsg: "", recent: [], recentOpen: false,
              employee: window.PosEmployee, rates: [95, 90, 85] };
   },
   computed: {
@@ -20,14 +20,15 @@ window.PosPages["page-checkout"] = {
     },
     // 目前只記錄賣了什麼、不實際收款:實收留白視為剛好付清
     // 轉帳、行動支付一律剛好付清,實收鎖住不給改
-    isCash() { return this.payment === "現金"; },
+    isCash() { return !!this.payments.find(p => p.payment_id === this.payment)?.is_cash; },
     paidBlank() { return !this.isCash || this.paid === null || this.paid === ""; },
     paidAmount() { return this.paidBlank ? this.total : this.paid; },
   },
   async mounted() {
     await this.guard(async () => {
-      this.payments = await API.listPayments();
-      this.payment = this.payments[0];
+      // 結帳只列啟用的;停用的留給紀錄查詢的篩選
+      this.payments = (await API.listPayments()).filter(p => p.active);
+      this.payment = this.payments[0]?.payment_id ?? null;
       this.recent = await API.recentSales();
     });
     this.$refs.scan?.focus();
@@ -189,14 +190,14 @@ window.PosPages["page-checkout"] = {
       try {
         await this.guard(async () => {
           const r = await API.checkout({
-            payment: this.payment, order_discount: this.draft.orderDiscount, member_discount: this.draft.memberDiscount,
+            payment_id: this.payment, order_discount: this.draft.orderDiscount, member_discount: this.draft.memberDiscount,
             paid: this.paidAmount, employee: this.employee.id, member_id: this.draft.member ? this.draft.member.member_id : null,
             items: snapshot });
           this.doneMsg = this.paidBlank
             ? `結帳完成(交易編號 ${r.sale_id})`
             : `結帳完成，找零 ${r.change} 元(交易編號 ${r.sale_id})`;
           this.draft.cart = []; this.draft.orderDiscount = 0; this.draft.memberDiscount = 0; this.draft.member = null; this.paid = null;
-          if (this.payments.length) this.payment = this.payments[0];
+          if (this.payments.length) this.payment = this.payments[0].payment_id;
           clearTimeout(this._doneTimer);
           this._doneTimer = setTimeout(() => this.doneMsg = "", 5000);
           done = true;

@@ -40,7 +40,8 @@ COPY_TABLES = [  # 欄位與來源相同，原樣複製（保留主鍵）
 CONVERT_TABLES = ["AttributeField"]  # 由來源 AttributeField＋CategoryField 轉換
 SOURCE_ONLY_TABLES = ["CategoryField"]  # 只存在來源，已併入 AttributeField
 SKIP_TABLES = ["Sale", "SaleItem", "StockMovement", "StocktakeSession", "StocktakeItem",
-               "ReturnSession", "ReturnItem", "Receipt", "ReceiptItem", "DayClose", "Correction"]
+               "ReturnSession", "ReturnItem", "Receipt", "ReceiptItem", "DayClose", "DayClosePayment", "Correction"]
+SEED_TABLES = ["PaymentMethod"]  # 不從來源帶,由種子建預設(來源是 v24,付款方式還在 Setting 裡)
 # Setting 逐鍵處理：schema_version 由本工具寫入最新版號，密碼依種子預設（不複製來源密碼）。
 # 付款方式依種子預設:來源母版是舊清單(行動支付),不帶過來。
 SETTING_COPY_KEYS = ["next_store_barcode"]
@@ -73,7 +74,7 @@ def columns(conn, table, schema="main"):
 
 
 def check_classification(conn):
-    known_new = set(COPY_TABLES) | set(CONVERT_TABLES) | set(SKIP_TABLES) | {"Setting"}
+    known_new = set(COPY_TABLES) | set(CONVERT_TABLES) | set(SKIP_TABLES) | set(SEED_TABLES) | {"Setting"}
     unknown = sorted(tables(conn) - known_new)
     if unknown:
         raise ConversionError(f"新格式有資料表尚未歸類（請在工具中決定怎麼處理）：{', '.join(unknown)}")

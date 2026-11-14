@@ -105,7 +105,7 @@ view.app.unmount();auth.isAdmin=false;
     def test_sales_show_member_and_filter_by_phone(self):
         self.run_js(r'''
 let filters=null;
-API.listPayments=async()=>["現金"];
+API.listPayments=async()=>[{payment_id:1,name:"現金",active:true,is_cash:true}];
 API.listSales=async f=>{filters=f;return [{sale_id:1,ts:"2026-11-06 10:00",employee:1,payment:"現金",order_discount:0,member_discount:0,total:100,member_name:"王小明",member_phones:"0912000111",items:[]}];};
 API.salesSummary=async()=>({count:1,total:100,by_payment:[]});
 const view=mount(context.window.PosPages["page-records"],template("records"));

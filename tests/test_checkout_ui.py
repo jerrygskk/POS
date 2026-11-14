@@ -34,7 +34,8 @@ function mkState(extra) {
   for (const [name, method] of Object.entries(page.methods)) s[name] = method.bind(s);
   for (const [name, getter] of Object.entries(page.computed))
     Object.defineProperty(s, name, { get: getter.bind(s), configurable: true });
-  Object.assign(s, extra || {});
+  // 付款方式由 mounted 載入;測試不跑 mounted,先給一筆現金
+  Object.assign(s, {payments: [{payment_id: 1, name: "現金", active: true, is_cash: true}], payment: 1}, extra || {});
   s._errors = errors;
   return s;
 }
@@ -221,7 +222,7 @@ s.draft.orderDiscount = 50;
 })();
 ''')
         self.assertEqual(out["submitted"], {
-            "payment": "現金", "order_discount": 50, "member_discount": 0, "paid": 500, "employee": 1, "member_id": None,
+            "payment_id": 1, "order_discount": 50, "member_discount": 0, "paid": 500, "employee": 1, "member_id": None,
             "items": [{"variant_id": 7, "qty": 2, "unit_price": 250, "discount": 50}]})
         self.assertEqual(out["draft"], {
             "cart": [], "orderDiscount": 0, "memberDiscount": 0, "member": None, "submitting": False, "generation": 1})

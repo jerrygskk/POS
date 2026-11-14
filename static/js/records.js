@@ -35,21 +35,25 @@ window.PosPages["page-records"] = {
     // 立帳紀錄的付款方式欄:每一列順序相同,取第一列;沒有紀錄時用設定清單
     dcPayments() {
       const first = this.dc.records[0];
-      return first ? first.by_payment.map(b => b.payment) : this.payments;
+      return first ? first.by_payment.map(b => b.payment) : this.payments.filter(p => p.active).map(p => p.name);
     },
     // 查詢區間的合計列
     dcTotals() {
       const sum = pick => this.dc.records.reduce((total, r) => total + pick(r), 0);
       const by_payment = this.dcPayments.map((_, i) => sum(r => r.by_payment[i].total));
       const sales_total = sum(r => r.sales_total);
-      // 手續費:金流業者在提領時才扣,所以拿查詢區間的合計算一次(四捨五入到元),每天的金額不扣。
-      // 費率是百分比,先乘 100 取整再算,避免小數誤差
-      const first = this.dc.records[0], rates = first ? first.by_payment.map(b => b.fee_rate || 0) : [];
-      const fees = by_payment.map((total, i) => Math.round(total * Math.round((rates[i] || 0) * 100) / 10000));
+      // 抽成:金流業者在提領時才扣,每天的金額不扣。每天用立帳當下的比例(百分比×100 的整數),
+      // 「金額×比例」先整個區間加總、最後才四捨五入一次;逐日四捨五入再加總會有累積誤差
+      const fees = by_payment.map((_, i) => Math.round(sum(r => r.by_payment[i].total * r.by_payment[i].fee_rate) / 10000));
       const fee_total = fees.reduce((a, b) => a + b, 0);
-      // rates:各付款方式的費率文字,寫在自己那一欄底下;0 的留空
-      return { by_payment, sales_total, diff: sum(r => r.diff), fees, fee_total,
-               rates: by_payment.map((_, i) => rates[i] ? rates[i] + "%" : ""),
+      // rates:各付款方式實際用到的比例(只算有金額的日子,依日期由舊到新、不重複),月中換比例時會有多個。
+      // 從頭到尾都不抽成的留空;抽過成又改成 0 的,0% 也要列,否則看起來整段都是同一個比例
+      const rates = by_payment.map((_, i) => {
+        const used = [...new Set(this.dc.records.slice().reverse()
+          .filter(r => r.by_payment[i].total).map(r => r.by_payment[i].fee_rate))];
+        return used.some(rate => rate) ? used.map(rate => rate / 100 + "%") : [];
+      });
+      return { by_payment, sales_total, diff: sum(r => r.diff), fees, fee_total, rates,
                net: by_payment.map((total, i) => total - fees[i]), net_total: sales_total - fee_total };
     },
     // 目前類別每一列的開合鍵,與範本的 isOpen／toggle 共用
@@ -108,7 +112,7 @@ window.PosPages["page-records"] = {
     openCorrect(mode, type, row) {
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
       const doc = {
-        sale: () => ({ label: "銷售單", id: row.sale_id, ts: row.ts, payment: row.payment, total: row.total, count: row.items.length }),
+        sale: () => ({ label: "銷售單", id: row.sale_id, ts: row.ts, payment: row.payment, payment_id: row.payment_id, total: row.total, count: row.items.length }),
         return: () => ({ label: "退貨單", id: row.return_id, ts: row.started_at }),
         receipt: () => ({ label: "進貨單", id: row.receipt_id, ts: row.ts }),
         stocktake: () => ({ label: "盤點單", id: row.session_id, ts: row.started_at }),
@@ -196,7 +200,7 @@ window.PosPages["page-records"] = {
                     line(true, "合計", ...totals.by_payment, totals.sales_total, this.signedText(totals.diff), "")];
       // 有手續費才多三列:抽成比例、抽成金額、實收
       if (totals.fee_total) {
-        rows.push(line(false, "抽成比例", ...totals.rates, "", "", ""),
+        rows.push(line(false, "抽成比例", ...totals.rates.map(list => list.join("／")), "", "", ""),
                   line(false, "抽成金額", ...totals.fees.map(minus), minus(totals.fee_total), "", ""),
                   line(true, "實收", ...totals.net, totals.net_total, "", ""));
       }
@@ -261,7 +265,7 @@ window.PosPages["page-records"] = {
       await this.guard(async () => {
         const range = {date_from: this.dateFrom, date_to: this.dateTo};
         if (this.kind === "sales") {
-          const filters = {...range, payment: this.payment || "", member_phone: this.memberPhone.trim()};
+          const filters = {...range, payment_id: this.payment === "" ? null : this.payment, member_phone: this.memberPhone.trim()};
           // 查詢失敗先清空,不留上一次結果;成功才記住條件給匯出用
           // 連續查詢時只讓最新一次更新畫面:列表、合計、匯出條件必須屬於同一次查詢
           const seq = this._salesSeq = (this._salesSeq || 0) + 1;

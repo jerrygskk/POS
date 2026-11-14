@@ -24,6 +24,7 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 | `lib/db_schema.py` | 現行 schema DDL 唯一來源、`MIN_SUPPORTED_VERSION` 與 migration 清單 |
 | `lib/stock_ledger.py` | 庫存異動唯一入帳入口 `post()` |
 | `lib/dayclose_service.py`／`lib/correction_service.py` | 每日立帳／單據更正紀錄與修正操作者 |
+| `lib/payment_service.py` | 付款方式設定：新增、改名、排序、停用、改抽成比例、刪除沒用過的 |
 | `lib/product_rules.py` | 共用商品規則（欄位型別驗證、自取碼取號、員工代號檢查） |
 | `lib/variant_batch_service.py` | 子產品批次建立與唯讀預檢 |
 | `lib/label_printer.py`／`lib/label_layout.py` | 標籤機協定／標籤版面（純函式） |
@@ -38,7 +39,7 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 
 ### 資料模型
 
-- **Schema**：`SCHEMA` 是唯一定義。`MIN_SUPPORTED_VERSION` 以前的升級步驟全部移除（目前等於 v27），較舊的資料庫一律拒絕開啟，改用母版工具轉出的新版標準資料庫。現行為 **v28**，`MIGRATIONS` 只有 v27→v28 一步（`_to_v28`：原名重建 `Sale`／`StockMovement`、補帳日；升級與種子在同一交易，commit 前跑外鍵檢查，失敗整個回復）；來源結構凍結在 `tests/fixtures/schema_v27.sql`。出 1.0.0 時把這一步連同該 fixture 與 `tests/test_migration_v28.py` 移除，`BASE_VERSION`、`MIN_SUPPORTED_VERSION` 改成當時版號。尚未上線期間，改結構直接改 `SCHEMA` 並重產母版；上線後再改結構才在 `MIGRATIONS` 加步驟：搬表要明確開交易、保留原編號與流水號，失敗完整回復，不可關閉外鍵檢查。
+- **Schema**：`SCHEMA` 是唯一定義。`MIN_SUPPORTED_VERSION` 以前的升級步驟全部移除（目前等於 v27），較舊的資料庫一律拒絕開啟，改用母版工具轉出的新版標準資料庫。現行為 **v29**，`MIGRATIONS` 依序是 v27→v28（`_to_v28`：原名重建 `Sale`／`StockMovement`、補帳日；建的是 v28 形狀的 `Sale`，不是現行的）與 v28→v29（`_to_v29`：付款方式由 `Setting` 的三個 JSON 鍵搬進 `PaymentMethod`、`Sale` 補 `payment_id`、已立帳的帳日補 `DayClosePayment` 快照；舊單上不在清單裡的名稱會替它建一筆停用的付款方式；補出來的快照比例是升級當下的設定值，當時的值沒有留）。升級與種子在同一交易，commit 前跑外鍵檢查，失敗整個回復；來源結構凍結在 `tests/fixtures/schema_v27.sql`、`schema_v28.sql`。出 1.0.0 時把這兩步連同 fixture 與 `tests/test_migration_v28.py`、`test_migration_v29.py` 移除，`BASE_VERSION`、`MIN_SUPPORTED_VERSION` 改成當時版號。尚未上線期間，改結構直接改 `SCHEMA` 並重產母版；上線後再改結構才在 `MIGRATIONS` 加步驟：搬表要明確開交易、保留原編號與流水號，失敗完整回復，不可關閉外鍵檢查。
 - **資料庫限制分兩層**：單筆能判斷的寫成 CHECK、複合外鍵、部分唯一索引；跨表規則放程式，在同一交易內檢查（`product_data.check_variant_attributes`、`returns_service.check_kind`、`product_data.check_field_name`）。
 - **金額與數量**：一律 int（新台幣元，無小數）。
 - **庫存採異動流水制**：不存目前庫存，一律由 `StockMovement` 加總（`product_data.stock_of`）。`kind`：`purchase`＋、`sale`－、`adjust`±、`return`＋、`repair`＋（返新）、`void`＋（作廢銷售單沖回，schema v28；與 `sale` 指向同一筆銷售明細，一筆明細各只能有一筆 `sale` 與一筆 `void`）。
@@ -51,7 +52,7 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 - **規格值一致性**：複合外鍵保證選項屬於該欄；跨表規則（欄位屬於商品的種類、select 單值、欄型別與值型別對應）由 `check_variant_attributes` 在寫入的同一交易檢查。已填規格的產品改種類回衝突，不自動清值。
 - **同種類欄名不重複**：資料庫 `UNIQUE(category_id, name)` 只擋完全相同；全半形、大小寫、空白不同的同名由 `check_field_name`（`normalize_key`）擋。⚠️ `fields.create`／`update` 先 `BEGIN IMMEDIATE` 再查重與寫入，否則兩個操作交錯會各自通過檢查。
 - **員工代號**：銷售、進貨、盤點、退貨的 `employee` 只收 1～6，後端必填（`require_employee`）。前端 `employee-picker` 共用同一選擇，切頁與結帳後保留。未選時按鈕**不反灰**，按下才提示，否則店員看不出為何沒反應。
-- **關鍵輸入**：進貨與盤點掃描數量 > 0，實盤量 ≥ 0；單項折扣不超過品項小計，總額不為負，付款方式須在設定清單內。
+- **關鍵輸入**：進貨與盤點掃描數量 > 0，實盤量 ≥ 0；單項折扣不超過品項小計，總額不為負，付款方式須是啟用中的編號。
 
 ### 條碼
 
@@ -68,18 +69,19 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 - **單項折扣與實售價**：原價唯讀（未標價品掃入時跳框輸入的值放在原價）；另有「實售價」欄，可由 95／9／85 切換鈕（共用 `.chip`，同列單選、再按取消）帶入「原價×折數」四捨五入到元，也可由店員直接輸入整數，手填即取消折數鈕。折扣金額 `lineDiscount`＝（原價－實售價）×數量；送後端仍是金額 `discount`，後端與 schema 不變。實售價高於原價時格子標紅，結帳前擋下（後端另驗 `0 ≤ discount ≤ 數量×原價`）。
 - **進貨列印標籤**：一般進貨與返新進貨都不另設標籤欄，「列印 N 張」按鈕接在數量框後面（`.qty-label`），按過變「已加入 N 張」，數量改大只補差額。
 - **金額欄**：原價、數量、整單折抵、會員折扣、實收都是文字框，輸入時只留數字。金額清空視為 0；實收清空維持空白（視為剛好付清）；數量打字途中可留白，離開欄位補回至少 1。
-- **付款方式**：現金、轉帳、LINE Pay、台灣Pay（存 `Setting.payments`，schema v23 把舊的「刷卡」連同舊銷售單改名為轉帳；2026-11-14 把「行動支付」改名 LINE Pay，未上線故不做升級，直接改種子並重產母版）。`Setting.payments_disabled` 列出停用的付款方式（目前是台灣Pay）：`payments.list`、結帳、更正付款方式都只認啟用的（`SalesRepository.enabled_payments`），報表類（收銀合計、立帳預覽、立帳紀錄）用全部清單（`payments`），停用的仍佔一欄、金額 0。`Setting.payment_fees` 是「付款方式 → 抽成比例（百分比）」，沒列的視為 0（目前 LINE Pay 2.2）。⚠️ 這三個設定目前沒有畫面可改，只能改種子或資料庫；設定入口待維護者與店家確認後再做。舊資料庫開啟時種子只補缺的鍵，不會改既有的 `payments`。非現金一律剛好付清：前端實收鎖住顯示應收，後端也把 `paid` 強制改成應收、找零 0，不信任前端傳值。現金實收少於應收時前後端都擋（後端為準）。結帳成功後付款方式回到清單第一項（現金），避免下一單沿用上一單的付款方式記錯。會員折扣不要求先選會員。
+- **付款方式**（`PaymentMethod`，schema v29）：`payment_id` 固定不重用，舊銷售單與立帳快照靠它認付款方式；`name`、`sort`、`active`、`fee_rate`（抽成比例，**百分比×100 的整數**，2.2%＝220，避免小數誤差）、`is_cash`。種子預設現金、轉帳、LINE Pay（2.2%）、台灣Pay（停用），只在空表時建。**現金靠 `is_cash` 認，不比對名稱**：恰好一筆、恆啟用、不抽成、不可刪，由 CHECK、部分唯一索引與 trigger 擋（`trg_payment_no_replace` 擋 `INSERT OR REPLACE` 換掉既有列）；只有它找零、計入立帳的現金銷售。`Sale` 同時存 `payment_id` 與 `payment`（結帳或更正當下的名稱），同一句寫入：查詢、篩選、合計、立帳一律認編號，單張單據、匯出 CSV、更正紀錄印當時的名稱。**API 一律傳編號**：`payments.list` 回全部（含停用）的 `{payment_id,name,active,fee_rate,is_cash,used}`；結帳、更正付款方式只收啟用中的編號（交易內檢查），紀錄篩選與收銀合計用全部。**設定頁「付款方式」**（`payment_service`，限管理者，改完即存）：`payments.create`（排最後）、`payments.update`（`name`／`active`／`fee_rate`）、`payments.sort`（須送全部編號）、`payments.delete`。名稱最多 10 字，以 `normalize_key` 比對不可重複（含停用的）；改名只改 `PaymentMethod.name`，別人放掉的舊名可再用。刪除只限沒用過的（沒有銷售單、沒有立帳快照，`used` 為否），用過的只能停用；畫面上每列控制項數量相同（現金列只佔位不顯示、用過的 ✕ 反灰），名稱框才會等寬。改抽成比例只影響之後立帳的帳日。非現金一律剛好付清：前端實收鎖住顯示應收，後端也把 `paid` 強制改成應收、找零 0，不信任前端傳值。現金實收少於應收時前後端都擋（後端為準）。結帳成功後付款方式回到清單第一項，避免下一單沿用上一單的付款方式記錯。會員折扣不要求先選會員。
 - **小計列**：待結帳表 `tfoot`，有品項才顯示；金額未扣整單折抵與會員折扣，所以可能與應收不同。
 - **紀錄查詢條件**：起日晚於迄日由後端拒絕；查詢失敗清空列表與合計，不留上一次結果。匯出 CSV 用最近一次查詢成功的條件，不讀輸入框當下的值（否則匯出內容與畫面不符）。
 - **匯出 CSV**（`sales.export`）：含 BOM 讓 Excel 認得 UTF-8；員工後一欄為會員（只有名稱，刻意不帶電話：匯出檔易外流）。紀錄查詢明細的會員列則帶該會員全部電話（`member_phones`，依號碼排序以「、」串接，即時讀 `MemberPhone`，非結帳當下快照）。⚠️ 文字格開頭是 `= + - @`、tab、換行時補單引號（`_csv_text`），否則 Excel 開檔會當公式執行；會員名稱來自 LINE 匯入與店員輸入，不能假設安全。
 - **進貨批次**：清單在 `window.PosReceiveDraft`，以 `stock.receive` 同一交易全有全無寫入，一次確認建一張進貨單（`Receipt`／`ReceiptItem`，同款式多列各自保留數量），回傳 `receipt_id`。⚠️ 確認／清空流程期間以 `locked` 鎖定（掃描、改數量、刪列、加標籤、重按都在方法內擋），另有世代編號 `generation`：掃描回來時編號不同就拒絕。只看鎖定擋不住「入庫完成、解鎖後才回來的舊掃描」，它會進下一批而重複入庫。數量欄不用 `v-model`（會直接改資料，方法擋不住）。
 - **適用機型欄**：收銀、進貨、退貨明細用 `display_models_by_variant`，種類 `model_mode` 不是 `required` 時顯示「—」，資料不動。
 
-### 立帳、作廢與更正（schema v28）
+### 立帳、作廢與更正
 
 - **帳日** `Sale.business_date`：結帳時在 INSERT 同一句決定，當天已立帳就算隔天，否則算當天；結帳先 `BEGIN IMMEDIATE`，避免與立帳交錯。紀錄查詢的日期條件、合計、匯出一律看帳日，不看結帳時間；帳日與結帳日期不同的單在列表標「計入次日帳」。
 - **每日立帳**（`dayclose_service`，限管理者，入口在紀錄查詢「立帳」）：`DayClose` 一個帳日一筆，記預備金、錢櫃現金總額、現金銷售、短溢、原因與員工代號。短溢＝錢櫃總額－預備金－現金銷售（不含已作廢），不為 0 時原因必填。`dayclose.close` 要帶預覽當下看到的現金銷售，後端同交易比對，不同就回衝突。不可替未來的帳日立帳；預備金存 `Setting.cash_float`。
-- **立帳紀錄與月結圖片**：`dayclose.list` 每筆帶 `by_payment`（各付款方式的 `total` 與 `fee_rate`，每筆順序相同）與 `sales_total`。立帳後銷售單已鎖，金額直接從 `Sale` 加總，不另存快照；不含已作廢、不扣退貨（店家每天處理完退貨才立帳）。表尾列查詢區間的合計；有抽成時再列「抽成比例／抽成金額／實收」。抽成由前端 `dcTotals` 以**區間合計**乘比例四捨五入到元（金流業者在提領時才扣，每天的金額不扣）。「複製成圖片」（`dcCopyImage`）用 canvas 畫一張給公司看的報表放進剪貼簿：欄位是帳日、各付款方式、銷售合計、短溢、原因，日期由小到大，不列員工、立帳時間、預備金、錢櫃總額；與畫面表格是兩套欄位，改一邊要想另一邊。畫面表格的短溢原因不佔欄，只在有原因的帳日下面多一行；最右一欄是空白欄，吃掉多餘寬度，讓金額欄維持固定寬。
+- **立帳快照**（`DayClosePayment`，一個帳日每種付款方式一筆）：立帳時把有交易的付款方式的筆數、金額、當下名稱與抽成比例寫進去，先寫明細再寫 `DayClose` 主檔（延後外鍵，提交時才檢查）；主檔寫入後不可追加、修改、刪除，也擋 REPLACE。沒交易的不存。金額不含已作廢、不扣退貨（店家每天處理完退貨才立帳）。
+- **立帳紀錄與月結圖片**：`dayclose.list` **只讀快照**，不回頭加總銷售單、不讀現在的比例（改比例、改名、停用都不會動到舊報表的金額）。每筆帶 `by_payment`（`payment_id`、`payment`、`total`、`fee_rate`，每筆欄位與順序相同）與 `sales_total`。欄位＝啟用中的付款方式，加上停用但查詢期間有交易的；欄名用現在的名稱，那天沒交易的補 0。⚠️ 前端 `dcPayments`／`dcTotals`／`dcCopyImage` 以索引對欄位，靠的就是「每筆順序相同」。表尾列查詢區間的合計；有抽成時再列「抽成比例／抽成金額／實收」。抽成由前端 `dcTotals` 算：每天的金額乘**當天快照的比例**，整個區間加總後才四捨五入一次（逐日四捨五入會有累積誤差；金流業者在提領時才扣，每天的金額不扣）。抽成比例只列有金額的日子實際用到的，依日期由舊到新、不重複，月中換比例時畫面上下排、圖片用「／」隔開；抽過成又改成 0 的，0% 也列，整段都不抽成的留空。「複製成圖片」（`dcCopyImage`）用 canvas 畫一張給公司看的報表放進剪貼簿：欄位是帳日、各付款方式、銷售合計、短溢、原因，日期由小到大，不列員工、立帳時間、預備金、錢櫃總額；與畫面表格是兩套欄位，改一邊要想另一邊。畫面表格的短溢原因不佔欄，只在有原因的帳日下面多一行；最右一欄是空白欄，吃掉多餘寬度，讓金額欄維持固定寬。
 - **鎖帳**：帳日立帳後，該帳日的銷售單不可新增、改金額／付款方式／會員／帳日、作廢、刪除，由 trigger 擋（含兩種 REPLACE）；`DayClose` 本身不可改刪。立帳後要沖帳只能走退貨。
 - **作廢銷售單**（`sales.void`，限管理者）：只限帳日未立帳、尚無退貨單、未作廢的單。原單保留，寫 `voided_at`、`void_reason`（原因代碼對應的文字；選「其他」必填說明），同交易以 `stock_ledger.post('void', …)` 沖回庫存，並同步進行中盤點單的系統庫存量。已作廢的單不可再改、不可退貨，合計與立帳的現金銷售都不計入，另列「已作廢 N 筆」。要重開就重新結一張。
 - **更正付款方式**（`sales.set_payment`，限管理者）：只限帳日未立帳、未作廢；金額不動。**修正操作者**（`corrections.set_employee`，限管理者）：銷售、進貨、退貨、盤點四種單據的員工代號，不受立帳限制。兩者都寫一筆 `Correction`（單據種類、編號、欄位、原值、新值、時間），`Correction` 不可改刪，紀錄查詢展開後列出更正歷程。
@@ -100,6 +102,7 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 | 銷售紀錄匯出 CSV | 不可 | 可 |
 | 每日立帳、預備金設定、立帳紀錄查詢 | 不可 | 可 |
 | 作廢銷售單、更正付款方式、修正單據操作者 | 不可 | 可 |
+| 付款方式設定（新增、改名、排序、停用、改抽成比例、刪除） | 不可 | 可 |
 | 商品新增、修改、停用／啟用、刪除、待處理管理及編輯子視窗 | 不可 | 可 |
 | 設定頁與管理者密碼變更 | 不可 | 可 |
 
@@ -235,13 +238,13 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 
 把 v24 資料庫的「商品與設定」轉成最新格式的新檔（母版）：營業紀錄一律不帶，庫存全為 0。來源以唯讀連線開啟，輸出檔已存在就停止。
 
-- **轉換**：`CategoryField` 併入 `AttributeField`（啟用取兩者皆啟用），保留原主鍵與 `sqlite_sequence`。單一交易寫入、`defer_foreign_keys`，commit 前跑外鍵檢查，再以 `check_variant_attributes` 核對單選單值與欄型別。⚠️ 每張資料表與設定鍵都要歸在「複製」或「不複製」清單，未歸類就停止；`payments` 不複製、依種子預設（來源母版還是舊的「行動支付」清單）；`next_store_barcode` 必須帶，否則新條碼會撞號。
+- **轉換**：`CategoryField` 併入 `AttributeField`（啟用取兩者皆啟用），保留原主鍵與 `sqlite_sequence`。單一交易寫入、`defer_foreign_keys`，commit 前跑外鍵檢查，再以 `check_variant_attributes` 核對單選單值與欄型別。⚠️ 每張資料表與設定鍵都要歸在「複製」或「不複製」清單，未歸類就停止；`payments` 等舊設定鍵不複製，`PaymentMethod` 由種子建（歸在 `SEED_TABLES`，來源沒有這張表）；`next_store_barcode` 必須帶，否則新條碼會撞號。
 - **對帳**：轉完逐表比對資料列、設定鍵與流水號，經正式 `init_db` 再開一次，最後核對來源雜湊值未變。任一步失敗都刪掉輸出檔（含 `-journal`）。
 - **來源結構凍結**在 `tests/fixtures/schema_v24.sql`，測試用它造 v24 來源。
-- **母版**：v24 原始檔 `docs/standard_db/pos_standard.db`（轉換來源，不要刪）與轉出的 `pos_standard_v28.db`（`docs/` 不入庫，換機器要自行複製）。`DayClose`、`Correction` 屬營業紀錄，不複製。結構有改就重新轉出：
+- **母版**：v24 原始檔 `docs/standard_db/pos_standard.db`（轉換來源，不要刪）與轉出的 `pos_standard_v29.db`（`docs/` 不入庫，換機器要自行複製）。`DayClose`、`DayClosePayment`、`Correction` 屬營業紀錄，不複製。結構有改就重新轉出：
 
 ```
-python tools/make_standard_db.py --source docs/standard_db/pos_standard.db --output docs/standard_db/pos_standard_v28_new.db
+python tools/make_standard_db.py --source docs/standard_db/pos_standard.db --output docs/standard_db/pos_standard_v29_new.db
 ```
 
 - **清乾淨 `pos.db`**：關掉 POS，複製母版換名成 `pos.db`。
@@ -255,7 +258,7 @@ python tools/make_standard_db.py --source docs/standard_db/pos_standard.db --out
 - **小解析度標準 1280×750**：實際筆電 1920×1200 縮放 150%。用資料庫副本開視窗，移到 (0, 0)、設為 1278×720，以 DOM 量測為證據，確認外框沒超出、控制項沒被擠窄、表格下方內容沒被推出畫面。
 - **表單對齊**：標籤（固定寬 `--label-w`）＋輸入框兩欄 grid，同表單對齊同一垂直線；巢狀框內覆寫 `--label-w`。對話框標籤欄用 px，em 會跟提示字級縮水（文字繼承見 VUE-13）。
 - **固定欄寬表格**：掃入明細用 `.cart-table`／`.fixed-table`（`table-layout: fixed`，欄寬用 `col-wNN`）。⚠️ 只設 `min-width` 掃入後照樣跳（VUE-22）。
-- **紀錄查詢列表**：右側 `.records-panel` 寬度上限 980px（1278 寬視窗下立帳表放得下五種付款方式；⚠️ 預設視窗 1124 寬時四種就會出現橫向捲軸，約需 1200）。`.records-table` 只留橫線、固定欄寬、數字靠右；列尾 `.records-toggle` 顯示項數，展開時轉白底藍灰框。展開中的單以 `tr:has(.records-toggle.on)` 認出（四種紀錄共用、不必改模板），主列與明細同一塊 `--accent-soft` 底、左側 4px `--accent` 條，明細 `.records-detail` 是白底圓角小卡，明細格底下 5px 元件底色把相鄰兩筆展開的單隔開。收銀明細欄為「原價／實售價／小計」，實售價＝原價－單項折扣÷數量（前端換算，資料仍存折扣金額）；表尾一行算式「商品小計 − 整單折抵 − 會員折扣 = 應收」，只列有發生的折抵，全無折抵只寫「應收 ○」。主列折抵金額帶減號，0 顯示「—」。明細，商品欄佔剩餘寬度並允許折行，不截斷（品名＋規格中位數 30、最長 67 個半形字）。盤點按鈕的項數是明細筆數，差異數另留「差異項數」欄。單號欄寬 80（放得下六位數，56 只夠三位數會折行）。收銀合計列固定兩行：第一行筆數與總額，第二行 `.pay-breakdown` 依設定清單順序固定列出每種付款方式的筆數與金額（沒交易列 0，清單外的舊付款方式排最後）；總額未扣退貨。
+- **紀錄查詢列表**：右側 `.records-panel` 寬度上限 980px（1278 寬視窗下立帳表放得下五種付款方式；⚠️ 預設視窗 1124 寬時四種就會出現橫向捲軸，約需 1200）。`.records-table` 只留橫線、固定欄寬、數字靠右；列尾 `.records-toggle` 顯示項數，展開時轉白底藍灰框。展開中的單以 `tr:has(.records-toggle.on)` 認出（四種紀錄共用、不必改模板），主列與明細同一塊 `--accent-soft` 底、左側 4px `--accent` 條，明細 `.records-detail` 是白底圓角小卡，明細格底下 5px 元件底色把相鄰兩筆展開的單隔開。收銀明細欄為「原價／實售價／小計」，實售價＝原價－單項折扣÷數量（前端換算，資料仍存折扣金額）；表尾一行算式「商品小計 − 整單折抵 − 會員折扣 = 應收」，只列有發生的折抵，全無折抵只寫「應收 ○」。主列折抵金額帶減號，0 顯示「—」。明細，商品欄佔剩餘寬度並允許折行，不截斷（品名＋規格中位數 30、最長 67 個半形字）。盤點按鈕的項數是明細筆數，差異數另留「差異項數」欄。單號欄寬 80（放得下六位數，56 只夠三位數會折行）。收銀合計列固定兩行：第一行筆數與總額，第二行 `.pay-breakdown` 依設定順序固定列出每種付款方式（含停用）的筆數與金額（沒交易列 0）；總額未扣退貨。
 - **商品資料庫欄寬**：條碼欄 210px 放得下 13 碼與「印標籤」鈕（鈕固定靠右），更長的以省略號顯示、滑鼠移上看全文；同款式條碼全部列出，自取碼排第一。操作欄只有管理者顯示，未登入時卡片與表格一起縮窄。
 - **頂部選單**：不折行不收縮，窄視窗以媒體查詢縮內距。
 - **輸入控制項三選一，不要造第四種**：

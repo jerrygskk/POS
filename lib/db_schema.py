@@ -162,10 +162,33 @@ CREATE TABLE IF NOT EXISTS ReceiptItem(
   UNIQUE(receipt_item_id, variant_id)
 );
 CREATE INDEX IF NOT EXISTS idx_receipt_item_receipt ON ReceiptItem(receipt_id);
+CREATE TABLE IF NOT EXISTS PaymentMethod(       -- 付款方式:編號固定,名稱與設定可改
+  payment_id INTEGER PRIMARY KEY AUTOINCREMENT,  -- 不重用編號:舊銷售單與立帳快照靠它認付款方式
+  name TEXT NOT NULL UNIQUE CHECK(length(trim(name)) > 0),
+  sort INTEGER NOT NULL DEFAULT 0,               -- 報表欄位與下拉選單的順序
+  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),  -- 停用:結帳與更正選不到,報表只在該期間有金額時才列它
+  fee_rate INTEGER NOT NULL DEFAULT 0 CHECK(fee_rate BETWEEN 0 AND 10000),  -- 抽成比例,百分比×100(2.2%＝220)
+  is_cash INTEGER NOT NULL DEFAULT 0 CHECK(is_cash IN (0,1)),  -- 現金:只有它找零、計入立帳的現金銷售
+  CHECK(is_cash = 0 OR (active = 1 AND fee_rate = 0))        -- 現金不可停用、不抽成
+);
+-- 部分唯一索引只保證「最多一筆」現金，「至少一筆」靠下面兩個 trigger 加上種子／升級補建
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_one_cash ON PaymentMethod(is_cash) WHERE is_cash = 1;
+CREATE TRIGGER IF NOT EXISTS trg_payment_cash_keep BEFORE DELETE ON PaymentMethod
+  WHEN OLD.is_cash = 1
+  BEGIN SELECT RAISE(ABORT, '現金不可刪除或改為其他付款方式'); END;
+CREATE TRIGGER IF NOT EXISTS trg_payment_cash_fixed BEFORE UPDATE ON PaymentMethod
+  WHEN OLD.is_cash IS NOT NEW.is_cash OR OLD.payment_id IS NOT NEW.payment_id
+  BEGIN SELECT RAISE(ABORT, '付款方式的編號與現金標記不可變更'); END;
+-- 擋 INSERT OR REPLACE:它會先刪掉撞到的舊列(不觸發刪除 trigger),現金或用過的付款方式就這樣被換掉
+CREATE TRIGGER IF NOT EXISTS trg_payment_no_replace BEFORE INSERT ON PaymentMethod
+  WHEN EXISTS(SELECT 1 FROM PaymentMethod
+              WHERE payment_id = NEW.payment_id OR name = NEW.name OR (NEW.is_cash = 1 AND is_cash = 1))
+  BEGIN SELECT RAISE(ABORT, '付款方式的編號、名稱或現金標記已存在'); END;
 CREATE TABLE IF NOT EXISTS Sale(
   sale_id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-  payment TEXT NOT NULL,
+  payment TEXT NOT NULL,          -- 結帳(或更正)當下的付款方式名稱:單據、匯出、更正紀錄印這個
+  payment_id INTEGER NOT NULL REFERENCES PaymentMethod(payment_id),  -- 查詢、合計、立帳認這個;與 payment 同一句寫入
   order_discount INTEGER NOT NULL DEFAULT 0,  -- 整單折抵(元)
   member_discount INTEGER NOT NULL DEFAULT 0,  -- 會員折扣(元,客人以點數折換)
   total INTEGER NOT NULL,         -- 應收
@@ -286,6 +309,16 @@ CREATE TABLE IF NOT EXISTS DayClose(           -- 每日立帳:一個帳日一�
   CHECK(diff = counted_total - float_amount - cash_sales),
   CHECK(diff = 0 OR (reason IS NOT NULL AND length(trim(reason)) > 0))
 );
+CREATE TABLE IF NOT EXISTS DayClosePayment(    -- 立帳當下各付款方式的快照:只存當天有交易的,不可改刪
+  -- 外鍵延後到提交才檢查:明細必須比主檔先寫(主檔一寫入,該帳日就不能再加明細)
+  business_date TEXT NOT NULL REFERENCES DayClose(business_date) DEFERRABLE INITIALLY DEFERRED,
+  payment_id INTEGER NOT NULL REFERENCES PaymentMethod(payment_id),
+  name TEXT NOT NULL,                            -- 立帳當下的名稱(報表欄名用現在的名稱,這欄只留底)
+  count INTEGER NOT NULL CHECK(count > 0),       -- 筆數(不含作廢)
+  total INTEGER NOT NULL CHECK(total >= 0),      -- 金額(不含作廢、不扣退貨)
+  fee_rate INTEGER NOT NULL CHECK(fee_rate BETWEEN 0 AND 10000),  -- 立帳當下的抽成比例,百分比×100
+  PRIMARY KEY(business_date, payment_id)
+);
 CREATE TABLE IF NOT EXISTS Correction(         -- 更正紀錄(付款方式、員工):恰一個來源單據,不可改刪
   correction_id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -398,6 +431,7 @@ CREATE TRIGGER IF NOT EXISTS trg_sale_closed_update BEFORE UPDATE ON Sale
   WHEN (EXISTS(SELECT 1 FROM DayClose WHERE business_date=OLD.business_date)
         OR EXISTS(SELECT 1 FROM DayClose WHERE business_date=NEW.business_date))
    AND (OLD.sale_id IS NOT NEW.sale_id OR OLD.ts IS NOT NEW.ts OR OLD.payment IS NOT NEW.payment
+        OR OLD.payment_id IS NOT NEW.payment_id
         OR OLD.order_discount IS NOT NEW.order_discount OR OLD.member_discount IS NOT NEW.member_discount
         OR OLD.total IS NOT NEW.total OR OLD.paid IS NOT NEW.paid OR OLD.change IS NOT NEW.change
         OR OLD.member_id IS NOT NEW.member_id OR OLD.business_date IS NOT NEW.business_date
@@ -417,7 +451,7 @@ CREATE TRIGGER IF NOT EXISTS trg_sale_void_final BEFORE UPDATE ON Sale
    AND (OLD.voided_at IS NOT NEW.voided_at OR OLD.void_reason IS NOT NEW.void_reason)
   BEGIN SELECT RAISE(ABORT, '已作廢的銷售單不可恢復或修改'); END;
 CREATE TRIGGER IF NOT EXISTS trg_sale_void_payment BEFORE UPDATE ON Sale
-  WHEN OLD.voided_at IS NOT NULL AND OLD.payment IS NOT NEW.payment
+  WHEN OLD.voided_at IS NOT NULL AND (OLD.payment IS NOT NEW.payment OR OLD.payment_id IS NOT NEW.payment_id)
   BEGIN SELECT RAISE(ABORT, '已作廢的銷售單不可恢復或修改'); END;
 CREATE TRIGGER IF NOT EXISTS trg_sale_void_keep_delete BEFORE DELETE ON Sale
   WHEN OLD.voided_at IS NOT NULL
@@ -437,6 +471,15 @@ CREATE TRIGGER IF NOT EXISTS trg_dayclose_no_update BEFORE UPDATE ON DayClose
   BEGIN SELECT RAISE(ABORT, '立帳紀錄不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_dayclose_no_delete BEFORE DELETE ON DayClose
   BEGIN SELECT RAISE(ABORT, '立帳紀錄不可修改或刪除'); END;
+-- 立帳快照:該帳日的主檔寫入後就不能再加明細(擋事後追加),同主鍵也不能再寫(擋 REPLACE)
+CREATE TRIGGER IF NOT EXISTS trg_dayclosepayment_no_append BEFORE INSERT ON DayClosePayment
+  WHEN EXISTS(SELECT 1 FROM DayClose WHERE business_date=NEW.business_date)
+    OR EXISTS(SELECT 1 FROM DayClosePayment WHERE business_date=NEW.business_date AND payment_id=NEW.payment_id)
+  BEGIN SELECT RAISE(ABORT, '立帳紀錄不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_dayclosepayment_no_update BEFORE UPDATE ON DayClosePayment
+  BEGIN SELECT RAISE(ABORT, '立帳紀錄不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_dayclosepayment_no_delete BEFORE DELETE ON DayClosePayment
+  BEGIN SELECT RAISE(ABORT, '立帳紀錄不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_correction_no_replace BEFORE INSERT ON Correction
   WHEN EXISTS(SELECT 1 FROM Correction WHERE correction_id=NEW.correction_id)
   BEGIN SELECT RAISE(ABORT, '更正紀錄不可修改或刪除'); END;
@@ -446,6 +489,7 @@ CREATE TRIGGER IF NOT EXISTS trg_correction_no_delete BEFORE DELETE ON Correctio
   BEGIN SELECT RAISE(ABORT, '更正紀錄不可修改或刪除'); END;
 """
 
+import json
 import sqlite3
 
 
@@ -492,18 +536,71 @@ def _to_v28(conn):
         shown = "、".join(bad[:20]) + ("…" if len(bad) > 20 else "")
         raise RuntimeError(f"資料庫升級中止：{len(bad)} 張銷售單的時間無法判斷帳日（單號 {shown}）")
     conn.execute("PRAGMA defer_foreign_keys=ON")  # 外鍵檢查不關,延到提交前整體檢查
-    for table, columns, extra_cols, extra_exprs in (
-            ("Sale", _SALE_V27_COLUMNS, ",business_date", ",date(ts)"),
-            ("StockMovement", _MOVE_V27_COLUMNS, "", "")):
-        seq = conn.execute("SELECT seq FROM sqlite_sequence WHERE name=?", (table,)).fetchone()
-        conn.execute(f"CREATE TEMP TABLE _old AS SELECT * FROM {table}")
-        conn.execute(f"DROP TABLE {table}")
-        conn.execute(_table_ddl(table))
-        conn.execute(f"INSERT INTO {table}({columns}{extra_cols}) SELECT {columns}{extra_exprs} FROM _old")
-        conn.execute("DROP TABLE _old")
-        if seq is not None:
-            conn.execute("DELETE FROM sqlite_sequence WHERE name=?", (table,))
-            conn.execute("INSERT INTO sqlite_sequence(name,seq) VALUES(?,?)", (table, seq[0]))
+    # Sale 要建成 v28 的樣子(還沒有 payment_id):現行定義那一欄是 NOT NULL,這一步填不出來,由 _to_v29 補
+    sale_v28 = "".join(l for l in _table_ddl("Sale").splitlines(keepends=True) if not l.startswith("  payment_id "))
+    _rebuild(conn, "Sale", sale_v28, _SALE_V27_COLUMNS + ",business_date", _SALE_V27_COLUMNS + ",date(ts)")
+    _rebuild(conn, "StockMovement", _table_ddl("StockMovement"), _MOVE_V27_COLUMNS, _MOVE_V27_COLUMNS)
+
+
+def _rebuild(conn, table, ddl, columns, select):
+    """原名重建一張表並搬回資料,保留主鍵與流水號;表上的 trigger、索引隨 DROP 消失,由 SCHEMA 建回。"""
+    seq = conn.execute("SELECT seq FROM sqlite_sequence WHERE name=?", (table,)).fetchone()
+    conn.execute(f"CREATE TEMP TABLE _old AS SELECT * FROM {table}")
+    conn.execute(f"DROP TABLE {table}")
+    conn.execute(ddl)
+    conn.execute(f"INSERT INTO {table}({columns}) SELECT {select} FROM _old")
+    conn.execute("DROP TABLE _old")
+    if seq is not None:
+        conn.execute("DELETE FROM sqlite_sequence WHERE name=?", (table,))
+        conn.execute("INSERT INTO sqlite_sequence(name,seq) VALUES(?,?)", (table, seq[0]))
+
+
+_SALE_V28_COLUMNS = _SALE_V27_COLUMNS + ",business_date,voided_at,void_reason"
+
+
+def _to_v29(conn):
+    """v28→v29:付款方式由 Setting 的三個 JSON 鍵搬進 PaymentMethod,Sale 補編號,已立帳帳日補快照。
+
+    補出來的快照比例一律是升級當下的設定值,不是立帳當時的值(當時沒有留)。
+    """
+    def setting(key, default):
+        row = conn.execute("SELECT value FROM Setting WHERE key=?", (key,)).fetchone()
+        try:
+            value = json.loads(row[0]) if row else default
+        except ValueError:
+            value = default
+        return value if isinstance(value, type(default)) else default
+
+    conn.execute("PRAGMA defer_foreign_keys=ON")
+    names = [n.strip() for n in setting("payments", []) if isinstance(n, str) and n.strip()]
+    names = list(dict.fromkeys(names))
+    if "現金" not in names:
+        names.insert(0, "現金")   # 舊版以這個名稱認現金
+    disabled, fees = set(setting("payments_disabled", [])), setting("payment_fees", {})
+    for table in ("PaymentMethod", "DayClose", "DayClosePayment"):
+        conn.execute(_table_ddl(table))   # v27 一路升上來時 DayClose 還沒建
+    for sort, name in enumerate(names, 1):
+        cash = name == "現金"
+        try:
+            rate = 0 if cash else min(max(round(float(fees.get(name, 0)) * 100), 0), 10000)
+        except (TypeError, ValueError):
+            rate = 0
+        conn.execute("INSERT INTO PaymentMethod(name,sort,active,fee_rate,is_cash) VALUES(?,?,?,?,?)",
+                     (name, sort, 1 if cash else int(name not in disabled), rate, int(cash)))
+    # 舊單上的名稱不在清單裡:替它建一筆停用的付款方式,不留空、不硬對到別人
+    for row in conn.execute("SELECT DISTINCT payment FROM Sale WHERE payment NOT IN (SELECT name FROM PaymentMethod) "
+                            "ORDER BY payment").fetchall():
+        conn.execute("INSERT INTO PaymentMethod(name,sort,active) "
+                     "VALUES(?,(SELECT COALESCE(MAX(sort),0)+1 FROM PaymentMethod),0)", (row[0],))
+    _rebuild(conn, "Sale", _table_ddl("Sale"), _SALE_V28_COLUMNS + ",payment_id",
+             _SALE_V28_COLUMNS + ",(SELECT payment_id FROM PaymentMethod WHERE name=_old.payment)")
+    conn.execute(
+        "INSERT INTO DayClosePayment(business_date,payment_id,name,count,total,fee_rate) "
+        "SELECT s.business_date, p.payment_id, p.name, COUNT(*), SUM(s.total), p.fee_rate "
+        "FROM Sale s JOIN PaymentMethod p ON p.payment_id=s.payment_id "
+        "WHERE s.voided_at IS NULL AND s.business_date IN (SELECT business_date FROM DayClose) "
+        "GROUP BY s.business_date, p.payment_id")
+    conn.execute("DELETE FROM Setting WHERE key IN ('payments','payments_disabled','payment_fees')")
 
 
 # 版號規則:新結構第一版為 BASE_VERSION;MIGRATIONS 為之後的升級步驟,
@@ -511,9 +608,9 @@ def _to_v28(conn):
 # 勿自行 commit/executescript(runner 已包在同一交易裡)。
 # 舊版(v24 以前)的升級步驟已移除:低於 MIN_SUPPORTED_VERSION 的資料庫一律拒絕開啟,
 # 主檔改由 tools/make_standard_db.py 唯讀轉出新母版。
-# v27→v28 是上線前唯一保留的升級步驟(維護者 2026-11-10 裁示),出 1.0.0 時移除。
+# v27→v28→v29 依序保留到正式版才移除(維護者 2026-11-11 裁示),出 1.0.0 時移除。
 BASE_VERSION = 27
-MIGRATIONS = [(28, _to_v28)]
+MIGRATIONS = [(28, _to_v28), (29, _to_v29)]
 
 # 最新版號 = 新結構第一版 + 升級步驟筆數;全新 DB 建 SCHEMA 即為此版
 SCHEMA_VERSION = BASE_VERSION + len(MIGRATIONS)

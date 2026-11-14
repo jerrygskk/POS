@@ -31,6 +31,7 @@ window.PosPages["page-settings"] = {
       // 商品設定單頁
       section: "category",
       passwordForm: { old: "", next: "", confirm: "" },
+      payments: [], newPayment: { name: "", rate: "" },
       selCatId: null, newCatName: "",
       tplFields: [], bigProducts: [],
       newField: { name: "", field_type: "select" },
@@ -155,12 +156,62 @@ window.PosPages["page-settings"] = {
         this.phoneBrands = await API.listPhoneBrands({ all: 1 });
         this.deviceTypes = await API.listDeviceTypes({ all: 1 });
         this.models = await API.listModels({ all: 1 });
+        this.payments = await API.listPayments();
         this._takeSnap();
         if (!this.categories.some(c => c.category_id === this.selCatId))
           this.selCatId = this.categories.length ? this.categories[0].category_id : null;
         if (this.selCatId != null) await this.loadCategoryDetail();
       });
     },
+
+    // ==== 付款方式:每個動作即時存檔,成敗都重讀(失敗時控制項不可停在沒存進去的狀態) ====
+    async paymentOp(work) {
+      this.errorScope = "payments";
+      if (!window.PosAuth.isAdmin) { this.showError("需要管理者權限", "payments"); return; }
+      try { await this.guard(work); }
+      finally { await this.guard(async () => { this.payments = await API.listPayments(); }); }
+    },
+    // 輸入的百分比(最多兩位小數)→ 後端用的整數(百分比×100);空白＝0,格式不對回 null
+    paymentRate(text) {
+      const t = String(text).trim();
+      if (t === "") return 0;
+      return /^\d{1,3}(\.\d{1,2})?$/.test(t) && Number(t) <= 100 ? Math.round(Number(t) * 100) : null;
+    },
+    async addPayment() {
+      const name = this.newPayment.name.trim(), fee_rate = this.paymentRate(this.newPayment.rate);
+      if (!name) { this.showError("請輸入付款方式名稱", "payments"); return; }
+      if (fee_rate === null) { this.showError("抽成比例請輸入 0～100，最多兩位小數", "payments"); return; }
+      await this.paymentOp(async () => {
+        await API.createPayment({ name, fee_rate });
+        this.newPayment = { name: "", rate: "" };
+      });
+    },
+    async setPaymentRate(p, event) {
+      const fee_rate = this.paymentRate(event.target.value);
+      if (fee_rate === null) {
+        event.target.value = p.fee_rate / 100;   // 格式不對:還原顯示,不送出
+        this.showError("抽成比例請輸入 0～100，最多兩位小數", "payments"); return;
+      }
+      if (fee_rate === p.fee_rate) { event.target.value = p.fee_rate / 100; return; }
+      await this.paymentOp(() => API.updatePayment({ payment_id: p.payment_id, fee_rate }));
+    },
+    async renamePayment(p, event) {
+      const name = event.target.value.trim();
+      if (!name || name === p.name) { event.target.value = p.name; return; }   // 空白或沒變:還原顯示,不送出
+      await this.paymentOp(() => API.updatePayment({ payment_id: p.payment_id, name }));
+      // 失敗時名稱沒變,畫面不會自己把輸入框改回來;p 是重讀前的舊物件,要從新清單取名稱
+      const now = this.payments.find(x => x.payment_id === p.payment_id);
+      if (now) event.target.value = now.name;
+    },
+    async deletePayment(p) {
+      if (p.is_cash || p.used) return;
+      if (!await PosConfirm.ask(`確定刪除付款方式「${p.name}」?刪除後無法復原。`, { danger: true })) return;
+      await this.paymentOp(() => API.deletePayment(p.payment_id));
+    },
+    async togglePayment(p) {
+      await this.paymentOp(() => API.updatePayment({ payment_id: p.payment_id, active: !p.active }));
+    },
+    async sortPayments(ids) { await this.paymentOp(() => API.sortPayments(ids)); },
 
     // ==== 商品設定:種類 ====
     selectSection(name) {

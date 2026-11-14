@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from lib.application import BaseFacade
 from lib.application_errors import ConflictError, ValidationError
 from lib.product_rules import date_range, is_int, require_employee
-from lib.sales_service import CASH_PAYMENT, SalesRepository
+from lib.sales_service import SalesRepository
 
 REASON_MAX = 60
 AMOUNT_MAX = 99_999_999
@@ -93,10 +93,17 @@ class DayCloseService:
         row = self.conn.execute("SELECT * FROM DayClose WHERE business_date=?", (business_date,)).fetchone()
         return dict(row) if row else None
 
-    def _cash_sales(self, business_date):
-        return self.conn.execute(
-            "SELECT COALESCE(SUM(total),0) FROM Sale WHERE business_date=? AND payment=? AND voided_at IS NULL",
-            (business_date, CASH_PAYMENT)).fetchone()[0]
+    def _by_payment(self, business_date):
+        """該帳日各付款方式的筆數與金額(不含作廢),依設定順序、含沒交易的;從銷售單即時加總。"""
+        found = {row["payment_id"]: (row["c"], row["t"]) for row in self.conn.execute(
+            "SELECT payment_id, COUNT(*) c, COALESCE(SUM(total),0) t FROM Sale "
+            "WHERE business_date=? AND voided_at IS NULL GROUP BY payment_id", (business_date,))}
+        return [{**p, "count": found.get(p["payment_id"], (0, 0))[0], "total": found.get(p["payment_id"], (0, 0))[1]}
+                for p in SalesRepository(self.conn).payments()]
+
+    @staticmethod
+    def _cash_of(by_payment):
+        return sum(b["total"] for b in by_payment if b["is_cash"])
 
     def current(self):
         return {"business_date": current_business_date(self.conn), "today": today(self.conn)}
@@ -105,12 +112,7 @@ class DayCloseService:
         # 同一次預覽的數字要出自同一個時間點:先開讀取交易
         self.conn.execute("BEGIN")
         record = self._record(business_date)
-        rows = self.conn.execute(
-            "SELECT payment, COUNT(*) c, COALESCE(SUM(total),0) t FROM Sale "
-            "WHERE business_date=? AND voided_at IS NULL GROUP BY payment", (business_date,)).fetchall()
-        found = {row["payment"]: (row["c"], row["t"]) for row in rows}
-        payments = SalesRepository(self.conn).payments()
-        names = payments + [p for p in found if p not in payments]
+        by_payment = self._by_payment(business_date)
         void = self.conn.execute(
             "SELECT COUNT(*), COALESCE(SUM(total),0) FROM Sale WHERE business_date=? AND voided_at IS NOT NULL",
             (business_date,)).fetchone()
@@ -123,9 +125,9 @@ class DayCloseService:
                 # 已立帳的帳日顯示當時的快照,不拿現在的設定值
                 "float_amount": record["float_amount"] if record else cash_float(self.conn),
                 "float_setting": cash_float(self.conn),
-                "cash_sales": record["cash_sales"] if record else self._cash_sales(business_date),
-                "by_payment": [{"payment": p, "count": found.get(p, (0, 0))[0], "total": found.get(p, (0, 0))[1]}
-                               for p in names],
+                "cash_sales": record["cash_sales"] if record else self._cash_of(by_payment),
+                "by_payment": [{"payment_id": b["payment_id"], "payment": b["name"], "count": b["count"],
+                                "total": b["total"]} for b in by_payment],
                 "void_count": void[0], "void_total": void[1],
                 "unclosed": sorted(unclosed[:UNCLOSED_SHOWN]), "unclosed_count": len(unclosed)}
 
@@ -136,12 +138,19 @@ class DayCloseService:
             raise ValidationError("不可替未來的帳日立帳")
         if is_closed(self.conn, business_date):
             raise ConflictError("此帳日已立帳")
-        float_amount, cash_sales = cash_float(self.conn), self._cash_sales(business_date)
+        # 現金銷售與快照出自同一份加總:兩邊不可能對不上
+        by_payment = self._by_payment(business_date)
+        float_amount, cash_sales = cash_float(self.conn), self._cash_of(by_payment)
         if body["expected"] != {"float_amount": float_amount, "cash_sales": cash_sales}:
             raise ConflictError("金額已變動，請重新確認")
         diff = body["counted_total"] - float_amount - cash_sales
         if diff and not body["reason"]:
             raise ValidationError("有短溢時請填寫原因")
+        # 快照先寫、主檔最後寫:主檔一寫入,資料庫就不再讓該帳日加明細。只存當天有交易的
+        self.conn.executemany(
+            "INSERT INTO DayClosePayment(business_date,payment_id,name,count,total,fee_rate) VALUES(?,?,?,?,?,?)",
+            [(business_date, b["payment_id"], b["name"], b["count"], b["total"], b["fee_rate"])
+             for b in by_payment if b["count"]])
         self.conn.execute(
             "INSERT INTO DayClose(business_date,employee,float_amount,counted_total,cash_sales,diff,reason) "
             "VALUES(?,?,?,?,?,?,?)",
@@ -158,21 +167,18 @@ class DayCloseService:
         self.conn.execute("BEGIN")   # 立帳紀錄與各付款方式金額出自同一個時間點
         records = [dict(row) for row in self.conn.execute(
             f"SELECT * FROM DayClose WHERE 1=1{where} ORDER BY business_date DESC", args)]
-        # 立帳後該帳日的銷售單已鎖住,各付款方式金額直接從銷售單加總(不含已作廢、不扣退貨)
-        found = {}
-        for row in self.conn.execute(
-                "SELECT business_date, payment, SUM(total) t FROM Sale WHERE voided_at IS NULL "
-                f"AND business_date IN (SELECT business_date FROM DayClose){where} "
-                "GROUP BY business_date, payment", args):
-            found[(row["business_date"], row["payment"])] = row["t"]
-        repo = SalesRepository(self.conn)
-        payments, fees = repo.payments(), repo.payment_fees()
-        names = payments + sorted({p for _, p in found} - set(payments))
-        # 每一列的付款方式順序相同:設定清單在前(含停用的,金額為 0),清單外的舊付款方式排最後。
-        # fee_rate 是手續費率(百分比);手續費在提領時才扣,由畫面對查詢區間的合計算一次
+        # 金額與抽成比例只讀立帳當下的快照:不回頭加總銷售單,也不讀現在的比例(改比例不可動到舊報表)
+        found = {(row["business_date"], row["payment_id"]): (row["total"], row["fee_rate"]) for row in self.conn.execute(
+            f"SELECT business_date, payment_id, total, fee_rate FROM DayClosePayment WHERE 1=1{where}", args)}
+        # 每一列的欄位與順序相同:啟用中的付款方式,加上停用但這段期間有交易的(用過的刪不掉,快照裡的編號一定找得到)。
+        # 欄名用現在的名稱,那天沒交易的補 0。fee_rate 是百分比×100,抽成由畫面逐日相乘加總後算一次
+        seen = {payment_id for _, payment_id in found}
+        payments = [p for p in SalesRepository(self.conn).payments() if p["active"] or p["payment_id"] in seen]
         for record in records:
-            record["by_payment"] = [{"payment": p, "total": found.get((record["business_date"], p), 0),
-                                     "fee_rate": fees.get(p, 0)} for p in names]
+            record["by_payment"] = [
+                {"payment_id": p["payment_id"], "payment": p["name"],
+                 "total": found.get((record["business_date"], p["payment_id"]), (0, 0))[0],
+                 "fee_rate": found.get((record["business_date"], p["payment_id"]), (0, 0))[1]} for p in payments]
             record["sales_total"] = sum(b["total"] for b in record["by_payment"])
         return records
 

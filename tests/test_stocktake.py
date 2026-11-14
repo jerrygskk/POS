@@ -108,7 +108,7 @@ class TestStocktake(FacadeTestCase):
         return self.invoke("stocktake.close", {"session_id": self.sid})
 
     def sell(self, qty):
-        return self.invoke("sales.checkout", {"employee": 1, "payment": "現金", "paid": qty * 10,
+        return self.invoke("sales.checkout", {"employee": 1, "payment_id": 1, "paid": qty * 10,
             "items": [{"variant_id": self.v1, "qty": qty, "unit_price": 10}]})
 
     def test_employee_approve_denied_and_both_roles_can_withdraw(self):

@@ -3,7 +3,7 @@ import datetime
 import sqlite3
 import unittest
 
-from base import FacadeTestCase
+from base import FacadeTestCase, PAY
 from lib.db import get_conn
 from lib.desktop_application import DesktopFacade
 from lib.desktop_bridge import DesktopBridge
@@ -25,15 +25,15 @@ class DayCloseTest(FacadeTestCase):
         self.addCleanup(self.conn.close)
 
     def checkout(self, payment="現金", qty=1):
-        return self.invoke("sales.checkout", {"payment": payment, "paid": 100 * qty, "employee": 1,
+        return self.invoke("sales.checkout", {"payment_id": PAY[payment], "paid": 100 * qty, "employee": 1,
                                               "items": [{"variant_id": self.vid, "qty": qty, "unit_price": 100}]})["sale_id"]
 
     def raw_sale(self, business_date, payment="現金", total=100, voided=False):
         """直接寫一張指定帳日的銷售單(沒有明細);回傳單號。"""
         void = ("'2026-01-01 00:00:00','重複結帳'" if voided else "NULL,NULL")
         sale_id = self.conn.execute(
-            "INSERT INTO Sale(ts,payment,total,paid,business_date,voided_at,void_reason) "
-            f"VALUES(?,?,?,?,?,{void})", (business_date + " 12:00:00", payment, total, total, business_date)).lastrowid
+            "INSERT INTO Sale(ts,payment_id,payment,total,paid,business_date,voided_at,void_reason) "
+            f"VALUES(?,?,?,?,?,?,{void})", (business_date + " 12:00:00", PAY[payment], payment, total, total, business_date)).lastrowid
         self.conn.commit()
         return sale_id
 
@@ -83,10 +83,10 @@ class DayCloseTest(FacadeTestCase):
         p = self.invoke("dayclose.preview", {"business_date": d})
         self.assertEqual((p["float_amount"], p["float_setting"], p["cash_sales"], p["closed"], p["record"]),
                          (3000, 3000, 350, False, None))
-        self.assertEqual(p["by_payment"], [{"payment": "現金", "count": 2, "total": 350},
-                                           {"payment": "轉帳", "count": 1, "total": 400},
-                                           {"payment": "LINE Pay", "count": 0, "total": 0},
-                                           {"payment": "台灣Pay", "count": 0, "total": 0}])
+        self.assertEqual(p["by_payment"], [{"payment_id": 1, "payment": "現金", "count": 2, "total": 350},
+                                           {"payment_id": 2, "payment": "轉帳", "count": 1, "total": 400},
+                                           {"payment_id": 3, "payment": "LINE Pay", "count": 0, "total": 0},
+                                           {"payment_id": 4, "payment": "台灣Pay", "count": 0, "total": 0}])
         self.assertEqual((p["void_count"], p["void_total"]), (1, 999))
         self.assertEqual((p["unclosed"], p["unclosed_count"]), ([day(-2), d], 2))
 
@@ -182,7 +182,6 @@ class DayCloseTest(FacadeTestCase):
         self.raw_sale(d, "現金", 250)
         self.raw_sale(d, "轉帳", 400)
         self.raw_sale(d, "LINE Pay", 30)
-        self.raw_sale(d, "舊付款", 7)                 # 設定清單外的付款方式排最後
         self.raw_sale(d, "現金", 999, voided=True)    # 已作廢不計
         self.raw_sale(other, "轉帳", 60)
         self.raw_sale(day(-3), "現金", 5)             # 未立帳的帳日不列
@@ -190,19 +189,19 @@ class DayCloseTest(FacadeTestCase):
         self.close(other, 0)
         rows = self.invoke("dayclose.list", {})
         self.assertEqual([r["business_date"] for r in rows], [d, other])
-        # 停用的台灣Pay 仍有一欄(金額 0);手續費率跟著付款方式,沒設定的是 0
-        names = ["現金", "轉帳", "LINE Pay", "台灣Pay", "舊付款"]
-        rates = (0, 0, 2.2, 0, 0)
-        def expect(totals):
-            return [{"payment": p, "total": t, "fee_rate": f} for p, t, f in zip(names, totals, rates)]
-        self.assertEqual(rows[0]["by_payment"], expect((350, 400, 30, 0, 7)))
-        self.assertEqual(rows[1]["by_payment"], expect((0, 60, 0, 0, 0)))
-        self.assertEqual([r["sales_total"] for r in rows], [787, 60])
+        # 停用且這段期間沒交易的台灣Pay 不列;抽成比例(百分比×100)來自那天的快照,那天沒交易的是 0
+        names = ["現金", "轉帳", "LINE Pay"]
+        def expect(totals, rates):
+            return [{"payment_id": i, "payment": p, "total": t, "fee_rate": f}
+                    for i, (p, t, f) in enumerate(zip(names, totals, rates), 1)]
+        self.assertEqual(rows[0]["by_payment"], expect((350, 400, 30), (0, 0, 220)))
+        self.assertEqual(rows[1]["by_payment"], expect((0, 60, 0), (0, 0, 0)))
+        self.assertEqual([r["sales_total"] for r in rows], [780, 60])
         self.assertEqual(rows[0]["by_payment"][0]["total"], rows[0]["cash_sales"])
         # 日期條件只影響列出的帳日,不影響當天金額
         only = self.invoke("dayclose.list", {"date_from": other, "date_to": other})
         self.assertEqual([(r["business_date"], r["sales_total"]) for r in only], [(other, 60)])
-        self.assertEqual([b["payment"] for b in only[0]["by_payment"]], ["現金", "轉帳", "LINE Pay", "台灣Pay"])
+        self.assertEqual([b["payment"] for b in only[0]["by_payment"]], ["現金", "轉帳", "LINE Pay"])
 
     def test_set_float_validation(self):
         for amount in (-1, "100", True, 1.5, 10 ** 9):
@@ -226,8 +225,8 @@ class DayCloseTest(FacadeTestCase):
         locked = self.raw_sale(d, "現金", 100)
         free = self.raw_sale(other, "現金", 100)
         self.close(d, 100)
-        self.blocked("INSERT INTO Sale(payment,total,paid,business_date) VALUES('現金',1,1,?)", (d,))
-        for column, value in (("payment", "轉帳"), ("total", 1), ("paid", 1), ("change", 1), ("order_discount", 1),
+        self.blocked("INSERT INTO Sale(payment_id,payment,total,paid,business_date) VALUES(1,'現金',1,1,?)", (d,))
+        for column, value in (("payment", "轉帳"), ("payment_id", 2), ("total", 1), ("paid", 1), ("change", 1), ("order_discount", 1),
                               ("member_discount", 1), ("ts", "2026-01-01 00:00:00"), ("business_date", other),
                               ("member_id", None), ("voided_at", "x")):
             if column == "member_id":
@@ -237,7 +236,7 @@ class DayCloseTest(FacadeTestCase):
         self.blocked("UPDATE Sale SET business_date=? WHERE sale_id=?", (d, free))   # 把別張單移進已立帳帳日
         self.blocked("DELETE FROM Sale WHERE sale_id=?", (locked,))
         # 兩種 REPLACE 撞上已立帳單的主鍵
-        self.blocked("INSERT OR REPLACE INTO Sale(sale_id,payment,total,paid,business_date) VALUES(?,'現金',1,1,?)",
+        self.blocked("INSERT OR REPLACE INTO Sale(sale_id,payment_id,payment,total,paid,business_date) VALUES(?,1,'現金',1,1,?)",
                      (locked, other))
         self.blocked("UPDATE OR REPLACE Sale SET sale_id=? WHERE sale_id=?", (locked, free))
         # 員工代號不限期限;同值更新也不擋
@@ -275,8 +274,9 @@ class DayCloseTest(FacadeTestCase):
         self.blocked("UPDATE Sale SET void_reason='改' WHERE sale_id=?", (sale,))
         self.blocked("UPDATE Sale SET voided_at='2027-01-01' WHERE sale_id=?", (sale,))
         self.blocked("UPDATE Sale SET payment='轉帳' WHERE sale_id=?", (sale,))
+        self.blocked("UPDATE Sale SET payment_id=2 WHERE sale_id=?", (sale,))
         self.blocked("DELETE FROM Sale WHERE sale_id=?", (sale,))
-        self.blocked("INSERT OR REPLACE INTO Sale(sale_id,payment,total,paid,business_date) VALUES(?,'現金',1,1,?)",
+        self.blocked("INSERT OR REPLACE INTO Sale(sale_id,payment_id,payment,total,paid,business_date) VALUES(?,1,'現金',1,1,?)",
                      (sale, day(-1)))
         other = self.raw_sale(day(-1))
         self.blocked("UPDATE OR REPLACE Sale SET sale_id=? WHERE sale_id=?", (sale, other))

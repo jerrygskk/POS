@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>膜型機門市管理系統</title>
-<link rel="stylesheet" href="css/pos.css?v=344">
+<link rel="stylesheet" href="css/pos.css?v=352">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=344" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=352" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -77,7 +77,7 @@
       :value="memberQuery" @input="setMemberQuery($event)" @keydown.enter="lookupMember" :disabled="draft.submitting">
       <button @click="lookupMember" :disabled="draft.submitting">查詢會員</button></span>
     <label>付款方式
-      <select v-model="payment" :disabled="draft.submitting"><option v-for="p in payments" :key="p">{{ p }}</option></select>
+      <select v-model="payment" :disabled="draft.submitting"><option v-for="p in payments" :key="p.payment_id" :value="p.payment_id">{{ p.name }}</option></select>
     </label>
     <div class="total">應收 {{ total }} 元</div>
     <label>實收 <input type="text" inputmode="numeric" class="w80" :value="isCash ? paid : total" @input="setPaid($event)" :disabled="draft.submitting || !isCash"></label>
@@ -362,7 +362,7 @@
         <label>起 <input type="date" v-model="dateFrom"></label>
         <label>迄 <input type="date" v-model="dateTo"></label>
         <select v-if="kind==='sales'" v-model="payment"><option value="">全部付款方式</option>
-          <option v-for="p in payments" :key="p">{{ p }}</option></select>
+          <option v-for="p in payments" :key="p.payment_id" :value="p.payment_id">{{ p.name }}</option></select>
         <input v-if="kind==='sales'" v-model="memberPhone" class="w120" inputmode="numeric" placeholder="會員電話" @keydown.enter="reload">
         <span v-if="kind==='returns'" class="mode-switch">
           <button type="button" class="chip-toggle" :class="{on: returnKind==='normal'}" @click="selectReturnKind('normal')">一般退貨</button>
@@ -374,7 +374,7 @@
       <div v-if="(kind==='sales' && summary) || rowKeys.length" class="records-bar">
         <div v-if="kind==='sales' && summary" class="pay-panel">
           <div>合計 {{ summary.count }} 筆，共 {{ summary.total }} 元<template v-if="summary.void_count">（已作廢 {{ summary.void_count }} 筆 {{ summary.void_total }} 元）</template></div>
-          <div class="pay-breakdown"><span v-for="b in summary.by_payment" :key="b.payment">{{ b.payment }}：{{ b.count }} 筆 {{ b.total }} 元</span></div>
+          <div class="pay-breakdown"><span v-for="b in summary.by_payment" :key="b.payment_id">{{ b.payment }}：{{ b.count }} 筆 {{ b.total }} 元</span></div>
         </div>
         <div v-if="rowKeys.length" class="records-bar-actions">
           <button @click="expandAll">展開全部</button>
@@ -397,7 +397,7 @@
           </span>
         </div>
         <div v-if="dc.preview" class="pay-breakdown dayclose-breakdown">
-          <span v-for="b in dc.preview.by_payment" :key="b.payment">{{ b.payment }}：{{ b.count }} 筆 {{ b.total }} 元</span>
+          <span v-for="b in dc.preview.by_payment" :key="b.payment_id">{{ b.payment }}：{{ b.count }} 筆 {{ b.total }} 元</span>
           <span v-if="dc.preview.void_count">已作廢：{{ dc.preview.void_count }} 筆 {{ dc.preview.void_total }} 元</span>
         </div>
         <div v-if="dc.preview && !dc.preview.closed" class="scan-row dayclose-row">
@@ -430,7 +430,7 @@
               <tr>
                 <td>{{ r.business_date }}</td><td>{{ minuteText(r.closed_at).slice(5) }}</td><td>{{ r.employee }}</td>
                 <td class="num">{{ r.float_amount }}</td><td class="num">{{ r.counted_total }}</td>
-                <td v-for="b in r.by_payment" :key="b.payment" class="num">{{ b.total }}</td><td class="num">{{ r.sales_total }}</td>
+                <td v-for="b in r.by_payment" :key="b.payment_id" class="num">{{ b.total }}</td><td class="num">{{ r.sales_total }}</td>
                 <td class="num" :class="{neg: r.diff}">{{ signedText(r.diff) }}</td><td></td>
               </tr>
               <tr v-if="r.reason" class="dayclose-reason-row"><td :colspan="8 + dcPayments.length">短溢原因：{{ r.reason }}</td></tr>
@@ -444,7 +444,7 @@
             </tr>
             <tr v-if="dcTotals.fee_total" class="dayclose-fee">
               <td colspan="5">抽成比例</td>
-              <td v-for="(t, i) in dcTotals.rates" :key="i" class="num">{{ t }}</td><td></td><td></td><td></td>
+              <td v-for="(list, i) in dcTotals.rates" :key="i" class="num"><div v-for="t in list" :key="t">{{ t }}</div></td><td></td><td></td><td></td>
             </tr>
             <tr v-if="dcTotals.fee_total" class="dayclose-fee">
               <td colspan="5">抽成金額</td>
@@ -755,6 +755,10 @@
            @click="selectSection('models')">
         <span class="cat-name">適用機型</span>
       </div>
+      <div class="cat-item" :class="{active: section==='payments'}"
+           @click="selectSection('payments')">
+        <span class="cat-name">付款方式</span>
+      </div>
       <div class="cat-item" :class="{active: section==='password'}"
            @click="selectSection('password')">
         <span class="cat-name">管理者密碼</span>
@@ -788,7 +792,7 @@
       </div>
       <div v-if="pageError && errorScope==='category'" class="error-bar section-bar">⚠ {{ pageError }}</div>
       <template v-if="specEditing">
-      <small class="hint spec-hint">可新增、修改、刪除規格</small>
+      <small class="hint spec-hint">修改即時儲存。可新增、修改、刪除規格。</small>
       <div class="inline-add add-before-list">
         <input v-model="newField.name" placeholder="新規格名稱"
                @keyup.enter="addTemplateField">
@@ -871,6 +875,40 @@
       </div>
     </section>
 
+    <!-- 基礎資料:付款方式(新增、排序、停用、改抽成比例;每個動作即時存檔) -->
+    <section class="cat-detail" v-else-if="section==='payments'">
+      <div class="card-head"><h3>付款方式</h3></div>
+      <div v-if="pageError && errorScope==='payments'" class="error-bar section-bar">⚠ {{ pageError }}</div>
+      <small class="hint spec-hint">修改即時儲存。抽成比例只套用在之後立帳的帳日，已立帳的不變。停用後結帳選不到，立帳紀錄在查詢期間沒有金額時不顯示該欄。已有交易紀錄的不能刪除，只能停用。</small>
+      <div class="inline-add add-before-list">
+        <input v-model="newPayment.name" maxlength="10" placeholder="新付款方式名稱" @keyup.enter="addPayment">
+        <input class="w60" v-model="newPayment.rate" inputmode="decimal" placeholder="抽成" @keyup.enter="addPayment">
+        <span class="pay-unit">%</span>
+        <button class="primary" @click="addPayment">新增</button>
+      </div>
+      <sortable-list :items="payments" item-key="payment_id" auto-save @save="sortPayments">
+        <template #row="{ item: p }">
+          <input class="name" :value="p.name" maxlength="10"
+                 @change="renamePayment(p, $event)" @keyup.enter="$event.target.blur()">
+          <!-- 現金列的控制項只佔位不顯示(改放一句說明):每列一樣寬,名稱框才會等寬 -->
+          <span class="pay-ctl" :class="{locked: p.is_cash}">
+            <span v-if="p.is_cash" class="pay-note">現金支付不可停用</span>
+            <span class="switch-label on">抽成</span>
+            <input class="w60" :value="p.fee_rate / 100" inputmode="decimal" :disabled="p.is_cash"
+                   @change="setPaymentRate(p, $event)" @keyup.enter="$event.target.blur()">
+            <span class="pay-unit">%</span>
+            <button class="switch" type="button" role="switch" :disabled="p.is_cash"
+                    :class="{on: p.active}" :aria-checked="p.active"
+                    @click.stop="togglePayment(p)"><span class="knob"></span></button>
+            <span class="switch-label" :class="{on: p.active}">{{ p.active ? '啟用' : '停用' }}</span>
+            <button class="btn-x" :disabled="p.is_cash || p.used"
+                    :title="p.used ? '已有交易紀錄，只能停用' : '刪除付款方式'"
+                    @click.stop="deletePayment(p)">✕</button>
+          </span>
+        </template>
+      </sortable-list>
+    </section>
+
     <!-- 基礎資料:廠牌 -->
     <section class="cat-detail" v-else-if="section==='brands'">
       <div class="card-head"><h3>廠牌(供應商)</h3>
@@ -920,6 +958,7 @@
       </div>
       <div v-if="pageError && errorScope==='deviceTypes'" class="error-bar section-bar">⚠ {{ pageError }}</div>
       <template v-if="editDeviceTypes">
+      <small class="hint spec-hint">修改即時儲存。</small>
       <div class="inline-add add-before-list">
         <input class="w60" v-model="newSeq.deviceTypes" placeholder="排序">
         <input v-model="newItem.deviceTypes" placeholder="新裝置類型名稱(如 平板)"
@@ -950,6 +989,7 @@
       </div>
       <div v-if="pageError && errorScope==='phoneBrands'" class="error-bar section-bar">⚠ {{ pageError }}</div>
       <template v-if="editPhoneBrands">
+      <small class="hint spec-hint">修改即時儲存。</small>
       <div class="inline-add add-before-list">
         <input class="w60" v-model="newSeq.phoneBrands" placeholder="排序">
         <input v-model="newItem.phoneBrands" placeholder="新機型品牌名稱(如 Apple)"
@@ -1061,29 +1101,29 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=344"></script>
-<script src="js/api.js?v=344"></script>
-<script src="js/confirm.js?v=344"></script>
-<script src="js/auth.js?v=344"></script>
-<script src="js/pos_shared.js?v=344"></script>
-<script src="js/catalogfields.js?v=344"></script>
-<script src="js/checkout.js?v=344"></script>
-<script src="js/receive.js?v=344"></script>
-<script src="js/stocktake.js?v=344"></script>
-<script src="js/returns.js?v=344"></script>
-<script src="js/records.js?v=344"></script>
-<script src="js/catalog.js?v=344"></script>
-<script src="js/sortable.js?v=344"></script>
-<script src="js/combobox.js?v=344"></script>
-<script src="js/optpicker.js?v=344"></script>
-<script src="js/modelpicker.js?v=344"></script>
-<script src="js/employeepicker.js?v=344"></script>
-<script src="js/membereditor.js?v=344"></script>
-<script src="js/doccorrect.js?v=344"></script>
-<script src="js/attrfields.js?v=344"></script>
-<script src="js/settings.js?v=344"></script>
-<script src="js/labels.js?v=344"></script>
-<script src="js/app_update.js?v=344"></script>
-<script src="js/app.js?v=344"></script>
+<script src="js/vue.global.prod.js?v=352"></script>
+<script src="js/api.js?v=352"></script>
+<script src="js/confirm.js?v=352"></script>
+<script src="js/auth.js?v=352"></script>
+<script src="js/pos_shared.js?v=352"></script>
+<script src="js/catalogfields.js?v=352"></script>
+<script src="js/checkout.js?v=352"></script>
+<script src="js/receive.js?v=352"></script>
+<script src="js/stocktake.js?v=352"></script>
+<script src="js/returns.js?v=352"></script>
+<script src="js/records.js?v=352"></script>
+<script src="js/catalog.js?v=352"></script>
+<script src="js/sortable.js?v=352"></script>
+<script src="js/combobox.js?v=352"></script>
+<script src="js/optpicker.js?v=352"></script>
+<script src="js/modelpicker.js?v=352"></script>
+<script src="js/employeepicker.js?v=352"></script>
+<script src="js/membereditor.js?v=352"></script>
+<script src="js/doccorrect.js?v=352"></script>
+<script src="js/attrfields.js?v=352"></script>
+<script src="js/settings.js?v=352"></script>
+<script src="js/labels.js?v=352"></script>
+<script src="js/app_update.js?v=352"></script>
+<script src="js/app.js?v=352"></script>
 </body>
 </html>

@@ -26,7 +26,7 @@ class RequiredReminderSalesTests(FacadeTestCase):
 
     def _checkout(self):
         return self.invoke("sales.checkout", {
-            "employee": 1, "payment": "現金", "paid": 100,
+            "employee": 1, "payment_id": 1, "paid": 100,
             "items": [{"variant_id": self.vid, "qty": 1, "unit_price": 100}],
         })
 

@@ -13,7 +13,7 @@ class TestFixG1Sales(FacadeTestCase):
         self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": self.vid, "qty": 10}]})
 
     def _sale(self, **kw):
-        body = {"payment": "現金", "paid": 500, "employee": 1,
+        body = {"payment_id": 1, "paid": 500, "employee": 1,
                 "items": [{"variant_id": self.vid, "qty": 1, "unit_price": 500}]}
         body.update(kw)
         return self.invoke("sales.checkout", body)
@@ -29,7 +29,7 @@ class TestFixG1Sales(FacadeTestCase):
         self.assertEqual(self._sale(paid=500)["change"], 0)
 
     def test_non_cash_ignores_paid(self):
-        self.assertEqual(self._sale(payment="LINE Pay", paid=0)["change"], 0)
+        self.assertEqual(self._sale(payment_id=3, paid=0)["change"], 0)
 
     def test_member_discount_allowed_without_member(self):
         self.assertEqual(self._sale(member_discount=10, paid=490)["total"], 490)

@@ -87,7 +87,7 @@ class MigrationV28Test(unittest.TestCase):
             conn.close()
 
     def test_versions(self):
-        self.assertEqual((db_schema.BASE_VERSION, db_schema.MIN_SUPPORTED_VERSION, db_schema.SCHEMA_VERSION), (27, 27, 28))
+        self.assertEqual((db_schema.BASE_VERSION, db_schema.MIN_SUPPORTED_VERSION, db_schema.SCHEMA_VERSION), (27, 27, 29))
 
     def test_schema_statements_cover_every_object(self):
         fresh = self.root / "fresh.db"
@@ -104,7 +104,7 @@ class MigrationV28Test(unittest.TestCase):
         others = {t: self.rows(f"SELECT * FROM {t}") for t in
                   ("SaleItem", "ReturnItem", "ReceiptItem", "StocktakeItem", "Variant", "Member")}
         init_db(self.db, require_existing=True)   # 提交成功
-        self.assertEqual(read_schema_version(self.db), 28)
+        self.assertEqual(read_schema_version(self.db), 29)   # 一路升到最新版
         self.assertEqual(self.rows(
             "SELECT sale_id,ts,payment,order_discount,member_discount,total,paid,change,employee,member_id "
             "FROM Sale ORDER BY sale_id"), sales)
@@ -129,7 +129,7 @@ class MigrationV28Test(unittest.TestCase):
         init_db(self.db, require_existing=True)   # 關閉後重開,不再升級也不出錯
         facade = DesktopFacade(self.db)
         self.assertEqual(facade.invoke("stock.detail", {"variant_id": 1})["stock"], 9)
-        sold = facade.invoke("sales.checkout", {"payment": "現金", "paid": 100, "employee": 1,
+        sold = facade.invoke("sales.checkout", {"payment_id": 1, "paid": 100, "employee": 1,
                                                 "items": [{"variant_id": 1, "qty": 1, "unit_price": 100}]})
         self.assertEqual(sold["sale_id"], 8)   # 流水號接續,不重用刪過的 7
         self.assertEqual(facade.invoke("stock.detail", {"variant_id": 1})["stock"], 8)
@@ -153,7 +153,7 @@ class MigrationV28Test(unittest.TestCase):
         self.assertEqual(dump(self.db), before)   # 版號、表、索引、trigger、資料、流水號全部與升級前相同
         self.assertEqual(read_schema_version(self.db), 27)
         init_db(self.db, require_existing=True)   # 之後仍可正常升級
-        self.assertEqual(read_schema_version(self.db), 28)
+        self.assertEqual(read_schema_version(self.db), 29)   # 一路升到最新版
 
     def test_foreign_key_violation_rolls_back(self):
         conn = sqlite3.connect(self.db)   # 未開外鍵檢查:造一筆指向不存在銷售單的明細
@@ -178,10 +178,10 @@ class MigrationV28Test(unittest.TestCase):
     def test_startup_backs_up_before_upgrading(self):
         paths = RuntimePaths.from_root(self.root)
         main.prepare_runtime(paths)
-        backups = sorted(paths.backup_dir.glob("pos_upgrade_*_v27-v28.db"))
+        backups = sorted(paths.backup_dir.glob("pos_upgrade_*_v27-v29.db"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(read_schema_version(backups[0]), 27)
-        self.assertEqual(read_schema_version(paths.db_path), 28)
+        self.assertEqual(read_schema_version(paths.db_path), 29)
 
 
 if __name__ == "__main__":

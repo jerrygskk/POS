@@ -45,7 +45,7 @@ class StockSourcesTest(FacadeTestCase):
         r = self.invoke("stock.receive", {"employee": 1, "items": [
             {"variant_id": self.v1, "qty": 5}, {"variant_id": self.v1, "qty": 2}, {"variant_id": self.v2, "qty": 5}]})
         self.assertEqual((self.stock(self.v1), self.stock(self.v2)), (7, 5))
-        sale = self.invoke("sales.checkout", {"payment": "現金", "paid": 100, "employee": 2,
+        sale = self.invoke("sales.checkout", {"payment_id": 1, "paid": 100, "employee": 2,
                                               "items": [{"variant_id": self.v1, "qty": 1, "unit_price": 100}]})
         self.assertEqual(self.stock(self.v1), 6)
         ret = self.invoke("returns.create", {"employee": 3})["return_id"]
@@ -144,7 +144,7 @@ class StockSourcesTest(FacadeTestCase):
         for table, key, row_id, cols in locked:
             for col, value in cols.items():
                 if table == "SaleItem" and col == "sale_id":
-                    value = conn.execute("INSERT INTO Sale(payment,total,paid,business_date) VALUES('現金',0,0,'2026-01-01')").lastrowid
+                    value = conn.execute("INSERT INTO Sale(payment_id,payment,total,paid,business_date) VALUES(1,'現金',0,0,'2026-01-01')").lastrowid
                 with self.subTest(f"{table}.{col}"), self.assertRaises(sqlite3.IntegrityError):
                     conn.execute(f"UPDATE {table} SET {col}=? WHERE {key}=?", (value, row_id))
             if table != "Sale":
@@ -170,7 +170,7 @@ class StockSourcesTest(FacadeTestCase):
                              "SELECT receipt_item_id,receipt_id,variant_id,8 FROM ReceiptItem WHERE receipt_item_id=?", (ids["receipt_item"],)),
             "銷售明細主鍵": ("INSERT OR REPLACE INTO SaleItem(item_id,sale_id,variant_id,qty,unit_price) "
                              "SELECT item_id,sale_id,variant_id,9,1 FROM SaleItem WHERE item_id=?", (ids["sale_item"],)),
-            "銷售單主鍵": ("INSERT OR REPLACE INTO Sale(sale_id,payment,total,paid) VALUES(?,'現金',1,1)", (ids["sale"],)),
+            "銷售單主鍵": ("INSERT OR REPLACE INTO Sale(sale_id,payment_id,payment,total,paid) VALUES(?,1,'現金',1,1)", (ids["sale"],)),
             "盤點明細主鍵": ("INSERT OR REPLACE INTO StocktakeItem(id,session_id,variant_id,system_qty,counted_qty) "
                              "SELECT id,session_id,variant_id,9,9 FROM StocktakeItem WHERE id=?", (ids["stocktake_item"],)),
             "盤點明細同單同款": ("INSERT OR REPLACE INTO StocktakeItem(session_id,variant_id,system_qty,counted_qty) "
@@ -199,7 +199,7 @@ class StockSourcesTest(FacadeTestCase):
         conn.execute("PRAGMA foreign_keys=ON")
         receipt = conn.execute("INSERT INTO Receipt(employee) VALUES(1)").lastrowid
         free_receipt_item = conn.execute("INSERT INTO ReceiptItem(receipt_id,variant_id,qty) VALUES(?,?,1)", (receipt, self.v1)).lastrowid
-        free_sale = conn.execute("INSERT INTO Sale(payment,total,paid,business_date) VALUES('現金',0,0,'2026-01-01')").lastrowid
+        free_sale = conn.execute("INSERT INTO Sale(payment_id,payment,total,paid,business_date) VALUES(1,'現金',0,0,'2026-01-01')").lastrowid
         free_sale_item = conn.execute("INSERT INTO SaleItem(sale_id,variant_id,qty,unit_price) VALUES(?,?,1,1)", (free_sale, self.v1)).lastrowid
         sid = conn.execute("SELECT session_id FROM StocktakeItem WHERE id=?", (ids["stocktake_item"],)).fetchone()[0]
         free_take = conn.execute("INSERT INTO StocktakeItem(session_id,variant_id,system_qty,counted_qty) VALUES(?,?,0,0)", (sid, self.v1)).lastrowid
@@ -287,7 +287,7 @@ class StockSourcesTest(FacadeTestCase):
         self.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": self.v1, "qty": 5}, {"variant_id": self.v2, "qty": 5}]})
         base_moves = self.counts("StockMovement")[0]
         with self.fail_on_second_post(), self.assertRaises(RuntimeError):
-            self.invoke("sales.checkout", {"payment": "現金", "paid": 300, "employee": 1, "items": [
+            self.invoke("sales.checkout", {"payment_id": 1, "paid": 300, "employee": 1, "items": [
                 {"variant_id": self.v1, "qty": 1, "unit_price": 100}, {"variant_id": self.v2, "qty": 1, "unit_price": 200}]})
         self.assertEqual(self.counts("Sale", "SaleItem", "StockMovement"), [0, 0, base_moves])
 

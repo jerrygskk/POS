@@ -28,7 +28,7 @@ class SalesLayersTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def checkout(self, **changes):
-        payload = {"payment": "現金", "order_discount": 100, "paid": 900, "employee": 1,
+        payload = {"payment_id": 1, "order_discount": 100, "paid": 900, "employee": 1,
                    "items": [{"variant_id": self.vid, "qty": 2,
                               "unit_price": 500, "discount": 0}]}
         payload.update(changes)
@@ -64,8 +64,8 @@ class SalesLayersTest(unittest.TestCase):
 
     def test_csv_uses_same_payment_filter_and_bom(self):
         self.checkout()
-        self.checkout(payment="轉帳")
-        exported = self.facade.invoke("sales.export", {"payment": "現金"})
+        self.checkout(payment_id=2)
+        exported = self.facade.invoke("sales.export", {"payment_id": 1})
         self.assertTrue(exported["content"].startswith("\ufeff"))
         self.assertIn("現金", exported["content"])
         self.assertNotIn("轉帳", exported["content"])

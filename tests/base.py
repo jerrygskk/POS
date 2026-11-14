@@ -29,6 +29,8 @@ from lib.desktop_bridge import DesktopBridge
 from lib.auth import hash_password
 
 _TEMPLATE_DB = None
+# 種子建的預設付款方式編號(測試以名稱取編號用)
+PAY = {"現金": 1, "轉帳": 2, "LINE Pay": 3, "台灣Pay": 4}
 
 
 def _template_db():

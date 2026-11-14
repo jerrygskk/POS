@@ -20,6 +20,7 @@ EXPECTED_ADMIN_ACTIONS = frozenset({
     "variants.create", "variants.update", "variants.set_models", "variants.update_details",
     "variants.update_editor", "variants.delete", "variants.batch_create", "variants.activate", "variants.issues", "variants.price_list", "variants.price_save",
     "members.delete",
+    "payments.create", "payments.update", "payments.sort", "payments.delete",
     "dayclose.preview", "dayclose.close", "dayclose.list", "dayclose.set_float", "sales.void", "sales.set_payment", "corrections.set_employee",
     "sales.export", "sales.export_save", "stocktake.approve", "stocktake.return", "stocktake.pending_count",
     "returns.set_disposition", "returns.set_kind", "returns.approve", "returns.pending_count", "returns.close_item", "returns.reopen_item",
@@ -62,7 +63,7 @@ class PermissionTests(ConnTestCase):
 
     def test_employee_can_checkout_receive_and_submit_stocktake(self):
         self.assertTrue(self.bridge.invoke("stock.receive", {"employee": 1, "items": [{"variant_id": 1, "qty": 2}]})["ok"])
-        self.assertTrue(self.bridge.invoke("sales.checkout", {"employee": 1, "payment": "現金", "paid": 10,
+        self.assertTrue(self.bridge.invoke("sales.checkout", {"employee": 1, "payment_id": 1, "paid": 10,
             "items": [{"variant_id": 1, "qty": 1, "unit_price": 10}]})["ok"])
         self.assertTrue(self.bridge.invoke("stocktake.withdraw", {"session_id": 1})["ok"])
         self.assertTrue(self.bridge.invoke("stocktake.close", {"session_id": 1})["ok"])

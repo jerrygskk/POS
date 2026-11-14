@@ -141,7 +141,7 @@ vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
   await vm.runInContext('API.createProduct({name:"A"})', context);
   await vm.runInContext('API.receiveStock({employee:1,items:[{variant_id:4,qty:2}]})', context);
   await vm.runInContext('API.listStocktakes()', context);
-  await vm.runInContext('API.checkout({payment:"現金",items:[]})', context);
+  await vm.runInContext('API.checkout({payment_id:1,items:[]})', context);
   await vm.runInContext('API.printBarcode(9)', context);
   let status = null;
   try { await vm.runInContext('API.scanBarcode("X")', context); } catch (e) { status = e.status; }
