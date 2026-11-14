@@ -150,12 +150,31 @@ class DayCloseService:
         return self._record(business_date)
 
     def list(self, filters):
-        sql, args = "SELECT * FROM DayClose WHERE 1=1", []
+        where, args = "", []
         for key, operator in (("date_from", ">="), ("date_to", "<=")):
             if filters[key]:
-                sql += f" AND business_date{operator}?"
+                where += f" AND business_date{operator}?"
                 args.append(filters[key])
-        return [dict(row) for row in self.conn.execute(sql + " ORDER BY business_date DESC", args)]
+        self.conn.execute("BEGIN")   # 立帳紀錄與各付款方式金額出自同一個時間點
+        records = [dict(row) for row in self.conn.execute(
+            f"SELECT * FROM DayClose WHERE 1=1{where} ORDER BY business_date DESC", args)]
+        # 立帳後該帳日的銷售單已鎖住,各付款方式金額直接從銷售單加總(不含已作廢、不扣退貨)
+        found = {}
+        for row in self.conn.execute(
+                "SELECT business_date, payment, SUM(total) t FROM Sale WHERE voided_at IS NULL "
+                f"AND business_date IN (SELECT business_date FROM DayClose){where} "
+                "GROUP BY business_date, payment", args):
+            found[(row["business_date"], row["payment"])] = row["t"]
+        repo = SalesRepository(self.conn)
+        payments, fees = repo.payments(), repo.payment_fees()
+        names = payments + sorted({p for _, p in found} - set(payments))
+        # 每一列的付款方式順序相同:設定清單在前(含停用的,金額為 0),清單外的舊付款方式排最後。
+        # fee_rate 是手續費率(百分比);手續費在提領時才扣,由畫面對查詢區間的合計算一次
+        for record in records:
+            record["by_payment"] = [{"payment": p, "total": found.get((record["business_date"], p), 0),
+                                     "fee_rate": fees.get(p, 0)} for p in names]
+            record["sales_total"] = sum(b["total"] for b in record["by_payment"])
+        return records
 
     def set_float(self, amount):
         self.conn.execute("INSERT OR REPLACE INTO Setting(key,value) VALUES('cash_float',?)", (str(amount),))

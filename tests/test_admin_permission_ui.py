@@ -218,7 +218,8 @@ process.exitCode=1;
 load("static/js/records.js");
 const preview={business_date:"",today:"2026-11-10",closed:false,record:null,float_amount:3000,float_setting:3000,cash_sales:500,
  by_payment:[{payment:"現金",count:1,total:500}],void_count:0,void_total:0,unclosed:["2026-11-08"],unclosed_count:1};
-const record={business_date:"2026-11-07",closed_at:"2026-11-07 22:00:05",employee:2,float_amount:3000,counted_total:2900,cash_sales:0,diff:-100,reason:"少找"};
+const record={business_date:"2026-11-07",closed_at:"2026-11-07 22:00:05",employee:2,float_amount:3000,counted_total:2900,cash_sales:0,diff:-100,reason:"少找",
+  by_payment:[{payment:"現金",total:0,fee_rate:0},{payment:"LINE Pay",total:1000,fee_rate:2.2}],sales_total:1000};
 API.listPayments=async()=>[];API.listSales=async()=>[];API.salesSummary=async()=>null;
 API.dayCloseCurrent=async()=>({business_date:"2999-01-01",today:"2026-11-10"});
 API.dayClosePreview=async d=>({...preview,business_date:d});API.dayCloseList=async()=>[record];
@@ -236,6 +237,9 @@ auth.isAdmin=true;await tick();assert.match(text(view.dom),/立帳/);
 await s.selectKind("dayclose");await tick();
 assert.equal(s.dc.preview.cash_sales,500);assert.match(text(view.dom),/尚未立帳/);assert.match(text(view.dom),/少找/);
 assert.ok(button(view.dom,"完成立帳"));assert.ok(button(view.dom,"11/08"));
+// 立帳紀錄表尾:手續費以區間合計乘費率四捨五入,另列費率與實收
+assert.deepEqual([...s.dcTotals.fees],[0,22]);assert.deepEqual([...s.dcTotals.rates],["","2.2%"]);
+assert.equal(s.dcTotals.net_total,978);assert.match(text(view.dom),/抽成比例.*2\.2%.*抽成金額.*−22.*實收.*978/s);
 // 必填:錢櫃現金總額、有短溢要原因
 await s.dcClose();assert.ok(errors.includes("請輸入錢櫃現金總額"));
 s.dc.counted="3400";await tick();assert.equal(s.dcDiff,-100);assert.match(text(view.dom),/−100/);

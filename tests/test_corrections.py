@@ -56,11 +56,11 @@ class CorrectionsTest(FacadeTestCase):
         self.assertEqual(self.invoke("dayclose.preview", {"business_date": TODAY})["cash_sales"], 200)
         by_payment = {b["payment"]: b["total"] for b in self.invoke("sales.summary", {})["by_payment"]}
         self.assertEqual((by_payment["現金"], by_payment["轉帳"]), (200, 0))
-        self.set_payment(sale, "行動支付", expected="現金")
+        self.set_payment(sale, "LINE Pay", expected="現金")
         row = self.sale_row(sale)
-        self.assertEqual(row["payment"], "行動支付")
+        self.assertEqual(row["payment"], "LINE Pay")
         self.assertEqual([(c["field"], c["old_value"], c["new_value"]) for c in row["corrections"]],
-                         [("payment", "轉帳", "現金"), ("payment", "現金", "行動支付")])
+                         [("payment", "轉帳", "現金"), ("payment", "現金", "LINE Pay")])
         self.assertEqual(set(row["corrections"][0]), {"ts", "field", "old_value", "new_value"})   # 不記是誰更正的
         self.assertTrue(row["corrections"][0]["ts"].startswith(TODAY))
         # 實收與找零保留原值

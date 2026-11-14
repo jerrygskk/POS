@@ -123,9 +123,22 @@ def _csv_text(value):
 
 
 class SalesRepository(BaseRepository):
+    def _setting_json(self, key, default):
+        row = self.connection.execute("SELECT value FROM Setting WHERE key=?", (key,)).fetchone()
+        return json.loads(row["value"]) if row else default
+
     def payments(self):
-        row = self.connection.execute("SELECT value FROM Setting WHERE key='payments'").fetchone()
-        return json.loads(row["value"]) if row else []
+        """全部付款方式(含停用):報表的欄位順序用這份。"""
+        return self._setting_json("payments", [])
+
+    def enabled_payments(self):
+        """結帳與更正付款方式可選的清單:扣掉停用的。"""
+        disabled = set(self._setting_json("payments_disabled", []))
+        return [p for p in self.payments() if p not in disabled]
+
+    def payment_fees(self):
+        """付款方式 → 手續費率(百分比);沒列的視為 0。"""
+        return self._setting_json("payment_fees", {})
 
     def variant_is_active(self, variant_id):
         # 種類、產品、款式都須啟用;缺必填值只是待補提醒,不擋銷售,
@@ -204,7 +217,7 @@ class SalesService:
         self.repo = repository
 
     def checkout(self, body):
-        if body["payment"] not in self.repo.payments():
+        if body["payment"] not in self.repo.enabled_payments():
             raise ValidationError("付款方式未在設定中")
         if body["member_id"] is not None and not self.repo.member_is_active(body["member_id"]):
             raise ValidationError("會員不存在或已刪除，請重新查詢")
@@ -288,7 +301,7 @@ class SalesService:
             raise ConflictError("此單已作廢，不可更正付款方式")
         if sale["closed"]:
             raise ConflictError("此帳日已立帳，不可更正付款方式")
-        if body["payment"] not in self.repo.payments():
+        if body["payment"] not in self.repo.enabled_payments():
             raise ValidationError("付款方式未在設定中")
         if body["payment"] == sale["payment"]:
             raise ValidationError("新付款方式與目前相同")
@@ -369,7 +382,7 @@ class SalesFacade(BaseFacade):
 
     def _dispatch(self, action, payload, connection):
         service = SalesService(SalesRepository(connection))
-        if action == "payments.list": return service.repo.payments()
+        if action == "payments.list": return service.repo.enabled_payments()
         if action == "sales.checkout": return service.checkout(payload)
         if action == "sales.void": return service.void(payload)
         if action == "sales.set_payment": return service.set_payment(payload)

@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>膜型機門市管理系統</title>
-<link rel="stylesheet" href="css/pos.css?v=337">
+<link rel="stylesheet" href="css/pos.css?v=344">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=337" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=344" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -420,17 +420,41 @@
           <label>起 <input type="date" v-model="dateFrom"></label>
           <label>迄 <input type="date" v-model="dateTo"></label>
           <button class="primary" @click="reload">查詢</button>
+          <button :disabled="!dc.records.length" @click="dcCopyImage">{{ dc.copied ? '已複製' : '複製成圖片' }}</button>
         </div>
         <table class="records-table">
-          <colgroup><col class="col-w110"><col class="col-w160"><col class="col-w56"><col class="col-w80"><col class="col-w88"><col class="col-w88"><col class="col-w80"><col></colgroup>
-          <thead><tr><th>帳日</th><th>立帳時間</th><th>員工</th><th class="num">預備金</th><th class="num">錢櫃總額</th><th class="num">現金銷售</th><th class="num">短溢</th><th>原因</th></tr></thead>
+          <colgroup><col class="col-w110"><col class="col-w110"><col class="col-w56"><col class="col-w64"><col class="col-w76"><col v-for="p in dcPayments" :key="p" class="col-w76"><col class="col-w84"><col class="col-w64"><col></colgroup>
+          <thead><tr class="dayclose-head"><th>帳日</th><th>立帳時間</th><th>員工</th><th class="num">預備金</th><th class="num">錢櫃總額</th><th v-for="p in dcPayments" :key="p" class="num">{{ p }}</th><th class="num">銷售合計</th><th class="num">短溢</th><th></th></tr></thead>
           <tbody>
-            <tr v-for="r in dc.records" :key="r.business_date">
-              <td>{{ r.business_date }}</td><td>{{ minuteText(r.closed_at) }}</td><td>{{ r.employee }}</td>
-              <td class="num">{{ r.float_amount }}</td><td class="num">{{ r.counted_total }}</td><td class="num">{{ r.cash_sales }}</td>
-              <td class="num" :class="{neg: r.diff}">{{ signedText(r.diff) }}</td><td>{{ r.reason || '—' }}</td>
-            </tr>
+            <template v-for="r in dc.records" :key="r.business_date">
+              <tr>
+                <td>{{ r.business_date }}</td><td>{{ minuteText(r.closed_at).slice(5) }}</td><td>{{ r.employee }}</td>
+                <td class="num">{{ r.float_amount }}</td><td class="num">{{ r.counted_total }}</td>
+                <td v-for="b in r.by_payment" :key="b.payment" class="num">{{ b.total }}</td><td class="num">{{ r.sales_total }}</td>
+                <td class="num" :class="{neg: r.diff}">{{ signedText(r.diff) }}</td><td></td>
+              </tr>
+              <tr v-if="r.reason" class="dayclose-reason-row"><td :colspan="8 + dcPayments.length">短溢原因：{{ r.reason }}</td></tr>
+            </template>
           </tbody>
+          <tfoot v-if="dc.records.length">
+            <tr class="dayclose-sum">
+              <td>合計</td><td>{{ dc.records.length }} 天</td><td></td><td></td><td></td>
+              <td v-for="(t, i) in dcTotals.by_payment" :key="i" class="num">{{ t }}</td><td class="num">{{ dcTotals.sales_total }}</td>
+              <td class="num" :class="{neg: dcTotals.diff}">{{ signedText(dcTotals.diff) }}</td><td></td>
+            </tr>
+            <tr v-if="dcTotals.fee_total" class="dayclose-fee">
+              <td colspan="5">抽成比例</td>
+              <td v-for="(t, i) in dcTotals.rates" :key="i" class="num">{{ t }}</td><td></td><td></td><td></td>
+            </tr>
+            <tr v-if="dcTotals.fee_total" class="dayclose-fee">
+              <td colspan="5">抽成金額</td>
+              <td v-for="(f, i) in dcTotals.fees" :key="i" class="num">{{ f ? '−' + f : '' }}</td><td class="num">−{{ dcTotals.fee_total }}</td><td></td><td></td>
+            </tr>
+            <tr v-if="dcTotals.fee_total" class="dayclose-sum dayclose-net">
+              <td colspan="5">實收</td>
+              <td v-for="(t, i) in dcTotals.net" :key="i" class="num">{{ t }}</td><td class="num">{{ dcTotals.net_total }}</td><td></td><td></td>
+            </tr>
+          </tfoot>
         </table>
       </template>
       <table v-if="kind==='sales'" class="records-table">
@@ -1037,29 +1061,29 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=337"></script>
-<script src="js/api.js?v=337"></script>
-<script src="js/confirm.js?v=337"></script>
-<script src="js/auth.js?v=337"></script>
-<script src="js/pos_shared.js?v=337"></script>
-<script src="js/catalogfields.js?v=337"></script>
-<script src="js/checkout.js?v=337"></script>
-<script src="js/receive.js?v=337"></script>
-<script src="js/stocktake.js?v=337"></script>
-<script src="js/returns.js?v=337"></script>
-<script src="js/records.js?v=337"></script>
-<script src="js/catalog.js?v=337"></script>
-<script src="js/sortable.js?v=337"></script>
-<script src="js/combobox.js?v=337"></script>
-<script src="js/optpicker.js?v=337"></script>
-<script src="js/modelpicker.js?v=337"></script>
-<script src="js/employeepicker.js?v=337"></script>
-<script src="js/membereditor.js?v=337"></script>
-<script src="js/doccorrect.js?v=337"></script>
-<script src="js/attrfields.js?v=337"></script>
-<script src="js/settings.js?v=337"></script>
-<script src="js/labels.js?v=337"></script>
-<script src="js/app_update.js?v=337"></script>
-<script src="js/app.js?v=337"></script>
+<script src="js/vue.global.prod.js?v=344"></script>
+<script src="js/api.js?v=344"></script>
+<script src="js/confirm.js?v=344"></script>
+<script src="js/auth.js?v=344"></script>
+<script src="js/pos_shared.js?v=344"></script>
+<script src="js/catalogfields.js?v=344"></script>
+<script src="js/checkout.js?v=344"></script>
+<script src="js/receive.js?v=344"></script>
+<script src="js/stocktake.js?v=344"></script>
+<script src="js/returns.js?v=344"></script>
+<script src="js/records.js?v=344"></script>
+<script src="js/catalog.js?v=344"></script>
+<script src="js/sortable.js?v=344"></script>
+<script src="js/combobox.js?v=344"></script>
+<script src="js/optpicker.js?v=344"></script>
+<script src="js/modelpicker.js?v=344"></script>
+<script src="js/employeepicker.js?v=344"></script>
+<script src="js/membereditor.js?v=344"></script>
+<script src="js/doccorrect.js?v=344"></script>
+<script src="js/attrfields.js?v=344"></script>
+<script src="js/settings.js?v=344"></script>
+<script src="js/labels.js?v=344"></script>
+<script src="js/app_update.js?v=344"></script>
+<script src="js/app.js?v=344"></script>
 </body>
 </html>

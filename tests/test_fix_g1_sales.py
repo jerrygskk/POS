@@ -29,7 +29,7 @@ class TestFixG1Sales(FacadeTestCase):
         self.assertEqual(self._sale(paid=500)["change"], 0)
 
     def test_non_cash_ignores_paid(self):
-        self.assertEqual(self._sale(payment="行動支付", paid=0)["change"], 0)
+        self.assertEqual(self._sale(payment="LINE Pay", paid=0)["change"], 0)
 
     def test_member_discount_allowed_without_member(self):
         self.assertEqual(self._sale(member_discount=10, paid=490)["total"], 490)

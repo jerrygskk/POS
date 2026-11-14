@@ -11,7 +11,7 @@ function defaultRange(kind) {
 }
 // 立帳頁的畫面資料;管理者登出或逾時時整份換掉,金額不留在畫面上
 function emptyDayClose() {
-  return { date: "", today: "", counted: "", reason: "", floatInput: "", preview: null, records: [], busy: false };
+  return { date: "", today: "", counted: "", reason: "", floatInput: "", preview: null, records: [], busy: false, copied: false };
 }
 window.PosPages["page-records"] = {
   template: "#tpl-records",
@@ -31,6 +31,26 @@ window.PosPages["page-records"] = {
     dcDiff() {
       const p = this.dc.preview, text = this.dc.counted.trim();
       return p && /^\d+$/.test(text) ? Number(text) - p.float_amount - p.cash_sales : null;
+    },
+    // 立帳紀錄的付款方式欄:每一列順序相同,取第一列;沒有紀錄時用設定清單
+    dcPayments() {
+      const first = this.dc.records[0];
+      return first ? first.by_payment.map(b => b.payment) : this.payments;
+    },
+    // 查詢區間的合計列
+    dcTotals() {
+      const sum = pick => this.dc.records.reduce((total, r) => total + pick(r), 0);
+      const by_payment = this.dcPayments.map((_, i) => sum(r => r.by_payment[i].total));
+      const sales_total = sum(r => r.sales_total);
+      // 手續費:金流業者在提領時才扣,所以拿查詢區間的合計算一次(四捨五入到元),每天的金額不扣。
+      // 費率是百分比,先乘 100 取整再算,避免小數誤差
+      const first = this.dc.records[0], rates = first ? first.by_payment.map(b => b.fee_rate || 0) : [];
+      const fees = by_payment.map((total, i) => Math.round(total * Math.round((rates[i] || 0) * 100) / 10000));
+      const fee_total = fees.reduce((a, b) => a + b, 0);
+      // rates:各付款方式的費率文字,寫在自己那一欄底下;0 的留空
+      return { by_payment, sales_total, diff: sum(r => r.diff), fees, fee_total,
+               rates: by_payment.map((_, i) => rates[i] ? rates[i] + "%" : ""),
+               net: by_payment.map((total, i) => total - fees[i]), net_total: sales_total - fee_total };
     },
     // 目前類別每一列的開合鍵,與範本的 isOpen／toggle 共用
     rowKeys() {
@@ -159,6 +179,58 @@ window.PosPages["page-records"] = {
         // 成敗都重讀:失敗可能是金額已變動或已被立帳,不可留舊數字
         if (this.isAdmin && this.kind === "dayclose") { await this.dcLoad(body.business_date); await this.reload(); }
       }
+    },
+    // 把查到的立帳紀錄畫成圖片放進剪貼簿,供貼到公司群組。
+    // 圖片是給公司看的報表,欄位與畫面上的表格不同:只列帳日、各付款方式、銷售合計、短溢與原因,
+    // 不列員工、立帳時間、預備金、錢櫃總額;日期由小到大(畫面是新的在上)
+    async dcCopyImage() {
+      if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
+      const records = this.dc.records.slice().reverse(), totals = this.dcTotals;
+      if (!records.length) { this.showError("沒有可複製的立帳紀錄"); return; }
+      // 一列:第一格與最後一格(原因)靠左,中間的金額靠右;bold 的列用粗體
+      const line = (bold, ...texts) => texts.map((text, i, all) => ({ text: String(text), num: i > 0 && i < all.length - 1, bold }));
+      const minus = n => n ? "−" + n : "";
+      const rows = [line(true, "帳日", ...this.dcPayments, "銷售合計", "短溢", "原因"),
+                    ...records.map(r => line(false, r.business_date, ...r.by_payment.map(b => b.total), r.sales_total,
+                                             this.signedText(r.diff), r.reason || "")),
+                    line(true, "合計", ...totals.by_payment, totals.sales_total, this.signedText(totals.diff), "")];
+      // 有手續費才多三列:抽成比例、抽成金額、實收
+      if (totals.fee_total) {
+        rows.push(line(false, "抽成比例", ...totals.rates, "", "", ""),
+                  line(false, "抽成金額", ...totals.fees.map(minus), minus(totals.fee_total), "", ""),
+                  line(true, "實收", ...totals.net, totals.net_total, "", ""));
+      }
+      const title = `立帳紀錄　${records[0].business_date} ～ ${records[records.length - 1].business_date}`;
+      const font = '15px "Microsoft JhengHei", sans-serif', pad = 10, rowH = 30, titleH = 40, scale = 2;
+      const canvas = document.createElement("canvas"), g = canvas.getContext("2d");
+      // 表頭與合計列是粗體,用粗體量字寬才不會切到
+      g.font = "bold " + font;
+      const widths = rows[0].map((_, i) => Math.ceil(Math.max(...rows.map(r => g.measureText(r[i].text).width))) + pad * 2);
+      const width = Math.max(widths.reduce((a, b) => a + b, 0), Math.ceil(g.measureText(title).width) + pad * 2);
+      const height = titleH + rowH * rows.length;
+      canvas.width = width * scale; canvas.height = height * scale;
+      g.scale(scale, scale);
+      g.fillStyle = "#fff"; g.fillRect(0, 0, width, height);
+      g.fillStyle = "#f2f2f7"; g.fillRect(0, titleH, width, rowH);
+      g.textBaseline = "middle"; g.fillStyle = "#1c1c1e"; g.font = "bold " + font;
+      g.fillText(title, pad, titleH / 2);
+      rows.forEach((row, n) => {
+        const y = titleH + rowH * n;
+        g.font = (row[0].bold ? "bold " : "") + font;
+        let x = 0;
+        row.forEach((cell, i) => {
+          g.textAlign = cell.num ? "right" : "left";
+          g.fillText(cell.text, cell.num ? x + widths[i] - pad : x + pad, y + rowH / 2);
+          x += widths[i];
+        });
+        g.fillStyle = "#c6c6c8"; g.fillRect(0, y + rowH - 1, width, 1); g.fillStyle = "#1c1c1e";
+      });
+      try {
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      } catch (e) { this.showError("複製圖片失敗，請再試一次"); return; }
+      this.dc.copied = true;
+      setTimeout(() => { this.dc.copied = false; }, 2000);
     },
     isOpen(key) { return this.expanded.has(key); },
     toggle(key) {

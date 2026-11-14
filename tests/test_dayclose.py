@@ -85,7 +85,8 @@ class DayCloseTest(FacadeTestCase):
                          (3000, 3000, 350, False, None))
         self.assertEqual(p["by_payment"], [{"payment": "現金", "count": 2, "total": 350},
                                            {"payment": "轉帳", "count": 1, "total": 400},
-                                           {"payment": "行動支付", "count": 0, "total": 0}])
+                                           {"payment": "LINE Pay", "count": 0, "total": 0},
+                                           {"payment": "台灣Pay", "count": 0, "total": 0}])
         self.assertEqual((p["void_count"], p["void_total"]), (1, 999))
         self.assertEqual((p["unclosed"], p["unclosed_count"]), ([day(-2), d], 2))
 
@@ -174,6 +175,34 @@ class DayCloseTest(FacadeTestCase):
         rows = self.invoke("dayclose.list", {"date_from": day(-2), "date_to": day(-2)})
         self.assertEqual([r["business_date"] for r in rows], [day(-2)])
         self.assert_application_error("validation_error", "dayclose.list", {"date_from": day(), "date_to": day(-1)})
+
+    def test_list_shows_each_payment_total_per_day(self):
+        d, other = day(-1), day(-2)
+        self.raw_sale(d, "現金", 100)
+        self.raw_sale(d, "現金", 250)
+        self.raw_sale(d, "轉帳", 400)
+        self.raw_sale(d, "LINE Pay", 30)
+        self.raw_sale(d, "舊付款", 7)                 # 設定清單外的付款方式排最後
+        self.raw_sale(d, "現金", 999, voided=True)    # 已作廢不計
+        self.raw_sale(other, "轉帳", 60)
+        self.raw_sale(day(-3), "現金", 5)             # 未立帳的帳日不列
+        self.close(d, 350)
+        self.close(other, 0)
+        rows = self.invoke("dayclose.list", {})
+        self.assertEqual([r["business_date"] for r in rows], [d, other])
+        # 停用的台灣Pay 仍有一欄(金額 0);手續費率跟著付款方式,沒設定的是 0
+        names = ["現金", "轉帳", "LINE Pay", "台灣Pay", "舊付款"]
+        rates = (0, 0, 2.2, 0, 0)
+        def expect(totals):
+            return [{"payment": p, "total": t, "fee_rate": f} for p, t, f in zip(names, totals, rates)]
+        self.assertEqual(rows[0]["by_payment"], expect((350, 400, 30, 0, 7)))
+        self.assertEqual(rows[1]["by_payment"], expect((0, 60, 0, 0, 0)))
+        self.assertEqual([r["sales_total"] for r in rows], [787, 60])
+        self.assertEqual(rows[0]["by_payment"][0]["total"], rows[0]["cash_sales"])
+        # 日期條件只影響列出的帳日,不影響當天金額
+        only = self.invoke("dayclose.list", {"date_from": other, "date_to": other})
+        self.assertEqual([(r["business_date"], r["sales_total"]) for r in only], [(other, 60)])
+        self.assertEqual([b["payment"] for b in only[0]["by_payment"]], ["現金", "轉帳", "LINE Pay", "台灣Pay"])
 
     def test_set_float_validation(self):
         for amount in (-1, "100", True, 1.5, 10 ** 9):

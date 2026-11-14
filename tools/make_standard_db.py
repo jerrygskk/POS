@@ -42,8 +42,9 @@ SOURCE_ONLY_TABLES = ["CategoryField"]  # 只存在來源，已併入 AttributeF
 SKIP_TABLES = ["Sale", "SaleItem", "StockMovement", "StocktakeSession", "StocktakeItem",
                "ReturnSession", "ReturnItem", "Receipt", "ReceiptItem", "DayClose", "Correction"]
 # Setting 逐鍵處理：schema_version 由本工具寫入最新版號，密碼依種子預設（不複製來源密碼）。
-SETTING_COPY_KEYS = ["payments", "next_store_barcode"]
-SETTING_SKIP_KEYS = ["schema_version", "admin_password_hash"]
+# 付款方式依種子預設:來源母版是舊清單(行動支付),不帶過來。
+SETTING_COPY_KEYS = ["next_store_barcode"]
+SETTING_SKIP_KEYS = ["schema_version", "admin_password_hash", "payments"]
 INSERT_ORDER = ["Category", "AttributeField", "AttributeOption", "OptionModel", "Brand",
                 "BrandCategory", "PhoneBrand", "DeviceType", "PhoneModel", "Product", "Variant",
                 "VariantAttribute", "VariantModel", "Barcode", "VariantIssue", "Member", "MemberPhone"]

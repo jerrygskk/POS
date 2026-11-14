@@ -90,8 +90,19 @@ class TestSales(FacadeTestCase):
         self.assertIn("付款方式未在設定中", error.message)
         self.assertEqual(self._stock(), 10)
 
+    def test_disabled_payment_not_selectable(self):
+        # 停用的付款方式:結帳清單不列、結帳與更正付款方式都擋;報表仍有一欄(見 test_summary)
+        self.assertEqual(self.invoke("payments.list"), ["現金", "轉帳", "LINE Pay"])
+        error = self.assert_application_error("validation_error", "sales.checkout", {"employee": 1,
+            "payment": "台灣Pay", "paid": 1000, "items": [{"variant_id": self.vid, "qty": 2, "unit_price": 500}]})
+        self.assertIn("付款方式未在設定中", error.message)
+        sale = self._sale()
+        self.assert_application_error("validation_error", "sales.set_payment", {
+            "sale_id": sale["sale_id"], "payment": "台灣Pay", "expected_payment": "現金"})
+        self.assertEqual(self._stock(), 8)
+
     def test_non_cash_paid_forced_to_total(self):
-        r = self._sale(payment="行動支付", paid=2000)
+        r = self._sale(payment="LINE Pay", paid=2000)
         self.assertEqual(r["change"], 0)
         with db_conn(self.db) as conn:
             row = conn.execute("SELECT paid,change FROM Sale WHERE sale_id=?", (r["sale_id"],)).fetchone()
@@ -104,7 +115,8 @@ class TestSales(FacadeTestCase):
         self.assertEqual(s["count"], 2)
         self.assertEqual(s["by_payment"], [{"payment": "現金", "count": 1, "total": 1000},
                                            {"payment": "轉帳", "count": 1, "total": 1000},
-                                           {"payment": "行動支付", "count": 0, "total": 0}])
+                                           {"payment": "LINE Pay", "count": 0, "total": 0},
+                                           {"payment": "台灣Pay", "count": 0, "total": 0}])
 
     def test_summary_date_range_and_payment(self):
         # 小結支援 date_from/date_to 區間與付款方式過濾(與明細清單一致)

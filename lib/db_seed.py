@@ -8,11 +8,19 @@ from lib.auth import hash_password
 # 新種類建立時自動建的規格欄(選填),各種類自己一份;不需要可在設定頁刪除。
 # (name, field_type)
 NEW_CATEGORY_OWN_FIELDS = [("顏色", "select"), ("款式", "select")]
-DEFAULT_PAYMENTS = ["現金", "轉帳", "行動支付"]
+DEFAULT_PAYMENTS = ["現金", "轉帳", "LINE Pay", "台灣Pay"]
+# 停用的付款方式:結帳與更正付款方式選不到,報表(立帳紀錄、合計列)仍保留一欄
+DEFAULT_PAYMENTS_DISABLED = ["台灣Pay"]
+# 各付款方式的手續費率(百分比);沒列的視為 0。金流業者在提領時才扣,所以只在報表合計算一次
+DEFAULT_PAYMENT_FEES = {"LINE Pay": 2.2}
 
 def seed(conn, fresh=False):
     conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('payments',?)",
                  (json.dumps(DEFAULT_PAYMENTS, ensure_ascii=False),))
+    conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('payments_disabled',?)",
+                 (json.dumps(DEFAULT_PAYMENTS_DISABLED, ensure_ascii=False),))
+    conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('payment_fees',?)",
+                 (json.dumps(DEFAULT_PAYMENT_FEES, ensure_ascii=False),))
     conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('cash_float','0')")  # 立帳預備金
     if conn.execute("SELECT 1 FROM Setting WHERE key='admin_password_hash'").fetchone() is None:
         conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('admin_password_hash',?)",

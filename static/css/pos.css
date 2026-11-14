@@ -718,7 +718,7 @@ button.primary.danger:hover { filter: brightness(0.92); }
 tr.stocktake-row-returned > td { background: rgba(220, 38, 38, 0.08); color: var(--danger); }
 /* 紀錄查詢:小結靠左,展開／收合全部靠右 */
 /* 紀錄查詢收銀查詢列(日期×2、付款、會員電話、查詢、匯出)要一排放得下:卡片比設定頁寬,按鈕不折字 */
-.records-panel { max-width: 900px; }
+.records-panel { max-width: 980px; }
 .records-panel > .scan-row > button { flex: 0 0 auto; white-space: nowrap; }
 .records-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
 .records-bar .pay-panel { flex: 1 1 auto; min-width: 0; margin: 0; flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -741,6 +741,16 @@ tr.sale-void > td { text-decoration: line-through; color: var(--text-2); }
 .dayclose-float { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .dayclose-reason { flex: 1 1 120px; min-width: 80px; }
 .dayclose-reason-text { flex: 0 1 auto; min-width: 0; white-space: normal; }
+.col-w76 { width: 76px; } .col-w84 { width: 84px; }
+.records-table .dayclose-sum td { font-weight: 600; border-top: 1px solid var(--border); border-bottom: 0; white-space: nowrap; }
+/* 立帳紀錄的欄名不折行(LINE Pay 在 76px 欄會斷成兩行);略寬於欄時往左吃留白 */
+.records-table .dayclose-head th { white-space: nowrap; overflow-wrap: normal; }
+/* 手續費與實收:接在合計列下面,三列之間不畫線 */
+.records-table .dayclose-fee td { border-bottom: 0; white-space: nowrap; color: var(--text-2); }
+.records-table .dayclose-net td { border-top: 0; }
+/* 短溢原因:只有有原因的帳日多一行,與上一列視為同一筆(中間不畫線) */
+.records-table tr:has(+ .dayclose-reason-row) > td { border-bottom: 0; }
+.records-table .dayclose-reason-row td { padding-top: 0; color: var(--text-2); font-size: 14px; }
 .dayclose-breakdown { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: -4px 0 12px; color: var(--text-2); font-size: 14px; }
 .records-bar-actions { display: flex; gap: 8px; flex: 0 0 auto; margin-left: auto; }
 /* 紀錄查詢列表:只留橫線,數字靠右;品名＋規格中位數約 30 個半形字、最長 67,明細品名欄佔剩餘寬度並允許折行 */
