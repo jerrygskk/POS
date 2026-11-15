@@ -89,6 +89,7 @@ window.PosPages["page-records"] = {
     },
     async enterKind(kind) {
       this.kind = kind;
+      this._loadSeq = (this._loadSeq || 0) + 1;   // 還沒回來的舊類別查詢就此作廢
       Object.assign(this, defaultRange(kind));
       if (kind === "sales") Object.assign(this, await this.salesRange());
       if (this.kind !== kind) return;
@@ -262,32 +263,43 @@ window.PosPages["page-records"] = {
     async reload() {
       // 查詢後資料可能換了,一律收合;更正後要保留展開的由呼叫端自己貼回
       this.collapseAll();
-      await this.guard(async () => {
+      // 連續查詢或切換類別時只讓最新一次更新畫面:回應不保證照送出順序回來,
+      // 晚到的舊結果會讓畫面條件與資料對不上。舊查詢的錯誤訊息也一起丟掉,所以不走 guard。
+      // 與 _dcSeq 分開:那是上方單日立帳預覽,共用會互相取消有效回應
+      const seq = this._loadSeq = (this._loadSeq || 0) + 1;
+      const stale = () => seq !== this._loadSeq;
+      try {
         const range = {date_from: this.dateFrom, date_to: this.dateTo};
         if (this.kind === "sales") {
           const filters = {...range, payment_id: this.payment === "" ? null : this.payment, member_phone: this.memberPhone.trim()};
-          // 查詢失敗先清空,不留上一次結果;成功才記住條件給匯出用
-          // 連續查詢時只讓最新一次更新畫面:列表、合計、匯出條件必須屬於同一次查詢
-          const seq = this._salesSeq = (this._salesSeq || 0) + 1;
+          // 查詢失敗先清空,不留上一次結果;成功才記住條件給匯出用。列表、合計、匯出條件必須屬於同一次查詢
           this.sales = []; this.summary = null; this.salesQuery = null;
           const sales = await API.listSales(filters);
           const summary = await API.salesSummary(filters);
-          if (seq !== this._salesSeq) return;
+          if (stale()) return;
           this.sales = sales; this.summary = summary; this.salesQuery = filters;
         } else if (this.kind === "members") {
-          this.members = await API.listMembers(this.memberQuery.trim());
+          const members = await API.listMembers(this.memberQuery.trim());
+          if (!stale()) this.members = members;
         } else if (this.kind === "dayclose") {
+          // 先清空:等待期間「複製成圖片」不可拿到上一次查詢的月份
+          this.dc.records = [];
           const records = await API.dayCloseList(range);
-          if (!this.isAdmin || this.kind !== "dayclose") return;
+          if (stale() || !this.isAdmin || this.kind !== "dayclose") return;
           this.dc.records = records;
         } else if (this.kind === "receive") {
-          this.receipts = await API.listReceipts(range);
+          const receipts = await API.listReceipts(range);
+          if (!stale()) this.receipts = receipts;
         } else if (this.kind === "returns") {
-          this.returns = await API.returnHistory({...range, kind: this.returnKind});
+          const returns = await API.returnHistory({...range, kind: this.returnKind});
+          if (!stale()) this.returns = returns;
         } else {
-          this.stocktakes = await API.stocktakeHistory(range);
+          const stocktakes = await API.stocktakeHistory(range);
+          if (!stale()) this.stocktakes = stocktakes;
         }
-      });
+      } catch (e) {
+        if (!stale()) this.showError(e.message);
+      }
     },
     // 返修品項:未處理件數、狀態(待返新/部分返新/已全部返新/已結案)與副標
     repairLeft(it) { return it.qty - it.closed_qty - it.repaired_qty; },

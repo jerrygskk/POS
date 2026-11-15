@@ -8,7 +8,7 @@
 - **VUE-2**: **bug 在 harness 瀏覽器／Bridge shim 下重現不了（或反之）** → 部分崩潰只在「真實 pywebview＋prod 版 Vue」穩定重現。前端改動最終驗證一律用真實 pywebview（以 `RuntimePaths` 指向 pos.db 副本＋repo static 開視窗走查）；Bridge shim 只供目視版面，**不是正式 runtime**。
 - **VUE-3**: **自動走查收不到 JS 錯誤，畫面明明壞了** → prod 版 Vue 的錯誤只進 `console.error`，光掛 `window.onerror` 收不到；收集器要 hook `console.error`＋`window.onerror` 兩邊。
 - **VUE-4**: **css／js 改了畫面沒變** → 忘記 bump `index.html` 的 `?v=`；css 與全部 js 共用同一版號，一起 bump。
-- **VUE-5**: **快速連點清單／分頁後，畫面停在「前一個」選擇的資料** → 載入函式內多個 `await`，慢回應後到蓋掉新資料。多段 await 的載入函式要加載入序號戳記，寫入 state 前比對仍是最新請求才寫（參考 `settings.js` `loadCategoryDetail`）。
+- **VUE-5**: **快速連點清單／分頁後，畫面停在「前一個」選擇的資料** → 載入函式內多個 `await`，慢回應後到蓋掉新資料。多段 await 的載入函式要加載入序號戳記，寫入 state 前比對仍是最新請求才寫（參考 `settings.js` `loadCategoryDetail`）。只有一個 `await` 的查詢也一樣：紀錄頁先查 10 月再查 11 月，10 月回應晚到就蓋掉 11 月，畫面條件與「複製成圖片」的資料對不上（`records.js` `reload` 以 `_loadSeq` 涵蓋全部類別）。舊請求的**錯誤訊息**也要丟，所以這種函式自己 try/catch、不走 `guard`；供匯出或複製用的資料在送出查詢時先清空。
 - **VUE-6**: **自動走查腳本一抓元件實例就 `Cannot read properties of undefined`** → prod 版 Vue 不掛 `__vueParentComponent`，`__vue_app__`／`app._instance` 也只在 dev 版才設；靠這些入口存取 Vue 狀態的走查腳本在真實 runtime 一定失敗。走查一律改走使用者真的會碰的 DOM（`setValue` 原生 setter＋派 `input`／`change`、點按鈕與 chip），順帶把事件繫結一起驗到。
 - **VUE-7**: **走查截圖抓到的是別的視窗（瀏覽器、桌面）** → `ImageGrab` 依螢幕座標抓，pywebview 視窗沒在前景就抓到前景程式的畫面，維護者同時在用電腦時必然發生。版面判斷改用 DOM 量測（`clientWidth`/`scrollWidth`/`getBoundingClientRect`），截圖只當輔助、不作為證據。
 - **VUE-8**: **子視窗開著時主視窗仍被滾輪／PageDown 捲走** → `inert` 只擋點擊與焦點，不擋捲動。要另外攔 `wheel`／`touchmove`／捲動鍵與 `scroll` 並還原位置（`window.PosDesktopLock`，DEVELOPER §2 子視窗）；解鎖事件要涵蓋取消、Esc 與按視窗 X 三條路徑，漏一條主視窗就永久鎖死。
@@ -31,6 +31,8 @@
 - **DATA-1**: **填在 A 種類的值，跑到 B 種類的欄位去了** → 「特性詞條」這種**每個種類各自一份、名字却一樣**的欄位，不可以欄名到全表找。舊版退路是「按名字找、取編號最小的一筆」，資料庫一旦有第二份同名欄，所有種類都會寫進第一份。一律改成只認本種類（`AttributeField.category_id`）的那一份（DEVELOPER §2 商品與規格設定）。⚠️ 症狀不會報錯，只會在別的種類看到不該出現的詞條。
 
 - **DATA-2**: **管理者核准時確認框寫的內容和實際入帳不同** → 確認框依畫面上的明細組字，但明細可能還在重讀（切換種類中），或確認框開著時店員抽回改數量再送出。前端停用按鈕擋不完；核准 action 要帶確認當下看到的內容（種類、品項、數量、處理方式），後端在同一交易比對現況，不同就回衝突（`returns.approve`）。
+
+- **DATA-3**: **先盤點、再結帳並作廢，核准盤點後庫存少了作廢的件數** → 作廢時一律把數量加回盤點明細的系統量，但只有「賣在清點之前」才該加；清點之後才賣的，快照當時還沒扣，加了核准就多扣。要以 `StocktakeItem.snapshot_move_id` 與銷售的異動編號比先後（規則見 DEVELOPER「盤點」快照編號）。凡是會重抓系統量的動作都要同時重記編號；只累加或平移的不可重記，也不可順手解除 `needs_recount`。
 
 #### PS：PowerShell 5.1／環境
 

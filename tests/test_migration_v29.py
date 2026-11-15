@@ -86,7 +86,7 @@ class MigrationV29Test(unittest.TestCase):
         sales = self.rows(f"SELECT {old_columns} FROM Sale ORDER BY sale_id")
         others = {t: self.rows(f"SELECT * FROM {t}") for t in ("SaleItem", "StockMovement", "DayClose", "Correction")}
         init_db(self.db, require_existing=True)
-        self.assertEqual(read_schema_version(self.db), 29)
+        self.assertEqual(read_schema_version(self.db), 30)   # 一路升到最新版
         # 設定清單照原順序搬入;舊單上清單外的名稱建成停用項目,排最後;現金恰好一筆
         self.assertEqual(self.rows("SELECT payment_id,name,sort,active,fee_rate,is_cash FROM PaymentMethod ORDER BY payment_id"),
                          [(1, "現金", 1, 1, 0, 1), (2, "轉帳", 2, 1, 0, 0), (3, "LINE Pay", 3, 1, 220, 0),

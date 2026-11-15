@@ -185,9 +185,13 @@ class TestStocktake(FacadeTestCase):
         self.invoke("stocktake.approve", {"session_id": self.sid})
         self.assertEqual(self.stock(), 0)
 
-    def test_scanning_recount_item_clears_flag(self):
+    def test_scanning_recount_item_keeps_flag_until_count_is_confirmed(self):
+        # 掃描只累加、不重抓系統數量與快照編號,不算重盤完成;要手動填實盤或按「確認」
         self._negative_rebase()
         self.scan(1)
+        self.assertEqual(self.item()["needs_recount"], 1)
+        self.assert_application_error("conflict", "stocktake.close", {"session_id": self.sid})
+        self.set_counted(1)
         self.assertEqual(self.item()["needs_recount"], 0)
         self.submit()
 

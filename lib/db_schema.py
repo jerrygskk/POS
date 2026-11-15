@@ -231,7 +231,10 @@ CREATE TABLE IF NOT EXISTS StocktakeItem(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER NOT NULL REFERENCES StocktakeSession(session_id),
   variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
-  system_qty INTEGER NOT NULL,    -- 首次掃描或最近一次抽回時的庫存快照
+  system_qty INTEGER NOT NULL,    -- 首次掃描、手動填實盤或最近一次抽回時的庫存快照
+  -- 清點當下最大的庫存異動編號(首次掃描或手動填實盤時記;抽回不更新)。
+  -- 作廢銷售單只把編號不大於它的銷售加回 system_qty:清點之後才賣的,快照裡本來就沒扣
+  snapshot_move_id INTEGER NOT NULL DEFAULT 0,
   counted_qty INTEGER NOT NULL DEFAULT 0,
   needs_recount INTEGER NOT NULL DEFAULT 0 CHECK(needs_recount IN (0,1)),
   note TEXT,                      -- 差異原因(選填)
@@ -353,7 +356,7 @@ CREATE TRIGGER IF NOT EXISTS trg_saleitem_lock_delete BEFORE DELETE ON SaleItem
   WHEN EXISTS(SELECT 1 FROM StockMovement WHERE sale_item_id=OLD.item_id)
   BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_stocktakeitem_lock_update BEFORE UPDATE ON StocktakeItem
-  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE stocktake_item_id=OLD.id) AND (OLD.session_id IS NOT NEW.session_id OR OLD.variant_id IS NOT NEW.variant_id OR OLD.system_qty IS NOT NEW.system_qty OR OLD.counted_qty IS NOT NEW.counted_qty)
+  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE stocktake_item_id=OLD.id) AND (OLD.session_id IS NOT NEW.session_id OR OLD.variant_id IS NOT NEW.variant_id OR OLD.system_qty IS NOT NEW.system_qty OR OLD.snapshot_move_id IS NOT NEW.snapshot_move_id OR OLD.counted_qty IS NOT NEW.counted_qty)
   BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_stocktakeitem_lock_delete BEFORE DELETE ON StocktakeItem
   WHEN EXISTS(SELECT 1 FROM StockMovement WHERE stocktake_item_id=OLD.id)
@@ -603,14 +606,31 @@ def _to_v29(conn):
     conn.execute("DELETE FROM Setting WHERE key IN ('payments','payments_disabled','payment_fees')")
 
 
+_TAKE_V29_COLUMNS = "id,session_id,variant_id,system_qty,counted_qty,needs_recount,note"
+
+
+def _to_v30(conn):
+    """v29→v30:StocktakeItem 加 snapshot_move_id。出 1.0.0 時移除。
+
+    舊明細沒留清點當下的異動編號,補不回來:未結案的盤點單一律退回進行中並標成需重新清點,
+    重填實盤時才記下新的快照;已結案、已作廢的不再受作廢影響,填什麼都不改變結果。
+    """
+    conn.execute("PRAGMA defer_foreign_keys=ON")
+    _rebuild(conn, "StocktakeItem", _table_ddl("StocktakeItem"), _TAKE_V29_COLUMNS + ",snapshot_move_id",
+             _TAKE_V29_COLUMNS + ",(SELECT COALESCE(MAX(move_id),0) FROM StockMovement)")
+    conn.execute("UPDATE StocktakeItem SET needs_recount=1 WHERE session_id IN "
+                 "(SELECT session_id FROM StocktakeSession WHERE status IN ('open','pending'))")
+    conn.execute("UPDATE StocktakeSession SET status='open', submitted_at=NULL WHERE status='pending'")
+
+
 # 版號規則:新結構第一版為 BASE_VERSION;MIGRATIONS 為之後的升級步驟,
 # 第 N 筆將 DB 由 BASE_VERSION+N-1 升至 BASE_VERSION+N。callable 只用 conn.execute,
 # 勿自行 commit/executescript(runner 已包在同一交易裡)。
 # 舊版(v24 以前)的升級步驟已移除:低於 MIN_SUPPORTED_VERSION 的資料庫一律拒絕開啟,
 # 主檔改由 tools/make_standard_db.py 唯讀轉出新母版。
-# v27→v28→v29 依序保留到正式版才移除(維護者 2026-11-11 裁示),出 1.0.0 時移除。
+# v27→v28→v29→v30 依序保留到正式版才移除(維護者 2026-11-11 裁示),出 1.0.0 時移除。
 BASE_VERSION = 27
-MIGRATIONS = [(28, _to_v28), (29, _to_v29)]
+MIGRATIONS = [(28, _to_v28), (29, _to_v29), (30, _to_v30)]
 
 # 最新版號 = 新結構第一版 + 升級步驟筆數;全新 DB 建 SCHEMA 即為此版
 SCHEMA_VERSION = BASE_VERSION + len(MIGRATIONS)

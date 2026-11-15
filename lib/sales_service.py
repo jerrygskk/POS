@@ -276,11 +276,13 @@ class SalesService:
             raise ConflictError("此單已作廢")
         for item in conn.execute("SELECT item_id, variant_id, qty FROM SaleItem WHERE sale_id=?", (body["sale_id"],)).fetchall():
             stock_ledger.post(conn, "void", item["item_id"])
-            # 以盤點為準:進行中或待核准的盤點單若已盤到這個品項,系統數量同步加回、實盤數量不動,
-            # 核准時差額(實盤−系統)才不會把作廢沖回的數量再算一次
-            conn.execute("UPDATE StocktakeItem SET system_qty=system_qty+? WHERE variant_id=? AND session_id IN "
-                         "(SELECT session_id FROM StocktakeSession WHERE status IN ('open','pending'))",
-                         (item["qty"], item["variant_id"]))
+            # 以盤點為準:進行中或待核准的盤點單若在這筆銷售之後才盤到這個品項,系統數量同步加回、
+            # 實盤數量不動,核准時差額(實盤−系統)才不會把作廢沖回的數量再算一次。
+            # 清點之後才賣的不加:快照當時還沒扣這筆,加了核准會多扣
+            conn.execute("UPDATE StocktakeItem SET system_qty=system_qty+? WHERE variant_id=? "
+                         "AND snapshot_move_id >= (SELECT move_id FROM StockMovement WHERE sale_item_id=? AND kind='sale') "
+                         "AND session_id IN (SELECT session_id FROM StocktakeSession WHERE status IN ('open','pending'))",
+                         (item["qty"], item["variant_id"], item["item_id"]))
         return {"ok": True}
 
     def set_payment(self, body):

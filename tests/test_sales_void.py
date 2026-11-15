@@ -131,6 +131,96 @@ class SalesVoidTest(FacadeTestCase):
         self.invoke("stocktake.approve", {"session_id": sid})
         self.assertEqual(self.stock(self.v1), 10)
 
+    # ---- 作廢與盤點快照的先後:清點之後才賣的單,作廢時不可再調高系統數量 ----
+
+    def take(self, qty=10):
+        sid = self.invoke("stocktake.create", {"employee": 1})["session_id"]
+        self.invoke("stocktake.scan", {"session_id": sid, "variant_id": self.v1, "qty": qty})
+        return sid
+
+    def take_item(self, sid):
+        item = self.invoke("stocktake.detail", {"session_id": sid})["items"][0]
+        return item["system_qty"], item["counted_qty"]
+
+    def approve(self, sid, close=True):
+        if close:
+            self.invoke("stocktake.close", {"session_id": sid})
+        self.invoke("stocktake.approve", {"session_id": sid})
+        return self.stock(self.v1)
+
+    def test_void_of_sale_made_after_count_does_not_raise_system_qty(self):
+        for pending in (False, True):   # 盤點單進行中、待核准都一樣
+            with self.subTest(pending=pending):
+                sid = self.take()
+                if pending:
+                    self.invoke("stocktake.close", {"session_id": sid})
+                self.void(self.checkout())
+                self.assertEqual(self.take_item(sid), (10, 10))
+                self.assertEqual(self.approve(sid, close=not pending), 10)   # 修正前是 8
+
+    def test_void_after_withdraw_keeps_shifted_diff(self):
+        # 抽回把系統與實盤一起平移成 8／8,差額不變;作廢不可再加回系統數量
+        sid = self.take()
+        self.invoke("stocktake.close", {"session_id": sid})
+        sale = self.checkout()
+        self.invoke("stocktake.withdraw", {"session_id": sid})
+        self.assertEqual(self.take_item(sid), (8, 8))
+        self.void(sale)
+        self.assertEqual(self.take_item(sid), (8, 8))
+        self.assertEqual(self.approve(sid), 10)
+
+    def test_void_after_withdraw_and_recount_follows_new_snapshot(self):
+        # 抽回後重填實盤＝重新清點:快照重抓(系統 8),這筆銷售變成「清點之前」,作廢要加回
+        sid = self.take()
+        self.invoke("stocktake.close", {"session_id": sid})
+        sale = self.checkout()
+        self.invoke("stocktake.withdraw", {"session_id": sid})
+        self.invoke("stocktake.set_counted", {"session_id": sid, "variant_id": self.v1, "counted_qty": 10})
+        self.assertEqual(self.take_item(sid), (8, 10))
+        self.void(sale)
+        self.assertEqual(self.take_item(sid), (10, 10))
+        self.assertEqual(self.approve(sid), 10)   # 快照不重抓會是 12
+
+    def test_void_after_returned_item_is_recounted(self):
+        sid = self.take()
+        self.invoke("stocktake.close", {"session_id": sid})
+        sale = self.checkout()
+        self.invoke("stocktake.return", {"session_id": sid, "variant_ids": [self.v1]})
+        self.assertEqual(self.take_item(sid), (8, 8))
+        self.invoke("stocktake.set_counted", {"session_id": sid, "variant_id": self.v1, "counted_qty": 10})
+        self.void(sale)
+        self.assertEqual(self.approve(sid), 10)
+
+    def test_void_after_item_removed_and_rescanned(self):
+        sid = self.take()
+        sale = self.checkout()
+        self.invoke("stocktake.remove_item", {"session_id": sid, "variant_id": self.v1})
+        self.invoke("stocktake.scan", {"session_id": sid, "variant_id": self.v1, "qty": 10})   # 新明細:系統 8
+        self.assertEqual(self.take_item(sid), (8, 10))
+        self.void(sale)
+        self.assertEqual(self.take_item(sid), (10, 10))
+        self.assertEqual(self.approve(sid), 10)
+
+    def test_void_of_sale_with_same_variant_on_two_lines(self):
+        lines = [{"variant_id": self.v1, "qty": 2, "unit_price": 100}, {"variant_id": self.v1, "qty": 1, "unit_price": 100}]
+        before = self.checkout(items=lines)   # 清點之前賣的:兩列都加回
+        sid = self.take()
+        self.assertEqual(self.take_item(sid), (7, 10))
+        after = self.checkout(items=lines)    # 清點之後賣的:兩列都不加
+        self.void(before, total=300)
+        self.assertEqual(self.take_item(sid), (10, 10))
+        self.void(after, total=300)
+        self.assertEqual(self.take_item(sid), (10, 10))
+        self.assertEqual(self.approve(sid), 10)
+
+    def test_set_counted_retakes_system_qty(self):
+        # 清點後賣出 2 件(沒作廢),重數後填 8:系統數量跟著變 8,核准後是 8 不是 6
+        sid = self.take()
+        self.checkout()
+        self.invoke("stocktake.set_counted", {"session_id": sid, "variant_id": self.v1, "counted_qty": 8})
+        self.assertEqual(self.take_item(sid), (8, 8))
+        self.assertEqual(self.approve(sid), 8)
+
     def test_void_after_stocktake_approved_only_adds_back(self):
         sale = self.checkout()
         sid = self.invoke("stocktake.create", {"employee": 1})["session_id"]

@@ -64,6 +64,73 @@ const flush = () => new Promise(r => setTimeout(r, 0));
         self.assertEqual(out["summary"], {"tag": "sum-B"})
         self.assertEqual(out["query"], "B")
 
+    RELOAD_RACE = r'''
+const fs = require("fs"), vm = require("vm");
+const waits = [], errors = [];
+const later = tag => new Promise((ok, fail) => waits.push(bad => bad ? fail(new Error("fail-" + tag)) : ok([tag])));
+const context = {window: {PosPages: {}}, API: {
+  dayCloseList: r => later(r.date_from), listReceipts: r => later(r.date_from),
+  returnHistory: r => later(r.date_from), stocktakeHistory: r => later(r.date_from),
+  listMembers: q => later(q)}};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
+const page = context.window.PosPages["page-records"];
+const [kind, field] = process.argv[2].split(":");
+const state = {kind, isAdmin: true, returnKind: "normal", memberQuery: "", dateTo: "x", dc: {records: ["old"]},
+  collapseAll() {}, showError(m) { errors.push(m); }, guard: async op => op()};
+const ask = tag => { state.dateFrom = tag; state.memberQuery = tag; return page.methods.reload.call(state); };
+const shown = () => field === "dc" ? state.dc.records : state[field];
+(async () => {
+  const out = {};
+  const qa = ask("A");
+  out.cleared = field === "dc" ? state.dc.records : null;   // 立帳:送出當下就清空
+  const qb = ask("B");
+  waits[1](); await qb; waits[0](); await qa;                 // 新查詢先回,舊查詢後回
+  out.late = shown();
+  const qc = ask("C"), qd = ask("D");
+  waits[3](); await qd; waits[2](true); await qc;             // 舊查詢後來才失敗
+  out.lateError = shown(); out.staleErrors = errors.slice();
+  const qe = ask("E"); waits[4](true); await qe;              // 最新查詢失敗才提示
+  out.errors = errors;
+  process.stdout.write(JSON.stringify(out));
+})().catch(e => { console.error(e); process.exit(1); });
+'''
+
+    def test_late_reply_of_older_query_never_overwrites_or_reports(self):
+        for kind, field in (("dayclose", "dc"), ("receive", "receipts"), ("returns", "returns"),
+                            ("stocktake", "stocktakes"), ("members", "members")):
+            with self.subTest(kind=kind):
+                result = subprocess.run(["node", "-e", self.RELOAD_RACE, str(STATIC / "js" / "records.js"), f"{kind}:{field}"],
+                                        cwd=ROOT, text=True, capture_output=True, check=True, encoding="utf-8")
+                out = json.loads(result.stdout)
+                self.assertEqual(out["late"], ["B"])
+                self.assertEqual(out["lateError"], ["D"])
+                self.assertEqual(out["staleErrors"], [])
+                self.assertEqual(out["errors"], ["fail-E"])
+                if kind == "dayclose":
+                    self.assertEqual(out["cleared"], [])
+
+    def test_switching_kind_discards_pending_query(self):
+        script = r'''
+const fs = require("fs"), vm = require("vm");
+let release;
+const context = {window: {PosPages: {}}, API: {
+  listReceipts: () => new Promise(r => { release = () => r(["late"]); }),
+  stocktakeHistory: async () => ["take"]}};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
+const page = context.window.PosPages["page-records"];
+const state = {kind: "receive", receipts: ["shown"], collapseAll() {}, showError() {}};
+state.reload = page.methods.reload; state.dcLoad = async () => {};
+(async () => {
+  const pending = page.methods.reload.call(state);
+  await page.methods.enterKind.call(state, "stocktake");
+  release(); await pending;
+  process.stdout.write(JSON.stringify({receipts: state.receipts, stocktakes: state.stocktakes}));
+})().catch(e => { console.error(e); process.exit(1); });
+'''
+        self.assertEqual(run_node(script, "records.js"), {"receipts": ["shown"], "stocktakes": ["take"]})
+
 
 if __name__ == "__main__":
     unittest.main()
