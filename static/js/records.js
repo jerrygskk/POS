@@ -85,6 +85,7 @@ window.PosPages["page-records"] = {
     async selectKind(kind) {
       if (this.kind === kind) return;
       if (kind === "dayclose" && !this.isAdmin) { this.showError("需要管理者權限"); return; }
+      window.scrollTo(0, 0);
       await this.enterKind(kind);
     },
     async enterKind(kind) {

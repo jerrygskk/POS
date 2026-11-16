@@ -1,4 +1,4 @@
-from lib.auth import hash_password
+from lib.auth import IDLE_DEFAULT_MIN, hash_password
 
 # 規格欄一律由各種類自己建一份,不留全域共用主檔:同名欄在不同種類的詞彙互不相干
 # (手機殼的天峰藍 vs 傳輸線的黑白),共用會讓建檔候選混進別種類的值。
@@ -15,7 +15,9 @@ def seed(conn, fresh=False):
         conn.executemany("INSERT INTO PaymentMethod(name,sort,active,fee_rate,is_cash) VALUES(?,?,?,?,?)",
                          [(name, sort, active, rate, cash)
                           for sort, (name, active, rate, cash) in enumerate(DEFAULT_PAYMENTS, 1)])
-    conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('cash_float','0')")  # 立帳預備金
+    conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('cash_float','6000')")  # 立帳預備金
+    conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('idle_logout_min',?)",
+                 (str(IDLE_DEFAULT_MIN),))  # 管理者閒置自動登出(分鐘),0＝不自動登出
     if conn.execute("SELECT 1 FROM Setting WHERE key='admin_password_hash'").fetchone() is None:
         conn.execute("INSERT OR IGNORE INTO Setting(key,value) VALUES('admin_password_hash',?)",
                      (hash_password("admin"),))

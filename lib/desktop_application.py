@@ -69,6 +69,7 @@ class DesktopFacade:
             "auth.status": set(), "auth.login": {"password"},
             "auth.logout": set(), "auth.touch": set(),
             "auth.change_password": {"old_password", "new_password"},
+            "auth.idle_logout": set(), "auth.set_idle_logout": {"minutes"},
         }
         if action not in rules or not isinstance(payload, Mapping):
             raise ValidationError("不支援的身分操作")
@@ -84,6 +85,11 @@ class DesktopFacade:
             self.session.touch()
         elif action == "auth.change_password":
             self.session.change_password(payload["old_password"], payload["new_password"])
+        elif action == "auth.idle_logout":
+            self.session.require_admin()
+            return {"is_admin": True, "minutes": self.session.idle_logout_min()}
+        elif action == "auth.set_idle_logout":
+            return {"is_admin": True, "minutes": self.session.set_idle_logout_min(payload["minutes"])}
         return {"is_admin": self.session.is_admin()}
 
 

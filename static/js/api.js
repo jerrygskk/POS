@@ -16,7 +16,7 @@ const API = {
   },
   async invoke(action, payload) {
     const allowed = new Set([
-      "auth.status", "auth.login", "auth.logout", "auth.touch", "auth.change_password",
+      "auth.status", "auth.login", "auth.logout", "auth.touch", "auth.change_password", "auth.idle_logout", "auth.set_idle_logout",
       "categories.list", "categories.create", "categories.update", "categories.delete", "categories.sort", "categories.fields", "categories.set_field", "categories.delete_field",
       "brands.list", "brands.create", "brands.update", "brands.delete", "brands.sort", "brands.set_categories",
       "phone_brands.list", "phone_brands.create", "phone_brands.update", "phone_brands.delete", "phone_brands.sort",
@@ -55,6 +55,8 @@ const API = {
   authLogout: () => API.invoke("auth.logout", {}),
   authTouch: () => API.invoke("auth.touch", {}),
   changePassword: (old_password, new_password) => API.invoke("auth.change_password", {old_password, new_password}),
+  idleLogout: () => API.invoke("auth.idle_logout", {}),
+  setIdleLogout: minutes => API.invoke("auth.set_idle_logout", {minutes}),
   removeStocktakeItem: (session_id, variant_id) => API.invoke("stocktake.remove_item", {session_id, variant_id}),
   listReceipts: p => API.invoke("stock.receipts", p),
   stocktakeHistory: p => API.invoke("stocktake.history", p),

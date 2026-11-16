@@ -24,6 +24,7 @@ const view=mount(context.window.PosPages["page-records"],template("records"));
 const s=view.state;
 assert.ok(all(view.dom,n=>text(n)==="資料設定"&&n.props.class==="cat-name").length===1);
 await s.selectKind("members");await tick();
+assert.deepEqual(context.window.scrolls,[[0,0]]);   // 切換左側類別後捲回頂端
 assert.equal(all(view.dom,n=>n.tag==="input"&&n.props.type==="date").length,0);
 assert.ok(button(view.dom,"新增會員"));
 assert.match(text(view.dom),/0912000111、0988000111/);

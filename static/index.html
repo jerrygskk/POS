@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>膜型機門市管理系統</title>
-<link rel="stylesheet" href="css/pos.css?v=353">
+<link rel="stylesheet" href="css/pos.css?v=357">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=353" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=357" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -759,6 +759,10 @@
            @click="selectSection('payments')">
         <span class="cat-name">付款方式</span>
       </div>
+      <div class="cat-item" :class="{active: section==='system'}"
+           @click="selectSection('system')">
+        <span class="cat-name">系統設定</span>
+      </div>
       <div class="cat-item" :class="{active: section==='password'}"
            @click="selectSection('password')">
         <span class="cat-name">管理者密碼</span>
@@ -872,6 +876,19 @@
         <label>新密碼 <input type="password" v-model="passwordForm.next" autocomplete="new-password"></label>
         <label>確認新密碼 <input type="password" v-model="passwordForm.confirm" autocomplete="new-password"></label>
         <button type="button" class="primary" @click="changePassword">變更密碼</button>
+      </div>
+    </section>
+
+    <!-- 系統設定:一項設定一張卡,各自儲存 -->
+    <section class="cat-detail card-stack" v-else-if="section==='system'">
+      <div class="card">
+        <div class="card-head"><h3>閒置自動登出</h3></div>
+        <div v-if="pageError && errorScope==='idle'" class="error-bar section-bar">⚠ {{ pageError }}</div>
+        <div class="create-form">
+          <label>閒置時間（分鐘） <input class="w80" v-model="idleLogoutMin" inputmode="numeric" maxlength="2" @keyup.enter="saveIdleLogout"></label>
+          <small class="hint">可填 0 到 60；0 為不自動登出。儲存後立即生效。</small>
+          <button type="button" class="primary" @click="saveIdleLogout">儲存</button>
+        </div>
       </div>
     </section>
 
@@ -1101,29 +1118,29 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=353"></script>
-<script src="js/api.js?v=353"></script>
-<script src="js/confirm.js?v=353"></script>
-<script src="js/auth.js?v=353"></script>
-<script src="js/pos_shared.js?v=353"></script>
-<script src="js/catalogfields.js?v=353"></script>
-<script src="js/checkout.js?v=353"></script>
-<script src="js/receive.js?v=353"></script>
-<script src="js/stocktake.js?v=353"></script>
-<script src="js/returns.js?v=353"></script>
-<script src="js/records.js?v=353"></script>
-<script src="js/catalog.js?v=353"></script>
-<script src="js/sortable.js?v=353"></script>
-<script src="js/combobox.js?v=353"></script>
-<script src="js/optpicker.js?v=353"></script>
-<script src="js/modelpicker.js?v=353"></script>
-<script src="js/employeepicker.js?v=353"></script>
-<script src="js/membereditor.js?v=353"></script>
-<script src="js/doccorrect.js?v=353"></script>
-<script src="js/attrfields.js?v=353"></script>
-<script src="js/settings.js?v=353"></script>
-<script src="js/labels.js?v=353"></script>
-<script src="js/app_update.js?v=353"></script>
-<script src="js/app.js?v=353"></script>
+<script src="js/vue.global.prod.js?v=357"></script>
+<script src="js/api.js?v=357"></script>
+<script src="js/confirm.js?v=357"></script>
+<script src="js/auth.js?v=357"></script>
+<script src="js/pos_shared.js?v=357"></script>
+<script src="js/catalogfields.js?v=357"></script>
+<script src="js/checkout.js?v=357"></script>
+<script src="js/receive.js?v=357"></script>
+<script src="js/stocktake.js?v=357"></script>
+<script src="js/returns.js?v=357"></script>
+<script src="js/records.js?v=357"></script>
+<script src="js/catalog.js?v=357"></script>
+<script src="js/sortable.js?v=357"></script>
+<script src="js/combobox.js?v=357"></script>
+<script src="js/optpicker.js?v=357"></script>
+<script src="js/modelpicker.js?v=357"></script>
+<script src="js/employeepicker.js?v=357"></script>
+<script src="js/membereditor.js?v=357"></script>
+<script src="js/doccorrect.js?v=357"></script>
+<script src="js/attrfields.js?v=357"></script>
+<script src="js/settings.js?v=357"></script>
+<script src="js/labels.js?v=357"></script>
+<script src="js/app_update.js?v=357"></script>
+<script src="js/app.js?v=357"></script>
 </body>
 </html>

@@ -429,6 +429,11 @@ table.sub td:last-child { white-space: nowrap; }
 .cat-add input { flex: 1; min-width: 0; }
 .cat-detail { flex: 1; background: var(--surface); border-radius: 8px; padding: 16px;
   min-width: 0; max-width: 770px; }
+/* 一頁放多張設定卡:外層不畫白底,每張卡各自一塊;卡內表單不再自帶底色與內距 */
+.cat-detail.card-stack { background: none; padding: 0; }
+.card-stack > .card { max-width: none; }
+.card-stack > .card:last-child { margin-bottom: 0; }
+.card > .create-form { padding: 0; margin-top: 0; }
 .detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   margin-bottom: 14px; }
 .detail-head .cat-title { flex: 1; min-width: 160px; font-size: 18px; font-weight: 600; }

@@ -6,6 +6,7 @@ const context = {console, setTimeout, clearTimeout, setInterval, clearInterval};
 context.document = {createElement: tag=>node(tag), activeElement:null,
   addEventListener(name, fn){events[name]=fn;}, removeEventListener(){}};
 context.window = {PosPages: {}, PosEmployee: {id: 1}, addEventListener(){}, removeEventListener(){},
+  scrolls: [], scrollTo(x, y){ this.scrolls.push([x, y]); },
   PosDesktopLock: {lock(){}, unlock(){}}, fmtAttr: row => row.attr_display || ""};
 context.API = {};
 context.PosConfirm = {ask: async () => true, notify: async () => {}};

@@ -492,7 +492,6 @@ CREATE TRIGGER IF NOT EXISTS trg_correction_no_delete BEFORE DELETE ON Correctio
   BEGIN SELECT RAISE(ABORT, '更正紀錄不可修改或刪除'); END;
 """
 
-import json
 import sqlite3
 
 
@@ -512,125 +511,12 @@ def statements():
     return out
 
 
-def _table_ddl(table):
-    prefix = f"CREATE TABLE IF NOT EXISTS {table}("
-    for stmt in statements():
-        start = stmt.find(prefix)  # 語句前面可能帶著註解行;表內的註解原樣保留,與全新資料庫存下的定義一致
-        if start >= 0 and all(l.strip().startswith("--") for l in stmt[:start].splitlines()):
-            return stmt[start:]
-    raise RuntimeError(f"SCHEMA 找不到資料表 {table}")
-
-
-_SALE_V27_COLUMNS = "sale_id,ts,payment,order_discount,member_discount,total,paid,change,employee,member_id"
-_MOVE_V27_COLUMNS = ("move_id,variant_id,qty,kind,receipt_item_id,sale_item_id,stocktake_item_id,"
-                     "return_item_id,note,employee,ts")
-
-
-def _to_v28(conn):
-    """v27→v28:Sale 加帳日與作廢欄位、StockMovement 加 void 種類。出 1.0.0 時移除。
-
-    用「原名直接重建」:資料先搬到暫存表,原表丟掉後用原名建新結構再搬回,保留主鍵與流水號。
-    不用「建新表再改名」:改名前新表不算子表的父表,延後的外鍵違規消不掉;改名也會被其他表上
-    引用 StockMovement 的 trigger 擋下。掛在兩張表上的 trigger 與索引隨 DROP 消失,由呼叫端
-    接著逐句執行 SCHEMA 重建;DayClose、Correction 同樣由 SCHEMA 建立。
-    """
-    bad = [str(r[0]) for r in conn.execute("SELECT sale_id FROM Sale WHERE date(ts) IS NULL ORDER BY sale_id")]
-    if bad:
-        shown = "、".join(bad[:20]) + ("…" if len(bad) > 20 else "")
-        raise RuntimeError(f"資料庫升級中止：{len(bad)} 張銷售單的時間無法判斷帳日（單號 {shown}）")
-    conn.execute("PRAGMA defer_foreign_keys=ON")  # 外鍵檢查不關,延到提交前整體檢查
-    # Sale 要建成 v28 的樣子(還沒有 payment_id):現行定義那一欄是 NOT NULL,這一步填不出來,由 _to_v29 補
-    sale_v28 = "".join(l for l in _table_ddl("Sale").splitlines(keepends=True) if not l.startswith("  payment_id "))
-    _rebuild(conn, "Sale", sale_v28, _SALE_V27_COLUMNS + ",business_date", _SALE_V27_COLUMNS + ",date(ts)")
-    _rebuild(conn, "StockMovement", _table_ddl("StockMovement"), _MOVE_V27_COLUMNS, _MOVE_V27_COLUMNS)
-
-
-def _rebuild(conn, table, ddl, columns, select):
-    """原名重建一張表並搬回資料,保留主鍵與流水號;表上的 trigger、索引隨 DROP 消失,由 SCHEMA 建回。"""
-    seq = conn.execute("SELECT seq FROM sqlite_sequence WHERE name=?", (table,)).fetchone()
-    conn.execute(f"CREATE TEMP TABLE _old AS SELECT * FROM {table}")
-    conn.execute(f"DROP TABLE {table}")
-    conn.execute(ddl)
-    conn.execute(f"INSERT INTO {table}({columns}) SELECT {select} FROM _old")
-    conn.execute("DROP TABLE _old")
-    if seq is not None:
-        conn.execute("DELETE FROM sqlite_sequence WHERE name=?", (table,))
-        conn.execute("INSERT INTO sqlite_sequence(name,seq) VALUES(?,?)", (table, seq[0]))
-
-
-_SALE_V28_COLUMNS = _SALE_V27_COLUMNS + ",business_date,voided_at,void_reason"
-
-
-def _to_v29(conn):
-    """v28→v29:付款方式由 Setting 的三個 JSON 鍵搬進 PaymentMethod,Sale 補編號,已立帳帳日補快照。
-
-    補出來的快照比例一律是升級當下的設定值,不是立帳當時的值(當時沒有留)。
-    """
-    def setting(key, default):
-        row = conn.execute("SELECT value FROM Setting WHERE key=?", (key,)).fetchone()
-        try:
-            value = json.loads(row[0]) if row else default
-        except ValueError:
-            value = default
-        return value if isinstance(value, type(default)) else default
-
-    conn.execute("PRAGMA defer_foreign_keys=ON")
-    names = [n.strip() for n in setting("payments", []) if isinstance(n, str) and n.strip()]
-    names = list(dict.fromkeys(names))
-    if "現金" not in names:
-        names.insert(0, "現金")   # 舊版以這個名稱認現金
-    disabled, fees = set(setting("payments_disabled", [])), setting("payment_fees", {})
-    for table in ("PaymentMethod", "DayClose", "DayClosePayment"):
-        conn.execute(_table_ddl(table))   # v27 一路升上來時 DayClose 還沒建
-    for sort, name in enumerate(names, 1):
-        cash = name == "現金"
-        try:
-            rate = 0 if cash else min(max(round(float(fees.get(name, 0)) * 100), 0), 10000)
-        except (TypeError, ValueError):
-            rate = 0
-        conn.execute("INSERT INTO PaymentMethod(name,sort,active,fee_rate,is_cash) VALUES(?,?,?,?,?)",
-                     (name, sort, 1 if cash else int(name not in disabled), rate, int(cash)))
-    # 舊單上的名稱不在清單裡:替它建一筆停用的付款方式,不留空、不硬對到別人
-    for row in conn.execute("SELECT DISTINCT payment FROM Sale WHERE payment NOT IN (SELECT name FROM PaymentMethod) "
-                            "ORDER BY payment").fetchall():
-        conn.execute("INSERT INTO PaymentMethod(name,sort,active) "
-                     "VALUES(?,(SELECT COALESCE(MAX(sort),0)+1 FROM PaymentMethod),0)", (row[0],))
-    _rebuild(conn, "Sale", _table_ddl("Sale"), _SALE_V28_COLUMNS + ",payment_id",
-             _SALE_V28_COLUMNS + ",(SELECT payment_id FROM PaymentMethod WHERE name=_old.payment)")
-    conn.execute(
-        "INSERT INTO DayClosePayment(business_date,payment_id,name,count,total,fee_rate) "
-        "SELECT s.business_date, p.payment_id, p.name, COUNT(*), SUM(s.total), p.fee_rate "
-        "FROM Sale s JOIN PaymentMethod p ON p.payment_id=s.payment_id "
-        "WHERE s.voided_at IS NULL AND s.business_date IN (SELECT business_date FROM DayClose) "
-        "GROUP BY s.business_date, p.payment_id")
-    conn.execute("DELETE FROM Setting WHERE key IN ('payments','payments_disabled','payment_fees')")
-
-
-_TAKE_V29_COLUMNS = "id,session_id,variant_id,system_qty,counted_qty,needs_recount,note"
-
-
-def _to_v30(conn):
-    """v29→v30:StocktakeItem 加 snapshot_move_id。出 1.0.0 時移除。
-
-    舊明細沒留清點當下的異動編號,補不回來:未結案的盤點單一律退回進行中並標成需重新清點,
-    重填實盤時才記下新的快照;已結案、已作廢的不再受作廢影響,填什麼都不改變結果。
-    """
-    conn.execute("PRAGMA defer_foreign_keys=ON")
-    _rebuild(conn, "StocktakeItem", _table_ddl("StocktakeItem"), _TAKE_V29_COLUMNS + ",snapshot_move_id",
-             _TAKE_V29_COLUMNS + ",(SELECT COALESCE(MAX(move_id),0) FROM StockMovement)")
-    conn.execute("UPDATE StocktakeItem SET needs_recount=1 WHERE session_id IN "
-                 "(SELECT session_id FROM StocktakeSession WHERE status IN ('open','pending'))")
-    conn.execute("UPDATE StocktakeSession SET status='open', submitted_at=NULL WHERE status='pending'")
-
-
 # 版號規則:新結構第一版為 BASE_VERSION;MIGRATIONS 為之後的升級步驟,
 # 第 N 筆將 DB 由 BASE_VERSION+N-1 升至 BASE_VERSION+N。callable 只用 conn.execute,
 # 勿自行 commit/executescript(runner 已包在同一交易裡)。
-# 舊版(v24 以前)的升級步驟已移除:低於 MIN_SUPPORTED_VERSION 的資料庫一律拒絕開啟,
-# 主檔改由 tools/make_standard_db.py 唯讀轉出新母版。
-# v27→v28→v29→v30 依序保留到正式版才移除(維護者 2026-11-11 裁示),出 1.0.0 時移除。
-BASE_VERSION = 27
-MIGRATIONS = [(28, _to_v28), (29, _to_v29), (30, _to_v30)]
+# 低於 MIN_SUPPORTED_VERSION 的資料庫一律拒絕開啟。
+BASE_VERSION = 1
+MIGRATIONS = []
 
 # 最新版號 = 新結構第一版 + 升級步驟筆數;全新 DB 建 SCHEMA 即為此版
 SCHEMA_VERSION = BASE_VERSION + len(MIGRATIONS)

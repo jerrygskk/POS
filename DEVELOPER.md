@@ -39,15 +39,15 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 
 ### 資料模型
 
-- **Schema**：`SCHEMA` 是唯一定義。`MIN_SUPPORTED_VERSION` 以前的升級步驟全部移除（目前等於 v27），較舊的資料庫一律拒絕開啟，改用母版工具轉出的新版標準資料庫。現行為 **v30**，`MIGRATIONS` 依序是 v27→v28（`_to_v28`：原名重建 `Sale`／`StockMovement`、補帳日；建的是 v28 形狀的 `Sale`，不是現行的）與 v28→v29（`_to_v29`：付款方式由 `Setting` 的三個 JSON 鍵搬進 `PaymentMethod`、`Sale` 補 `payment_id`、已立帳的帳日補 `DayClosePayment` 快照；舊單上不在清單裡的名稱會替它建一筆停用的付款方式；補出來的快照比例是升級當下的設定值，當時的值沒有留）、v29→v30（`_to_v30`：原名重建 `StocktakeItem` 加 `snapshot_move_id`；舊明細沒留清點當下的異動編號、補不回來，未結案的盤點單一律退回進行中並把品項標成需重新清點，已結案與已作廢的不受影響）。升級與種子在同一交易，commit 前跑外鍵檢查，失敗整個回復；來源結構凍結在 `tests/fixtures/schema_v27.sql`、`schema_v28.sql`、`schema_v29.sql`。出 1.0.0 時把這三步連同 fixture 與 `tests/test_migration_v28.py`、`test_migration_v29.py`、`test_migration_v30.py` 移除，`BASE_VERSION`、`MIN_SUPPORTED_VERSION` 改成當時版號。尚未上線期間，改結構直接改 `SCHEMA` 並重產母版；上線後再改結構才在 `MIGRATIONS` 加步驟：搬表要明確開交易、保留原編號與流水號，失敗完整回復，不可關閉外鍵檢查。
+- **Schema**：`SCHEMA` 是唯一定義。現行為 **v1**，`BASE_VERSION`、`MIN_SUPPORTED_VERSION` 都是 1，`MIGRATIONS` 是空的：上線前的升級步驟與來源結構凍結檔已全部移除，上線前建立的舊資料庫（版號 27～30）會被當成「比程式新」而拒絕開啟，一律改用新版標準資料庫。升級與種子在同一交易，commit 前跑外鍵檢查，失敗整個回復。上線後再改結構才在 `MIGRATIONS` 加步驟並凍結來源結構到 `tests/fixtures/`：搬表要明確開交易、保留原編號與流水號，失敗完整回復，不可關閉外鍵檢查。
 - **資料庫限制分兩層**：單筆能判斷的寫成 CHECK、複合外鍵、部分唯一索引；跨表規則放程式，在同一交易內檢查（`product_data.check_variant_attributes`、`returns_service.check_kind`、`product_data.check_field_name`）。
 - **金額與數量**：一律 int（新台幣元，無小數）。
-- **庫存採異動流水制**：不存目前庫存，一律由 `StockMovement` 加總（`product_data.stock_of`）。`kind`：`purchase`＋、`sale`－、`adjust`±、`return`＋、`repair`＋（返新）、`void`＋（作廢銷售單沖回，schema v28；與 `sale` 指向同一筆銷售明細，一筆明細各只能有一筆 `sale` 與一筆 `void`）。
-- **異動來源（schema v26）**：每筆異動恰好指向一個來源明細（`receipt_item_id`／`sale_item_id`／`stocktake_item_id`／`return_item_id`），CHECK 限定來源與 kind、正負一致；複合外鍵保證來源與異動同款式；部分唯一索引防同一明細入帳兩次（返新可分批，不套用）。`employee` 只有返新記，其他看各自單據。
+- **庫存採異動流水制**：不存目前庫存，一律由 `StockMovement` 加總（`product_data.stock_of`）。`kind`：`purchase`＋、`sale`－、`adjust`±、`return`＋、`repair`＋（返新）、`void`＋（作廢銷售單沖回；與 `sale` 指向同一筆銷售明細，一筆明細各只能有一筆 `sale` 與一筆 `void`）。
+- **異動來源**：每筆異動恰好指向一個來源明細（`receipt_item_id`／`sale_item_id`／`stocktake_item_id`／`return_item_id`），CHECK 限定來源與 kind、正負一致；複合外鍵保證來源與異動同款式；部分唯一索引防同一明細入帳兩次（返新可分批，不套用）。`employee` 只有返新記，其他看各自單據。
 - **入帳唯一入口** `stock_ledger.post(conn, kind, source_id, qty=None, employee=None)`：數量一律由來源明細算出（返新除外），同交易檢查單據狀態與返新上限。進貨、結帳、盤點核准、退貨核准、返新五個寫入點都走它，不直接寫 `StockMovement`。
 - **已入帳鎖定**：有異動指向的明細，被鎖欄位真的改值（`OLD.x IS NOT NEW.x`）或刪除時由 trigger 擋；`StockMovement` 全表不可改刪。⚠️ 另有新增前與更新前檢查擋 `INSERT／UPDATE OR REPLACE`：撞鍵時的隱含刪除不會觸發刪除 trigger（PITFALLS SQL-5）。返修結案／撤回、退貨原因、盤點備註、單據狀態不在鎖定範圍。
 - **售價**：只看 `Variant.price`，NULL 表示未定價。
-- **商品結構**：`Product`（款）掛 `Category`／`Brand`；`Variant`（子產品）經 `VariantModel` 多對多掛型號；規格欄 `AttributeField` 直接帶 `category_id`（schema v25 併入原 `CategoryField` 的排序、必填、預設選項），選項 `AttributeOption` 無上下層連動。
+- **商品結構**：`Product`（款）掛 `Category`／`Brand`；`Variant`（子產品）經 `VariantModel` 多對多掛型號；規格欄 `AttributeField` 直接帶 `category_id`（併入原 `CategoryField` 的排序、必填、預設選項），選項 `AttributeOption` 無上下層連動。
 - **規格值**：存在 `VariantAttribute`（`option_id`／`text_value` 恰一非 NULL），改欄名或選項值立即生效。action 以 `attributes:{欄名:值}` 進出，由 `set_variant_attributes`／`attrs_by_variant` 轉換；select 值查無選項回驗證錯誤。
 - **規格值一致性**：複合外鍵保證選項屬於該欄；跨表規則（欄位屬於商品的種類、select 單值、欄型別與值型別對應）由 `check_variant_attributes` 在寫入的同一交易檢查。已填規格的產品改種類回衝突，不自動清值。
 - **同種類欄名不重複**：資料庫 `UNIQUE(category_id, name)` 只擋完全相同；全半形、大小寫、空白不同的同名由 `check_field_name`（`normalize_key`）擋。⚠️ `fields.create`／`update` 先 `BEGIN IMMEDIATE` 再查重與寫入，否則兩個操作交錯會各自通過檢查。
@@ -69,7 +69,7 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 - **單項折扣與實售價**：原價唯讀（未標價品掃入時跳框輸入的值放在原價）；另有「實售價」欄，可由 95／9／85 切換鈕（共用 `.chip`，同列單選、再按取消）帶入「原價×折數」四捨五入到元，也可由店員直接輸入整數，手填即取消折數鈕。折扣金額 `lineDiscount`＝（原價－實售價）×數量；送後端仍是金額 `discount`，後端與 schema 不變。實售價高於原價時格子標紅，結帳前擋下（後端另驗 `0 ≤ discount ≤ 數量×原價`）。
 - **進貨列印標籤**：一般進貨與返新進貨都不另設標籤欄，「列印 N 張」按鈕接在數量框後面（`.qty-label`），按過變「已加入 N 張」，數量改大只補差額。
 - **金額欄**：原價、數量、整單折抵、會員折扣、實收都是文字框，輸入時只留數字。金額清空視為 0；實收清空維持空白（視為剛好付清）；數量打字途中可留白，離開欄位補回至少 1。
-- **付款方式**（`PaymentMethod`，schema v29）：`payment_id` 固定不重用，舊銷售單與立帳快照靠它認付款方式；`name`、`sort`、`active`、`fee_rate`（抽成比例，**百分比×100 的整數**，2.2%＝220，避免小數誤差）、`is_cash`。種子預設現金、轉帳、LINE Pay（2.2%）、台灣Pay（停用），只在空表時建。**現金靠 `is_cash` 認，不比對名稱**：恰好一筆、恆啟用、不抽成、不可刪，由 CHECK、部分唯一索引與 trigger 擋（`trg_payment_no_replace` 擋 `INSERT OR REPLACE` 換掉既有列）；只有它找零、計入立帳的現金銷售。`Sale` 同時存 `payment_id` 與 `payment`（結帳或更正當下的名稱），同一句寫入：查詢、篩選、合計、立帳一律認編號，單張單據、匯出 CSV、更正紀錄印當時的名稱。**API 一律傳編號**：`payments.list` 回全部（含停用）的 `{payment_id,name,active,fee_rate,is_cash,used}`；結帳、更正付款方式只收啟用中的編號（交易內檢查），紀錄篩選與收銀合計用全部。**設定頁「付款方式」**（`payment_service`，限管理者，改完即存）：`payments.create`（排最後）、`payments.update`（`name`／`active`／`fee_rate`）、`payments.sort`（須送全部編號）、`payments.delete`。名稱最多 10 字，以 `normalize_key` 比對不可重複（含停用的）；改名只改 `PaymentMethod.name`，別人放掉的舊名可再用。刪除只限沒用過的（沒有銷售單、沒有立帳快照，`used` 為否），用過的只能停用；畫面上每列控制項數量相同（現金列只佔位不顯示、用過的 ✕ 反灰），名稱框才會等寬。改抽成比例只影響之後立帳的帳日。非現金一律剛好付清：前端實收鎖住顯示應收，後端也把 `paid` 強制改成應收、找零 0，不信任前端傳值。現金實收少於應收時前後端都擋（後端為準）。結帳成功後付款方式回到清單第一項，避免下一單沿用上一單的付款方式記錯。會員折扣不要求先選會員。
+- **付款方式**（`PaymentMethod`）：`payment_id` 固定不重用，舊銷售單與立帳快照靠它認付款方式；`name`、`sort`、`active`、`fee_rate`（抽成比例，**百分比×100 的整數**，2.2%＝220，避免小數誤差）、`is_cash`。種子預設現金、轉帳、LINE Pay（2.2%）、台灣Pay（停用），只在空表時建。**現金靠 `is_cash` 認，不比對名稱**：恰好一筆、恆啟用、不抽成、不可刪，由 CHECK、部分唯一索引與 trigger 擋（`trg_payment_no_replace` 擋 `INSERT OR REPLACE` 換掉既有列）；只有它找零、計入立帳的現金銷售。`Sale` 同時存 `payment_id` 與 `payment`（結帳或更正當下的名稱），同一句寫入：查詢、篩選、合計、立帳一律認編號，單張單據、匯出 CSV、更正紀錄印當時的名稱。**API 一律傳編號**：`payments.list` 回全部（含停用）的 `{payment_id,name,active,fee_rate,is_cash,used}`；結帳、更正付款方式只收啟用中的編號（交易內檢查），紀錄篩選與收銀合計用全部。**設定頁「付款方式」**（`payment_service`，限管理者，改完即存）：`payments.create`（排最後）、`payments.update`（`name`／`active`／`fee_rate`）、`payments.sort`（須送全部編號）、`payments.delete`。名稱最多 10 字，以 `normalize_key` 比對不可重複（含停用的）；改名只改 `PaymentMethod.name`，別人放掉的舊名可再用。刪除只限沒用過的（沒有銷售單、沒有立帳快照，`used` 為否），用過的只能停用；畫面上每列控制項數量相同（現金列只佔位不顯示、用過的 ✕ 反灰），名稱框才會等寬。改抽成比例只影響之後立帳的帳日。非現金一律剛好付清：前端實收鎖住顯示應收，後端也把 `paid` 強制改成應收、找零 0，不信任前端傳值。現金實收少於應收時前後端都擋（後端為準）。結帳成功後付款方式回到清單第一項，避免下一單沿用上一單的付款方式記錯。會員折扣不要求先選會員。
 - **小計列**：待結帳表 `tfoot`，有品項才顯示；金額未扣整單折抵與會員折扣，所以可能與應收不同。
 - **紀錄查詢條件**：起日晚於迄日由後端拒絕；查詢失敗清空列表與合計，不留上一次結果。匯出 CSV 用最近一次查詢成功的條件，不讀輸入框當下的值（否則匯出內容與畫面不符）。
 - **匯出 CSV**（`sales.export`）：含 BOM 讓 Excel 認得 UTF-8；員工後一欄為會員（只有名稱，刻意不帶電話：匯出檔易外流）。紀錄查詢明細的會員列則帶該會員全部電話（`member_phones`，依號碼排序以「、」串接，即時讀 `MemberPhone`，非結帳當下快照）。⚠️ 文字格開頭是 `= + - @`、tab、換行時補單引號（`_csv_text`），否則 Excel 開檔會當公式執行；會員名稱來自 LINE 匯入與店員輸入，不能假設安全。
@@ -79,7 +79,7 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 ### 立帳、作廢與更正
 
 - **帳日** `Sale.business_date`：結帳時在 INSERT 同一句決定，當天已立帳就算隔天，否則算當天；結帳先 `BEGIN IMMEDIATE`，避免與立帳交錯。紀錄查詢的日期條件、合計、匯出一律看帳日，不看結帳時間；帳日與結帳日期不同的單在列表標「計入次日帳」。
-- **每日立帳**（`dayclose_service`，限管理者，入口在紀錄查詢「立帳」）：`DayClose` 一個帳日一筆，記預備金、錢櫃現金總額、現金銷售、短溢、原因與員工代號。短溢＝錢櫃總額－預備金－現金銷售（不含已作廢），不為 0 時原因必填。`dayclose.close` 要帶預覽當下看到的現金銷售，後端同交易比對，不同就回衝突。不可替未來的帳日立帳；預備金存 `Setting.cash_float`。
+- **每日立帳**（`dayclose_service`，限管理者，入口在紀錄查詢「立帳」）：`DayClose` 一個帳日一筆，記預備金、錢櫃現金總額、現金銷售、短溢、原因與員工代號。短溢＝錢櫃總額－預備金－現金銷售（不含已作廢），不為 0 時原因必填。`dayclose.close` 要帶預覽當下看到的現金銷售，後端同交易比對，不同就回衝突。不可替未來的帳日立帳；預備金存 `Setting.cash_float`（種子預設 6000）。
 - **立帳快照**（`DayClosePayment`，一個帳日每種付款方式一筆）：立帳時把有交易的付款方式的筆數、金額、當下名稱與抽成比例寫進去，先寫明細再寫 `DayClose` 主檔（延後外鍵，提交時才檢查）；主檔寫入後不可追加、修改、刪除，也擋 REPLACE。沒交易的不存。金額不含已作廢、不扣退貨（店家每天處理完退貨才立帳）。
 - **立帳紀錄與月結圖片**：`dayclose.list` **只讀快照**，不回頭加總銷售單、不讀現在的比例（改比例、改名、停用都不會動到舊報表的金額）。每筆帶 `by_payment`（`payment_id`、`payment`、`total`、`fee_rate`，每筆欄位與順序相同）與 `sales_total`。欄位＝啟用中的付款方式，加上停用但查詢期間有交易的；欄名用現在的名稱，那天沒交易的補 0。⚠️ 前端 `dcPayments`／`dcTotals`／`dcCopyImage` 以索引對欄位，靠的就是「每筆順序相同」。表尾列查詢區間的合計；有抽成時再列「抽成比例／抽成金額／實收」。抽成由前端 `dcTotals` 算：每天的金額乘**當天快照的比例**，整個區間加總後才四捨五入一次（逐日四捨五入會有累積誤差；金流業者在提領時才扣，每天的金額不扣）。抽成比例只列有金額的日子實際用到的，依日期由舊到新、不重複，月中換比例時畫面上下排、圖片用「／」隔開；抽過成又改成 0 的，0% 也列，整段都不抽成的留空。「複製成圖片」（`dcCopyImage`）用 canvas 畫一張給公司看的報表放進剪貼簿：欄位是帳日、各付款方式、銷售合計、短溢、原因，日期由小到大，不列員工、立帳時間、預備金、錢櫃總額；與畫面表格是兩套欄位，改一邊要想另一邊。畫面表格的短溢原因不佔欄，只在有原因的帳日下面多一行；最右一欄是空白欄，吃掉多餘寬度，讓金額欄維持固定寬。
 - **鎖帳**：帳日立帳後，該帳日的銷售單不可新增、改金額／付款方式／會員／帳日、作廢、刪除，由 trigger 擋（含兩種 REPLACE）；`DayClose` 本身不可改刪。立帳後要沖帳只能走退貨。
@@ -109,7 +109,7 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 - **唯一權限表**：`auth.ADMIN_ACTIONS`。新增會改資料的動作必須決定歸屬，並更新逐項列權限的測試。`DesktopFacade.invoke` 分派前檢查；Bridge 直接處理的入口另檢查；匯出在實際寫檔前再查一次。待核准單的修改與作廢不在表內，由服務層依單據狀態檢查。
 - **前端**：員工畫面隱藏受限操作，但每個進入點仍要檢查；確認視窗後的破壞性操作在執行前再查身分與目標狀態。
 - **身分**：只存後端記憶體，主視窗與子視窗共用，關程式不保留。初始密碼 `admin`，改密碼後立即登出。
-- **閒置**：600 秒。後端讀取身分時先檢查逾時，前端不自行計時。`auth.status`、`auth.logout`、待核准數量查詢不續期。主動登出關閉子視窗；閒置逾時不關，下次儲存收到權限錯誤。
+- **閒置**：分鐘數存 `Setting.idle_logout_min`（預設 15、範圍 0～60、0＝不自動登出；缺值或壞值退回 15），在設定頁左側「系統設定」的「閒置自動登出」卡片修改（`auth.idle_logout`／`auth.set_idle_logout`，限管理者）。`AdminSession` 只在登入與存檔當下讀設定，存檔立即生效並重新起算。⚠️ 前端每 60 秒最多回報一次操作，設成 1 分鐘時操作中也可能被登出。後端讀取身分時先檢查逾時，前端不自行計時。`auth.status`、`auth.logout`、待核准數量查詢不續期。主動登出關閉子視窗；閒置逾時不關，下次儲存收到權限錯誤。
 - **視窗標題**：主視窗顯示 `膜型機門市管理系統  [一般使用者／管理者模式]  - v版號`，由 `lib/desktop_bridge.py` 在每次 `auth.*` 回傳後同步；閒置逾時要等前端下次查 `auth.status` 才變，與選單的管理者標籤同時。子視窗標題不變。
 - **密碼**：PBKDF2-HMAC-SHA256、200,000 次、16 bytes 鹽，`hmac.compare_digest` 比對。種子只補缺少的密碼。密碼與請求內容不得寫入錯誤記錄；標準資料庫不複製來源密碼。
 
@@ -120,7 +120,7 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 - **送審不動庫存**，只有管理者核准才寫 `adjust`。任何身分可抽回。
 - **差額公式**：實盤量 − 系統量（首次掃描、手動填實盤或最近一次抽回時的快照），加入核准當下庫存。⚠️ 不能用目前庫存重算，否則送審期間的銷售會被重複扣除。待核准單不開放改實盤量（含管理者），有誤一律以「退回重盤」交回員工依現場數量修正；此時也禁止掃描新增。
 - **抽回平移**：同一交易內，新系統量＝目前庫存；新實盤量＝舊實盤量＋（新系統量 − 舊系統量），讓未修改品項維持原差額。結果為負時實盤量設 0 並標 `needs_recount=1`，須重新確認才能結案或核准；手動填實盤或按「確認」才清除（送出相同的 0 也算），掃描只累加、不清除。
-- **快照編號**（`StocktakeItem.snapshot_move_id`，schema v30）：清點當下最大的 `StockMovement.move_id`。作廢銷售單時，只有該銷售的異動編號不大於它（賣在清點之前）才把數量加回系統量；清點之後才賣的，快照當時還沒扣，加了核准會多扣。用編號不用時間：`ts` 只到秒，同秒分不出先後。何時重記：首次掃描、移除後重掃（新明細）、手動填實盤（視為現場重新清點，系統量一併重抓成當下庫存）；既有列掃描累加與抽回**不重記**——抽回是系統量與實盤量一起平移、差額不變，重記會讓「清點後才賣」的單在作廢時被多加一次。已入帳明細連這一欄一起鎖。⚠️ 已知限制：只改正打錯的數字而沒重數、中間又有賣出時，差額會少算賣出的件數。
+- **快照編號**（`StocktakeItem.snapshot_move_id`）：清點當下最大的 `StockMovement.move_id`。作廢銷售單時，只有該銷售的異動編號不大於它（賣在清點之前）才把數量加回系統量；清點之後才賣的，快照當時還沒扣，加了核准會多扣。用編號不用時間：`ts` 只到秒，同秒分不出先後。何時重記：首次掃描、移除後重掃（新明細）、手動填實盤（視為現場重新清點，系統量一併重抓成當下庫存）；既有列掃描累加與抽回**不重記**——抽回是系統量與實盤量一起平移、差額不變，重記會讓「清點後才賣」的單在作廢時被多加一次。已入帳明細連這一欄一起鎖。⚠️ 已知限制：只改正打錯的數字而沒重數、中間又有賣出時，差額會少算賣出的件數。
 - **防重**：送審、抽回、核准都以來源狀態作條件式更新；核准更新成功一筆才寫調整，同一交易。
 - **作廢**：進行中或待核准可作廢（待核准限管理者），記 `cancelled_at`／`cancelled_by`，不動庫存、保留紀錄。已核准不可作廢，以新盤點單修正。不提供真正刪除，避免做錯的單不留痕跡。
 - **差異原因**：`StocktakeItem.note` 選填，只在進行中可改。
@@ -143,7 +143,7 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 `ReturnSession`／`ReturnItem`，狀態與作廢規則同盤點，但**不限同時一張**，也不受盤點影響。
 
 - 每項可填銷售單編號（選填，填了須存在）與原因，送審後不可改。
-- **種類（schema v27）**：`ReturnSession.kind` 為 `normal`／`repair`。一般退貨由管理者逐項選 `disposition`：`restock`（預設）、`discard`、`reject`，核准同一交易內只替 `restock` 寫 `kind='return'`。返修單的品項 `disposition` 為 NULL；兩者一致由 `check_kind` 在掃描、切換、改處理方式、核准時檢查。
+- **種類**：`ReturnSession.kind` 為 `normal`／`repair`。一般退貨由管理者逐項選 `disposition`：`restock`（預設）、`discard`、`reject`，核准同一交易內只替 `restock` 寫 `kind='return'`。返修單的品項 `disposition` 為 NULL；兩者一致由 `check_kind` 在掃描、切換、改處理方式、核准時檢查。
 - **切換種類**：`returns.set_kind` 限管理者、限待核准。切返修清空處理方式、切回一般全部設回加回庫存；⚠️ 種類沒變就不動，否則重送會把「不同意」改回加回庫存。
 - **核准帶確認內容**：`returns.approve` 必帶確認框上看到的 `kind` 與各品項 `item_id`／`qty`／`disposition`，與資料庫現況不同回衝突「退貨單內容已變更」。前端在切換期間停用核准鈕。⚠️ 只靠前端停用擋不住「確認框開著時店員抽回改數量再送出」。
 - 品項操作一律以 `ReturnItem.id`（`item_id`）定位。
@@ -242,10 +242,10 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 - **轉換**：`CategoryField` 併入 `AttributeField`（啟用取兩者皆啟用），保留原主鍵與 `sqlite_sequence`。單一交易寫入、`defer_foreign_keys`，commit 前跑外鍵檢查，再以 `check_variant_attributes` 核對單選單值與欄型別。⚠️ 每張資料表與設定鍵都要歸在「複製」或「不複製」清單，未歸類就停止；`payments` 等舊設定鍵不複製，`PaymentMethod` 由種子建（歸在 `SEED_TABLES`，來源沒有這張表）；`next_store_barcode` 必須帶，否則新條碼會撞號。
 - **對帳**：轉完逐表比對資料列、設定鍵與流水號，經正式 `init_db` 再開一次，最後核對來源雜湊值未變。任一步失敗都刪掉輸出檔（含 `-journal`）。
 - **來源結構凍結**在 `tests/fixtures/schema_v24.sql`，測試用它造 v24 來源。
-- **母版**：v24 原始檔 `docs/standard_db/pos_standard.db`（轉換來源，不要刪）與轉出的 `pos_standard_v30.db`（`docs/` 不入庫，換機器要自行複製）。`DayClose`、`DayClosePayment`、`Correction` 屬營業紀錄，不複製。結構有改就重新轉出：
+- **母版**：v24 原始檔 `docs/standard_db/pos_standard.db`（轉換來源，不要刪）與轉出的 `pos_standard_v1.db`（`docs/` 不入庫，換機器要自行複製）。`DayClose`、`DayClosePayment`、`Correction` 屬營業紀錄，不複製。結構有改就重新轉出：
 
 ```
-python tools/make_standard_db.py --source docs/standard_db/pos_standard.db --output docs/standard_db/pos_standard_v30_new.db
+python tools/make_standard_db.py --source docs/standard_db/pos_standard.db --output docs/standard_db/pos_standard_v1_new.db
 ```
 
 - **清乾淨 `pos.db`**：關掉 POS，複製母版換名成 `pos.db`。

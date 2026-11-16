@@ -40,12 +40,12 @@ class MinSupportedVersionTest(unittest.TestCase):
         self.assertEqual(self.db.stat().st_mtime_ns, mtime)
         self.assertEqual([p.name for p in self.root.iterdir()], ["pos.db"])
 
-    def test_min_supported_is_above_v24(self):
-        self.assertGreater(db_schema.MIN_SUPPORTED_VERSION, 24)
+    def test_min_supported_is_within_range(self):
+        self.assertGreaterEqual(db_schema.MIN_SUPPORTED_VERSION, 1)
         self.assertLessEqual(db_schema.MIN_SUPPORTED_VERSION, db_schema.SCHEMA_VERSION)
 
-    def test_v24_database_is_rejected_before_any_write(self):
-        _legacy_db(self.db, 24)
+    def test_older_than_min_supported_is_rejected_before_any_write(self):
+        _legacy_db(self.db, db_schema.MIN_SUPPORTED_VERSION - 1)
         self.assert_rejected_without_writing()
 
     def test_database_with_tables_but_no_version_is_rejected(self):
@@ -78,6 +78,13 @@ class MinSupportedVersionTest(unittest.TestCase):
     def test_new_database_is_created_at_latest_version(self):
         init_db(self.db)
         self.assertEqual(read_schema_version(self.db), db_schema.SCHEMA_VERSION)
+        conn = get_conn(self.db)
+        try:
+            seeded = dict(conn.execute(
+                "SELECT key,value FROM Setting WHERE key IN ('cash_float','idle_logout_min')").fetchall())
+        finally:
+            conn.close()
+        self.assertEqual(seeded, {"cash_float": "6000", "idle_logout_min": "15"})
 
     def test_empty_file_is_treated_as_new(self):
         self.db.write_bytes(b"")
@@ -100,7 +107,7 @@ class MinSupportedVersionTest(unittest.TestCase):
 
     def test_main_shows_dialog_and_leaves_old_database_untouched(self):
         paths = RuntimePaths.from_root(self.root)
-        _legacy_db(paths.db_path, 24)
+        _legacy_db(paths.db_path, db_schema.MIN_SUPPORTED_VERSION - 1)
         before = _digest(paths.db_path)
         dialog, app = Mock(), Mock()
         with patch.object(RuntimePaths, "detect", return_value=paths):

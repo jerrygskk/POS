@@ -316,7 +316,8 @@ DESKTOP_UPDATE_ACTIONS = {
     "desktop.update.check", "desktop.update.start", "desktop.update.status",
     "desktop.update.restart", "desktop.update.busy",
 }
-AUTH_ACTIONS = {"auth.status", "auth.login", "auth.logout", "auth.touch", "auth.change_password"}
+AUTH_ACTIONS = {"auth.status", "auth.login", "auth.logout", "auth.touch", "auth.change_password",
+                "auth.idle_logout", "auth.set_idle_logout"}
 DESKTOP_WINDOW_ACTIONS = {
     "desktop.child_window.open",
     "desktop.child_window.context",

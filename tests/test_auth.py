@@ -48,22 +48,63 @@ class AuthTests(ConnTestCase):
         self.assertFalse(fresh.login("admin"))
         self.assertTrue(fresh.login("Changed-pass"))
 
-    def test_idle_599_and_601_seconds(self):
+    def test_idle_899_and_901_seconds(self):
         self.session.login("admin")
-        self.now += 599
+        self.now += 899
         self.assertTrue(self.session.is_admin())
         self.now += 2
         self.assertFalse(self.session.is_admin())
         with self.assertRaises(ForbiddenError):
             self.session.require_admin()
 
+    def _set_raw_idle(self, value):
+        self.conn.execute("INSERT OR REPLACE INTO Setting(key,value) VALUES('idle_logout_min',?)", (value,))
+        self.conn.commit()
+
+    def test_idle_setting_seed_default_and_bad_values_fall_back(self):
+        self.assertEqual(self.session.idle_logout_min(), 15)
+        for bad in ("abc", "", "-1", "61", "1.5"):
+            with self.subTest(value=bad):
+                self._set_raw_idle(bad)
+                self.assertEqual(self.session.idle_logout_min(), 15)
+        self.conn.execute("DELETE FROM Setting WHERE key='idle_logout_min'")
+        self.conn.commit()
+        self.assertEqual(self.session.idle_logout_min(), 15)
+
+    def test_idle_setting_saved_takes_effect_immediately(self):
+        self.session.login("admin")
+        data = self.bridge.invoke("auth.set_idle_logout", {"minutes": "5"})["data"]
+        self.assertEqual(data, {"is_admin": True, "minutes": 5})
+        self.assertEqual(self.bridge.invoke("auth.idle_logout", {})["data"]["minutes"], 5)
+        self.now += 299
+        self.assertTrue(self.session.is_admin())
+        self.now += 2
+        self.assertFalse(self.session.is_admin())
+
+    def test_idle_zero_never_logs_out_and_applies_on_next_login(self):
+        self._set_raw_idle("0")
+        self.session.login("admin")
+        self.now += 10 ** 6
+        self.assertTrue(self.session.is_admin())
+
+    def test_idle_setting_rejects_bad_input_and_employee(self):
+        payload = {"minutes": "5"}
+        self.assertEqual(self.bridge.invoke("auth.set_idle_logout", payload)["error"]["code"], "forbidden")
+        self.assertEqual(self.bridge.invoke("auth.idle_logout", {})["error"]["code"], "forbidden")
+        self.session.login("admin")
+        for bad in ("61", "-1", "abc", "", "1.5", "５", 5):
+            with self.subTest(value=bad):
+                response = self.bridge.invoke("auth.set_idle_logout", {"minutes": bad})
+                self.assertEqual(response["error"]["code"], "validation_error")
+        self.assertEqual(self.session.idle_logout_min(), 15)
+
     def test_touch_extends_live_session_but_never_resurrects_expired_session(self):
         self.session.touch()
         self.assertFalse(self.session.is_admin())
         self.session.login("admin")
-        self.now += 599
+        self.now += 899
         self.session.touch()
-        self.now += 599
+        self.now += 899
         self.assertTrue(self.session.is_admin())
         self.now += 2
         self.session.touch()
@@ -72,7 +113,7 @@ class AuthTests(ConnTestCase):
     def test_bridge_checks_expiration_before_touch_and_denies_without_write(self):
         self.session.login("admin")
         before = self.conn.execute("SELECT COUNT(*) FROM Category").fetchone()[0]
-        self.now += 601
+        self.now += 901
         response = self.bridge.invoke("categories.create", {"name": "must not exist"})
         self.assertEqual(response["error"]["code"], "forbidden")
         self.assertEqual(before, self.conn.execute("SELECT COUNT(*) FROM Category").fetchone()[0])
@@ -84,7 +125,7 @@ class AuthTests(ConnTestCase):
                                            "desktop.update.restart", "desktop.update.busy"})
         self.session.login("admin")
         for _ in range(2):
-            self.now += 300
+            self.now += 450
             self.assertTrue(self.bridge.invoke("auth.status")["data"]["is_admin"])
             self.assertTrue(self.bridge.invoke("stocktake.pending_count")["ok"])
         self.now += 1
@@ -99,7 +140,7 @@ class AuthTests(ConnTestCase):
             self.assertNotEqual((response.get("error") or {}).get("code"), "forbidden", action)
         self.session.login("admin")
         for _ in range(3):
-            self.now += 300
+            self.now += 450
             self.bridge.invoke("desktop.update.status")
         self.assertFalse(self.session.is_admin())
 
@@ -107,7 +148,7 @@ class AuthTests(ConnTestCase):
         child = DesktopBridge(facade=self.facade)
         self.session.login("admin")
         for _ in range(3):
-            self.now += 300
+            self.now += 450
             self.assertTrue(child.invoke("auth.touch")["data"]["is_admin"])
         self.assertTrue(self.bridge.invoke("auth.status")["data"]["is_admin"])
 

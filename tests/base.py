@@ -44,6 +44,8 @@ def _template_db():
         conn = get_conn(path)
         conn.execute("UPDATE Setting SET value=? WHERE key='admin_password_hash'",
                      (hash_password("admin", iterations=1),))
+        # 預備金歸零:立帳相關測試的金額一律以「沒有預備金」起算
+        conn.execute("UPDATE Setting SET value='0' WHERE key='cash_float'")
         conn.commit()
         conn.close()
         _TEMPLATE_DB = path

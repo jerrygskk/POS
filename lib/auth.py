@@ -58,15 +58,43 @@ def verify_password(password, stored):
         return False
 
 
-class AdminSession:
-    IDLE_SECONDS = 600
+IDLE_DEFAULT_MIN = 15
+IDLE_MAX_MIN = 60
 
+
+class AdminSession:
     def __init__(self, db_path, clock=time.monotonic):
         self.db_path = db_path
         self._clock = clock
         self._admin = False
         self._last_activity = None
+        self._idle_seconds = IDLE_DEFAULT_MIN * 60   # 登入與存檔時更新;0＝不自動登出
         self._lock = threading.RLock()
+
+    def idle_logout_min(self):
+        """設定的閒置分鐘數;缺值或壞值(非整數、超出範圍)退回預設。"""
+        from lib.db import db_conn
+        with db_conn(self.db_path) as conn:
+            row = conn.execute("SELECT value FROM Setting WHERE key='idle_logout_min'").fetchone()
+        try:
+            minutes = int(row["value"])
+        except (TypeError, ValueError):
+            return IDLE_DEFAULT_MIN
+        return minutes if 0 <= minutes <= IDLE_MAX_MIN else IDLE_DEFAULT_MIN
+
+    def set_idle_logout_min(self, value):
+        from lib.db import db_conn
+        with self._lock:
+            self.require_admin()
+            if not isinstance(value, str) or not value.isascii() or not value.isdigit() or int(value) > IDLE_MAX_MIN:
+                raise ValidationError(f"閒置自動登出請輸入 0 到 {IDLE_MAX_MIN} 的整數（0 為不自動登出）")
+            minutes = int(value)
+            with db_conn(self.db_path) as conn:
+                conn.execute("INSERT OR REPLACE INTO Setting(key,value) VALUES('idle_logout_min',?)", (str(minutes),))
+                conn.commit()
+            self._idle_seconds = minutes * 60
+            self._last_activity = self._clock()
+            return minutes
 
     def _password_hash(self):
         # 延後匯入，讓 db_seed 可直接使用本模組的純雜湊函式。
@@ -77,7 +105,7 @@ class AdminSession:
 
     def is_admin(self):
         with self._lock:
-            if self._admin and self._clock() - self._last_activity > self.IDLE_SECONDS:
+            if self._admin and self._idle_seconds and self._clock() - self._last_activity > self._idle_seconds:
                 self.logout()
             return self._admin
 
@@ -85,6 +113,7 @@ class AdminSession:
         with self._lock:
             if not verify_password(password, self._password_hash()):
                 return False
+            self._idle_seconds = self.idle_logout_min() * 60
             self._admin = True
             self._last_activity = self._clock()
             return True

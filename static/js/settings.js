@@ -31,6 +31,7 @@ window.PosPages["page-settings"] = {
       // 商品設定單頁
       section: "category",
       passwordForm: { old: "", next: "", confirm: "" },
+      idleLogoutMin: "",
       payments: [], newPayment: { name: "", rate: "" },
       selCatId: null, newCatName: "",
       tplFields: [], bigProducts: [],
@@ -141,6 +142,18 @@ window.PosPages["page-settings"] = {
         await window.PosAuthOps.refresh();
       });
     },
+    async saveIdleLogout() {
+      this.errorScope = "idle";
+      if (!window.PosAuth.isAdmin) { this.showError("需要管理者權限"); return; }
+      const text = String(this.idleLogoutMin).trim();
+      if (!/^\d{1,2}$/.test(text) || Number(text) > 60) {
+        this.showError("閒置自動登出請輸入 0 到 60 的整數（0 為不自動登出）"); return;
+      }
+      await this.guard(async () => {
+        this.idleLogoutMin = String((await API.setIdleLogout(text)).minutes);
+        await PosConfirm.notify(this.idleLogoutMin === "0" ? "已設定為不自動登出。" : `已設定為閒置 ${this.idleLogoutMin} 分鐘自動登出。`);
+      });
+    },
     // scope 決定訊息出現在哪一段(category／brands／phoneBrands／models),
     // 不指定就歸商品種類那段;沒有歸屬會四個區塊同時亮。
     showError(message, scope) {
@@ -157,6 +170,7 @@ window.PosPages["page-settings"] = {
         this.deviceTypes = await API.listDeviceTypes({ all: 1 });
         this.models = await API.listModels({ all: 1 });
         this.payments = await API.listPayments();
+        this.idleLogoutMin = String((await API.idleLogout()).minutes);
         this._takeSnap();
         if (!this.categories.some(c => c.category_id === this.selCatId))
           this.selCatId = this.categories.length ? this.categories[0].category_id : null;
@@ -217,11 +231,13 @@ window.PosPages["page-settings"] = {
     selectSection(name) {
       this.section = name;
       this.prodPopup = null;
+      window.scrollTo(0, 0);
     },
     async selectCategory(c) {
       const same = this.selCatId === c.category_id;
       this.section = "category";
       this.prodPopup = null;
+      window.scrollTo(0, 0);
       if (same) return;
       this.selCatId = c.category_id;
       this.specEditing = false;
