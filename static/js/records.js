@@ -34,8 +34,12 @@ window.PosPages["page-records"] = {
     },
     // 立帳紀錄的付款方式欄:每一列順序相同,取第一列;沒有紀錄時用設定清單
     dcPayments() {
+      // 現金那一欄標成「現金銷售」:旁邊還有預備金欄,只寫「現金」分不出含不含預備金
+      const cash = new Set(this.payments.filter(p => p.is_cash).map(p => p.payment_id));
+      const label = (id, name) => cash.has(id) ? "現金銷售" : name;
       const first = this.dc.records[0];
-      return first ? first.by_payment.map(b => b.payment) : this.payments.filter(p => p.active).map(p => p.name);
+      return first ? first.by_payment.map(b => label(b.payment_id, b.payment))
+                   : this.payments.filter(p => p.active).map(p => label(p.payment_id, p.name));
     },
     // 查詢區間的合計列
     dcTotals() {
@@ -165,7 +169,7 @@ window.PosPages["page-records"] = {
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
       const p = this.dc.preview;
       if (!p || p.closed || this.dc.busy) return;
-      if (this.dcDiff === null) { this.showError("請輸入錢櫃現金總額"); return; }
+      if (this.dcDiff === null) { this.showError("請輸入錢櫃現金（含預備金）"); return; }
       const employee = window.PosEmployee.id;
       if (!employee) { this.showError("請選擇員工代號（1～6）"); return; }
       const reason = this.dc.reason.trim();
@@ -188,7 +192,7 @@ window.PosPages["page-records"] = {
     },
     // 把查到的立帳紀錄畫成圖片放進剪貼簿,供貼到公司群組。
     // 圖片是給公司看的報表,欄位與畫面上的表格不同:只列帳日、各付款方式、銷售合計、短溢與原因,
-    // 不列員工、立帳時間、預備金、錢櫃總額;日期由小到大(畫面是新的在上)
+    // 不列員工、立帳時間、預備金;日期由小到大(畫面是新的在上)
     async dcCopyImage() {
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
       const records = this.dc.records.slice().reverse(), totals = this.dcTotals;
@@ -196,7 +200,7 @@ window.PosPages["page-records"] = {
       // 一列:第一格與最後一格(原因)靠左,中間的金額靠右;bold 的列用粗體
       const line = (bold, ...texts) => texts.map((text, i, all) => ({ text: String(text), num: i > 0 && i < all.length - 1, bold }));
       const minus = n => n ? "−" + n : "";
-      const rows = [line(true, "帳日", ...this.dcPayments, "銷售合計", "短溢", "原因"),
+      const rows = [line(true, "立帳日", ...this.dcPayments, "銷售合計", "短溢", "原因"),
                     ...records.map(r => line(false, r.business_date, ...r.by_payment.map(b => b.total), r.sales_total,
                                              this.signedText(r.diff), r.reason || "")),
                     line(true, "合計", ...totals.by_payment, totals.sales_total, this.signedText(totals.diff), "")];

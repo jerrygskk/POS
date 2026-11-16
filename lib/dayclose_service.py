@@ -78,7 +78,7 @@ def _validate(action, payload):
         if not isinstance(expected, Mapping) or set(expected) != {"float_amount", "cash_sales"}:
             raise ValidationError("立帳資料格式不正確")
         return {"business_date": _business_date(payload),
-                "counted_total": _amount(payload.get("counted_total"), "錢櫃現金總額"),
+                "counted_total": _amount(payload.get("counted_total"), "錢櫃現金（含預備金）"),
                 "reason": reason, "employee": payload["employee"],
                 "expected": {"float_amount": _amount(expected["float_amount"], "預備金"),
                              "cash_sales": _amount(expected["cash_sales"], "現金銷售")}}
@@ -94,12 +94,15 @@ class DayCloseService:
         return dict(row) if row else None
 
     def _by_payment(self, business_date):
-        """該帳日各付款方式的筆數與金額(不含作廢),依設定順序、含沒交易的;從銷售單即時加總。"""
+        """該帳日各付款方式的筆數與金額(不含作廢),依設定順序;從銷售單即時加總。
+
+        啟用中的沒交易也列 0;停用的只在那天有交易時才列(停用前收的錢要對得上帳)。
+        """
         found = {row["payment_id"]: (row["c"], row["t"]) for row in self.conn.execute(
             "SELECT payment_id, COUNT(*) c, COALESCE(SUM(total),0) t FROM Sale "
             "WHERE business_date=? AND voided_at IS NULL GROUP BY payment_id", (business_date,))}
         return [{**p, "count": found.get(p["payment_id"], (0, 0))[0], "total": found.get(p["payment_id"], (0, 0))[1]}
-                for p in SalesRepository(self.conn).payments()]
+                for p in SalesRepository(self.conn).payments() if p["active"] or p["payment_id"] in found]
 
     @staticmethod
     def _cash_of(by_payment):

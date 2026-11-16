@@ -343,12 +343,12 @@ class SalesService:
         return {"count": sum(row["c"] for row in rows), "total": sum(row["t"] or 0 for row in rows),
                 "by_payment": self._by_payment(rows), "void_count": void["c"], "void_total": void["t"]}
 
-    # 依設定順序固定列出每種付款方式(含停用;沒交易的列 0),名稱用現在的
+    # 依設定順序列出付款方式,名稱用現在的:啟用中的沒交易也列 0;停用的只在查詢範圍內有交易時才列
     def _by_payment(self, rows):
         found = {row["payment_id"]: (row["c"], row["t"] or 0) for row in rows}
         return [{"payment_id": p["payment_id"], "payment": p["name"],
                  "count": found.get(p["payment_id"], (0, 0))[0], "total": found.get(p["payment_id"], (0, 0))[1]}
-                for p in self.repo.payments()]
+                for p in self.repo.payments() if p["active"] or p["payment_id"] in found]
 
     def export(self, filters):
         rows = self.repo.sale_rows(filters)

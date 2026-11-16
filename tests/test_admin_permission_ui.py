@@ -255,7 +255,7 @@ s.dc.records=[mk("2026-11-03",15,220),mk("2026-11-02",15,220),mk("2026-11-01",15
 assert.deepEqual([...s.dcTotals.fees],[0,1]);
 s.dc.records=keep;await tick();}
 // 必填:錢櫃現金總額、有短溢要原因
-await s.dcClose();assert.ok(errors.includes("請輸入錢櫃現金總額"));
+await s.dcClose();assert.ok(errors.includes("請輸入錢櫃現金（含預備金）"));
 s.dc.counted="3400";await tick();assert.equal(s.dcDiff,-100);assert.match(text(view.dom),/−100/);
 await s.dcClose();assert.ok(errors.includes("有短溢時請填寫原因"));assert.equal(sent.length,0);assert.equal(asked.length,0);
 // 確認框不放實點與短溢;送出的是按下當下那一份,不讀確認框期間被改的輸入框

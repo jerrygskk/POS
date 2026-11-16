@@ -114,7 +114,8 @@ class PaymentTests(FacadeTestCase):
     def test_sort_needs_every_id(self):
         self.invoke("payments.sort", {"ids": [3, 1, 4, 2]})
         self.assertEqual(self.names(), ["LINE Pay", "現金", "台灣Pay", "轉帳"])
-        self.assertEqual([b["payment"] for b in self.invoke("sales.summary", {})["by_payment"]], self.names())   # 報表欄位跟著排
+        self.assertEqual([b["payment"] for b in self.invoke("sales.summary", {})["by_payment"]],
+                         ["LINE Pay", "現金", "轉帳"])   # 報表欄位跟著排;停用且沒交易的台灣Pay 不列
         for ids in ([1, 2, 3], [1, 2, 3, 4, 5], [1, 1, 2, 3], [1, 2, 3, "4"], "1234", []):
             self.assert_application_error("validation_error", "payments.sort", {"ids": ids})
         self.assertEqual(self.names(), ["LINE Pay", "現金", "台灣Pay", "轉帳"])

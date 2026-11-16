@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>膜型機門市管理系統</title>
-<link rel="stylesheet" href="css/pos.css?v=357">
+<link rel="stylesheet" href="css/pos.css?v=365">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=357" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=365" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -401,7 +401,7 @@
           <span v-if="dc.preview.void_count">已作廢：{{ dc.preview.void_count }} 筆 {{ dc.preview.void_total }} 元</span>
         </div>
         <div v-if="dc.preview && !dc.preview.closed" class="scan-row dayclose-row">
-          <label>錢櫃現金總額 <input ref="dcCounted" class="w100" inputmode="numeric" v-model="dc.counted" @keydown.enter="dcClose"></label>
+          <label>錢櫃現金（含預備金） <input ref="dcCounted" class="w100" inputmode="numeric" v-model="dc.counted" @keydown.enter="dcClose"></label>
           <span>短溢 <b :class="{neg: dcDiff}">{{ dcDiff === null ? '—' : signedText(dcDiff) }}</b></span>
           <input class="dayclose-reason" v-model="dc.reason" maxlength="60" placeholder="短溢原因（有短溢必填）">
           <employee-picker></employee-picker>
@@ -409,7 +409,7 @@
         </div>
         <div v-if="dc.preview && dc.preview.closed" class="scan-row dayclose-row">
           <span class="tag">已立帳</span>
-          <span>錢櫃現金總額 <b>{{ dc.preview.record.counted_total }}</b></span>
+          <span>錢櫃現金（含預備金） <b>{{ dc.preview.record.counted_total }}</b></span>
           <span>短溢 <b :class="{neg: dc.preview.record.diff}">{{ signedText(dc.preview.record.diff) }}</b></span>
           <span v-if="dc.preview.record.reason" class="dayclose-reason-text">原因：{{ dc.preview.record.reason }}</span>
           <span>員工 {{ dc.preview.record.employee }}</span>
@@ -423,35 +423,35 @@
           <button :disabled="!dc.records.length" @click="dcCopyImage">{{ dc.copied ? '已複製' : '複製成圖片' }}</button>
         </div>
         <table class="records-table">
-          <colgroup><col class="col-w110"><col class="col-w110"><col class="col-w56"><col class="col-w64"><col class="col-w76"><col v-for="p in dcPayments" :key="p" class="col-w76"><col class="col-w84"><col class="col-w64"><col></colgroup>
-          <thead><tr class="dayclose-head"><th>帳日</th><th>立帳時間</th><th>員工</th><th class="num">預備金</th><th class="num">錢櫃總額</th><th v-for="p in dcPayments" :key="p" class="num">{{ p }}</th><th class="num">銷售合計</th><th class="num">短溢</th><th></th></tr></thead>
+          <colgroup><col class="col-w110"><col class="col-w110"><col class="col-w56"><col class="col-w64"><col v-for="p in dcPayments" :key="p" class="col-w76"><col class="col-w84"><col class="col-w64"><col></colgroup>
+          <thead><tr class="dayclose-head"><th>立帳日</th><th>立帳時間</th><th>員工</th><th class="num">預備金</th><th v-for="p in dcPayments" :key="p" class="num">{{ p }}</th><th class="num">銷售合計</th><th class="num">短溢</th><th></th></tr></thead>
           <tbody>
             <template v-for="r in dc.records" :key="r.business_date">
               <tr>
                 <td>{{ r.business_date }}</td><td>{{ minuteText(r.closed_at).slice(5) }}</td><td>{{ r.employee }}</td>
-                <td class="num">{{ r.float_amount }}</td><td class="num">{{ r.counted_total }}</td>
+                <td class="num">{{ r.float_amount }}</td>
                 <td v-for="b in r.by_payment" :key="b.payment_id" class="num">{{ b.total }}</td><td class="num">{{ r.sales_total }}</td>
                 <td class="num" :class="{neg: r.diff}">{{ signedText(r.diff) }}</td><td></td>
               </tr>
-              <tr v-if="r.reason" class="dayclose-reason-row"><td :colspan="8 + dcPayments.length">短溢原因：{{ r.reason }}</td></tr>
+              <tr v-if="r.reason" class="dayclose-reason-row"><td :colspan="7 + dcPayments.length">短溢原因：{{ r.reason }}</td></tr>
             </template>
           </tbody>
           <tfoot v-if="dc.records.length">
             <tr class="dayclose-sum">
-              <td>合計</td><td>{{ dc.records.length }} 天</td><td></td><td></td><td></td>
+              <td>合計</td><td>{{ dc.records.length }} 天</td><td></td><td></td>
               <td v-for="(t, i) in dcTotals.by_payment" :key="i" class="num">{{ t }}</td><td class="num">{{ dcTotals.sales_total }}</td>
               <td class="num" :class="{neg: dcTotals.diff}">{{ signedText(dcTotals.diff) }}</td><td></td>
             </tr>
             <tr v-if="dcTotals.fee_total" class="dayclose-fee">
-              <td colspan="5">抽成比例</td>
+              <td colspan="4">抽成比例</td>
               <td v-for="(list, i) in dcTotals.rates" :key="i" class="num"><div v-for="t in list" :key="t">{{ t }}</div></td><td></td><td></td><td></td>
             </tr>
             <tr v-if="dcTotals.fee_total" class="dayclose-fee">
-              <td colspan="5">抽成金額</td>
+              <td colspan="4">抽成金額</td>
               <td v-for="(f, i) in dcTotals.fees" :key="i" class="num">{{ f ? '−' + f : '' }}</td><td class="num">−{{ dcTotals.fee_total }}</td><td></td><td></td>
             </tr>
             <tr v-if="dcTotals.fee_total" class="dayclose-sum dayclose-net">
-              <td colspan="5">實收</td>
+              <td colspan="4">實收</td>
               <td v-for="(t, i) in dcTotals.net" :key="i" class="num">{{ t }}</td><td class="num">{{ dcTotals.net_total }}</td><td></td><td></td>
             </tr>
           </tfoot>
@@ -1118,29 +1118,29 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=357"></script>
-<script src="js/api.js?v=357"></script>
-<script src="js/confirm.js?v=357"></script>
-<script src="js/auth.js?v=357"></script>
-<script src="js/pos_shared.js?v=357"></script>
-<script src="js/catalogfields.js?v=357"></script>
-<script src="js/checkout.js?v=357"></script>
-<script src="js/receive.js?v=357"></script>
-<script src="js/stocktake.js?v=357"></script>
-<script src="js/returns.js?v=357"></script>
-<script src="js/records.js?v=357"></script>
-<script src="js/catalog.js?v=357"></script>
-<script src="js/sortable.js?v=357"></script>
-<script src="js/combobox.js?v=357"></script>
-<script src="js/optpicker.js?v=357"></script>
-<script src="js/modelpicker.js?v=357"></script>
-<script src="js/employeepicker.js?v=357"></script>
-<script src="js/membereditor.js?v=357"></script>
-<script src="js/doccorrect.js?v=357"></script>
-<script src="js/attrfields.js?v=357"></script>
-<script src="js/settings.js?v=357"></script>
-<script src="js/labels.js?v=357"></script>
-<script src="js/app_update.js?v=357"></script>
-<script src="js/app.js?v=357"></script>
+<script src="js/vue.global.prod.js?v=365"></script>
+<script src="js/api.js?v=365"></script>
+<script src="js/confirm.js?v=365"></script>
+<script src="js/auth.js?v=365"></script>
+<script src="js/pos_shared.js?v=365"></script>
+<script src="js/catalogfields.js?v=365"></script>
+<script src="js/checkout.js?v=365"></script>
+<script src="js/receive.js?v=365"></script>
+<script src="js/stocktake.js?v=365"></script>
+<script src="js/returns.js?v=365"></script>
+<script src="js/records.js?v=365"></script>
+<script src="js/catalog.js?v=365"></script>
+<script src="js/sortable.js?v=365"></script>
+<script src="js/combobox.js?v=365"></script>
+<script src="js/optpicker.js?v=365"></script>
+<script src="js/modelpicker.js?v=365"></script>
+<script src="js/employeepicker.js?v=365"></script>
+<script src="js/membereditor.js?v=365"></script>
+<script src="js/doccorrect.js?v=365"></script>
+<script src="js/attrfields.js?v=365"></script>
+<script src="js/settings.js?v=365"></script>
+<script src="js/labels.js?v=365"></script>
+<script src="js/app_update.js?v=365"></script>
+<script src="js/app.js?v=365"></script>
 </body>
 </html>

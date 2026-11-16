@@ -85,8 +85,10 @@ class DayCloseTest(FacadeTestCase):
                          (3000, 3000, 350, False, None))
         self.assertEqual(p["by_payment"], [{"payment_id": 1, "payment": "現金", "count": 2, "total": 350},
                                            {"payment_id": 2, "payment": "轉帳", "count": 1, "total": 400},
-                                           {"payment_id": 3, "payment": "LINE Pay", "count": 0, "total": 0},
-                                           {"payment_id": 4, "payment": "台灣Pay", "count": 0, "total": 0}])
+                                           {"payment_id": 3, "payment": "LINE Pay", "count": 0, "total": 0}])   # 停用且沒交易的台灣Pay 不列
+        self.raw_sale(d, "台灣Pay", 60)   # 停用前收的錢:有交易就要列
+        self.assertEqual(self.invoke("dayclose.preview", {"business_date": d})["by_payment"][-1],
+                         {"payment_id": 4, "payment": "台灣Pay", "count": 1, "total": 60})
         self.assertEqual((p["void_count"], p["void_total"]), (1, 999))
         self.assertEqual((p["unclosed"], p["unclosed_count"]), ([day(-2), d], 2))
 
