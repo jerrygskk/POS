@@ -216,9 +216,9 @@ view.app.unmount();
         self.run_js(r'''
 process.exitCode=1;
 load("static/js/records.js");
-const preview={business_date:"",today:"2026-11-10",closed:false,record:null,float_amount:3000,float_setting:3000,cash_sales:500,
+const preview={business_date:"",today:"2026-11-10",closed:false,record:null,float_amount:3000,float_setting:3000,cash_sales:500,cash_refund:0,
  by_payment:[{payment:"現金",count:1,total:500}],void_count:0,void_total:0,unclosed:["2026-11-08"],unclosed_count:1};
-const record={business_date:"2026-11-07",closed_at:"2026-11-07 22:00:05",employee:2,float_amount:3000,counted_total:2900,cash_sales:0,diff:-100,reason:"少找",
+const record={business_date:"2026-11-07",closed_at:"2026-11-07 22:00:05",employee:2,float_amount:3000,counted_total:2900,cash_sales:0,cash_refund:0,diff:-100,reason:"少找",
   by_payment:[{payment_id:1,payment:"現金",total:0,fee_rate:0},{payment_id:3,payment:"LINE Pay",total:1000,fee_rate:220}],sales_total:1000};
 API.listPayments=async()=>[];API.listSales=async()=>[];API.salesSummary=async()=>null;
 API.dayCloseCurrent=async()=>({business_date:"2999-01-01",today:"2026-11-10"});
@@ -241,7 +241,7 @@ assert.ok(button(view.dom,"完成立帳"));assert.ok(button(view.dom,"11/08"));
 assert.deepEqual([...s.dcTotals.fees],[0,22]);assert.equal(JSON.stringify(s.dcTotals.rates),'[[],["2.2%"]]');
 assert.equal(s.dcTotals.net_total,978);assert.match(text(view.dom),/抽成比例.*2\.2%.*抽成金額.*−22.*實收.*978/s);
 // 月中換比例:每天用自己的比例,「金額×比例」加總後才四捨五入一次;比例只列有金額的日子用到的,由舊到新
-{const keep=s.dc.records,mk=(d,line,rate)=>({business_date:d,closed_at:d+" 22:00:00",employee:1,float_amount:0,counted_total:0,cash_sales:0,diff:0,reason:null,
+{const keep=s.dc.records,mk=(d,line,rate)=>({business_date:d,closed_at:d+" 22:00:00",employee:1,float_amount:0,counted_total:0,cash_sales:0,cash_refund:0,diff:0,reason:null,
   by_payment:[{payment_id:1,payment:"現金",total:0,fee_rate:0},{payment_id:3,payment:"LINE Pay",total:line,fee_rate:rate}],sales_total:line});
 s.dc.records=[mk("2026-11-04",0,300),mk("2026-11-03",10000,250),mk("2026-11-02",20000,220),mk("2026-11-01",5000,220)];await tick();
 assert.deepEqual([...s.dcTotals.fees],[0,800]);assert.equal(JSON.stringify(s.dcTotals.rates),'[[],["2.2%","2.5%"]]');   // 550+250;沒金額那天的 3% 不列
@@ -263,7 +263,7 @@ s.dc.reason=" 少找 ";const picked=s.dc.date;
 context.PosConfirm.ask=async m=>{asked.push(m);s.dc.counted="9999";s.dc.reason="改掉";return true;};
 await s.dcClose();await tick();
 assert.equal(asked.length,1);assert.ok(!/3400|9999|短溢|−/.test(asked[0]));assert.match(asked[0],/不可再作廢或更正付款方式/);
-assert.deepEqual(sent,[{business_date:picked,counted_total:3400,reason:"少找",employee:1,expected:{float_amount:3000,cash_sales:500}}]);
+assert.deepEqual(sent,[{business_date:picked,counted_total:3400,reason:"少找",employee:1,expected:{float_amount:3000,cash_sales:500,cash_refund:0}}]);
 assert.equal(s.dc.counted,"");
 // 已立帳的帳日:唯讀顯示當時紀錄,沒有按鈕
 API.dayClosePreview=async d=>({...preview,business_date:d,closed:true,record});
@@ -401,7 +401,7 @@ let loads=0;API.listSales=async()=>{loads++;return list;};
 API.salesSummary=async()=>({count:2,total:200,by_payment:[],void_count:1,void_total:100});
 const view=mount(context.window.PosPages["page-records"],template("records"));const s=view.state;
 await s.reload();s.expandAll();await tick();
-assert.match(text(view.dom),/合計 2 筆，共 200 元（已作廢 1 筆 100 元）/);
+assert.match(text(view.dom),/銷售 2 筆，共 200 元（已作廢 1 筆 100 元）/);
 assert.match(text(view.dom),/原因：重複結帳/);assert.equal(text(view.dom).split("已作廢").length-1,3);
 assert.ok(!button(view.dom,"作廢"));s.openVoid(list[0]);assert.equal(s.correct,null);assert.ok(errors.includes("需要管理者權限"));
 auth.isAdmin=true;await tick();

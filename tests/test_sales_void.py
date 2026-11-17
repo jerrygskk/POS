@@ -63,7 +63,7 @@ class SalesVoidTest(FacadeTestCase):
         self.void(gone)
         summary = self.invoke("sales.summary", {})
         self.assertEqual((summary["count"], summary["total"], summary["void_count"], summary["void_total"]), (2, 400, 1, 200))
-        self.assertEqual(summary["by_payment"][0], {"payment_id": 1, "payment": "現金", "count": 1, "total": 200})
+        self.assertEqual(summary["by_payment"][0], {"payment_id": 1, "payment": "現金", "count": 1, "total": 200, "cash_net":200})
         self.assertEqual([s["sale_id"] for s in self.invoke("sales.list", {})][-2:], [gone, keep])   # 作廢單照樣列出
         lines = self.invoke("sales.export", {})["content"].lstrip("﻿").splitlines()
         self.assertTrue(lines[0].endswith("總額,帳日,狀態,作廢原因"))
@@ -97,7 +97,7 @@ class SalesVoidTest(FacadeTestCase):
     def test_closed_day_cannot_be_voided(self):
         sale = self.checkout()
         self.invoke("dayclose.close", {"business_date": TODAY, "counted_total": 200, "reason": "", "employee": 1,
-                                       "expected": {"float_amount": 0, "cash_sales": 200}})
+                                       "expected": {"float_amount": 0, "cash_sales": 200, "cash_refund": 0}})
         self.assertIn("已立帳", self.void_error("conflict", sale).message)
         self.assertEqual(self.stock(self.v1), 8)
         later = self.checkout()   # 立帳後結的單算明天的帳,仍可作廢
@@ -105,18 +105,14 @@ class SalesVoidTest(FacadeTestCase):
 
     def test_sale_with_return_cannot_be_voided_until_return_cancelled(self):
         sale = self.checkout()
-        rid = self.invoke("returns.create", {"employee": 1})["return_id"]
-        self.invoke("returns.scan", {"return_id": rid, "variant_id": self.v1, "qty": 1})
-        item = self.return_item_id(rid, self.v1)
-        self.invoke("returns.set_sale", {"return_id": rid, "item_id": item, "sale_id": sale})
+        rid = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
+        self.invoke("returns.load_sale", {"return_id":rid,"sale_id":sale})
         self.assertIn("已有退貨單", self.void_error("conflict", sale).message)
         self.invoke("returns.cancel", {"return_id": rid, "employee": 1})
         self.void(sale)
         # 已作廢的銷售單不可再填為退貨的原銷售單
-        rid2 = self.invoke("returns.create", {"employee": 1})["return_id"]
-        self.invoke("returns.scan", {"return_id": rid2, "variant_id": self.v1, "qty": 1})
-        error = self.assert_application_error("conflict", "returns.set_sale", {
-            "return_id": rid2, "item_id": self.return_item_id(rid2, self.v1), "sale_id": sale})
+        rid2 = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
+        error = self.assert_application_error("conflict", "returns.load_sale", {"return_id":rid2,"sale_id":sale})
         self.assertIn("已作廢", error.message)
 
     def test_void_during_stocktake_is_not_counted_twice(self):

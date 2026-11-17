@@ -1,4 +1,5 @@
-from lib import correction_service, product_data, stock_ledger
+from lib import correction_service, dayclose_service, product_data, stock_ledger
+from lib.refund_rules import allocate_paid, refund_limit
 from lib.application import BaseFacade, BaseRepository
 from lib.application_errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from lib.product_rules import allow_keys as _allow, date_range, date_sql, is_int as _is_int, require_employee
@@ -15,23 +16,25 @@ def _optional_text(payload, key):
         raise ValidationError(f"{key} 必須是字串")
 
 def _validate(action, payload):
-    allowed = {"returns.create":{"employee"}, "returns.list":set(),
+    allowed = {"returns.create":{"employee","kind"}, "returns.list":set(),
         "returns.history":{"date_from","date_to","kind"}, "returns.detail":{"return_id"},
         "returns.repair_receive":{"return_id","employee","items"},
         "returns.close_item":{"return_id","item_id","reason"}, "returns.reopen_item":{"return_id","item_id"},
         "returns.scan":{"return_id","variant_id","qty"}, "returns.set_qty":{"return_id","item_id","qty"},
         "returns.set_reason":{"return_id","item_id","reason"},
-        "returns.set_sale":{"return_id","item_id","sale_id"},
+        "returns.load_sale":{"return_id","sale_id"}, "returns.pick":{"return_id","sale_item_id","qty"},
+        "returns.clear":{"return_id"}, "returns.set_refund":{"return_id","item_id","amount"},
+        "returns.set_member":{"return_id","member_id"},
         "returns.remove_item":{"return_id","item_id"},
         "returns.close":{"return_id"}, "returns.withdraw":{"return_id"},
         "returns.set_disposition":{"return_id","item_id","disposition"},
         "returns.set_kind":{"return_id","kind"},
-        "returns.approve":{"return_id","kind","items"}, "returns.cancel":{"return_id","employee"},
+        "returns.approve":{"return_id","kind","items","business_date"}, "returns.cancel":{"return_id","employee"},
         "returns.pending_count":set()}[action]
     _allow(payload, allowed)
-    for key in ("return_id", "variant_id", "item_id"):
+    for key in ("return_id", "variant_id", "item_id", "sale_item_id", "sale_id"):
         if key in allowed and not _is_int(payload.get(key)): raise ValidationError(f"{key} 必須是整數")
-    if action in {"returns.scan", "returns.set_qty"} and (not _is_int(payload.get("qty")) or payload["qty"] <= 0):
+    if action in {"returns.scan", "returns.set_qty", "returns.pick"} and (not _is_int(payload.get("qty")) or payload["qty"] <= 0):
         raise ValidationError("數量必須是正整數")
     if action == "returns.repair_receive":
         items = payload.get("items")
@@ -47,9 +50,11 @@ def _validate(action, payload):
         if len(payload["reason"].strip()) > REASON_MAX: raise ValidationError(f"結案理由最多 {REASON_MAX} 字")
     if action in {"returns.create", "returns.cancel", "returns.repair_receive"}:
         require_employee(payload.get("employee"))
-    if action == "returns.set_sale":
-        if "sale_id" not in payload: raise ValidationError("sale_id 為必填")
-        if payload["sale_id"] is not None and not _is_int(payload["sale_id"]): raise ValidationError("sale_id 必須是整數")
+    if action == "returns.set_refund" and (not _is_int(payload.get("amount")) or payload["amount"] < 0):
+        raise ValidationError("退貨價格須為 0 以上的整數")
+    if action == "returns.set_member":
+        if "member_id" not in payload or (payload["member_id"] is not None and not _is_int(payload["member_id"])):
+            raise ValidationError("會員資料格式不正確")
     if action == "returns.set_reason":
         if "reason" not in payload: raise ValidationError("reason 為必填")
         _optional_text(payload, "reason")
@@ -63,13 +68,21 @@ def _validate(action, payload):
         items = payload.get("items")
         if not isinstance(items, list): raise ValidationError("items 必須是清單")
         for it in items:
-            if not isinstance(it, dict) or set(it) != {"item_id", "qty", "disposition"}: raise ValidationError("items 格式不正確")
+            if not isinstance(it, dict) or set(it) != {"item_id", "qty", "disposition", "refund"}: raise ValidationError("items 格式不正確")
             if not _is_int(it["item_id"]): raise ValidationError("item_id 必須是整數")
             if not _is_int(it["qty"]) or it["qty"] <= 0: raise ValidationError("數量必須是正整數")
             if it["disposition"] is not None and it["disposition"] not in DISPOSITIONS: raise ValidationError("處理方式不正確")
+            if it["refund"] is not None and (not _is_int(it["refund"]) or it["refund"] < 0): raise ValidationError("退貨價格格式不正確")
         if len({it["item_id"] for it in items}) != len(items): raise ValidationError("品項重複")
-    if action == "returns.set_kind" and payload.get("kind") not in RETURN_KINDS:
+    if action in {"returns.set_kind", "returns.create"} and payload.get("kind") not in RETURN_KINDS:
         raise ValidationError("退貨種類不正確")
+    if action == "returns.approve":
+        if payload["kind"] == "normal":
+            if not isinstance(payload.get("business_date"), str) or not payload["business_date"]:
+                raise ValidationError("請確認退款帳日")
+            date_range({"date_from": payload["business_date"]})
+        elif "business_date" in payload:
+            raise ValidationError("返修單不記退款帳日")
     if action == "returns.history":
         if payload.get("kind", "normal") not in HISTORY_KINDS: raise ValidationError("退貨種類不正確")
         date_range(payload)
@@ -135,11 +148,111 @@ class ReturnsRepository(BaseRepository):
 class ReturnsService:
     def __init__(self, repository):
         self.repo = repository
-    def create(self, employee):
-        cur = self.repo.execute("INSERT INTO ReturnSession(employee) VALUES(?)", (employee,))
+    def create(self, employee, kind):
+        cur = self.repo.execute("INSERT INTO ReturnSession(employee,kind) VALUES(?,?)", (employee,kind))
         return {"return_id": cur.lastrowid}
+    def _item(self, rid, item_id):
+        row = self.repo.one("SELECT * FROM ReturnItem WHERE return_id=? AND id=?", (rid,item_id))
+        if row is None: raise NotFoundError("找不到退貨品項")
+        return row
+    def _sale_lines(self, session):
+        sid, rid = session["sale_id"], session["return_id"]
+        if sid is None: return []
+        sale = self.repo.one("SELECT * FROM Sale WHERE sale_id=?", (sid,))
+        lines = [dict(r) for r in self.repo.all("SELECT si.*,p.name FROM SaleItem si JOIN Variant v ON v.variant_id=si.variant_id JOIN Product p ON p.product_id=v.product_id WHERE si.sale_id=? ORDER BY si.item_id", (sid,))]
+        vids = [r["variant_id"] for r in lines]
+        attrs = product_data.attrs_by_variant(self.repo.connection,vids)
+        displays = product_data.display_attrs(self.repo.connection,vids)
+        models = product_data.display_models_by_variant(self.repo.connection,vids)
+        paid = allocate_paid(lines, sale["total"])
+        used = self.repo.all("SELECT i.sale_item_id,i.qty,CASE WHEN s.business_date IS NOT NULL THEN i.refund_approved ELSE i.refund_request END amount,s.return_id FROM ReturnItem i JOIN ReturnSession s ON s.return_id=i.return_id WHERE s.sale_id=? AND s.return_id<>? AND s.status<>'cancelled' AND (i.disposition IS NULL OR i.disposition<>'reject')", (sid,rid))
+        chosen = {r["sale_item_id"]: r["id"] for r in self.repo.all("SELECT id,sale_item_id FROM ReturnItem WHERE return_id=?", (rid,))}
+        for row, amount in zip(lines, paid):
+            taken = [u for u in used if u["sale_item_id"] == row["item_id"]]
+            left_qty = row["qty"] - sum(u["qty"] for u in taken)
+            left_amount = amount - sum(u["amount"] or 0 for u in taken)
+            row.update(line_paid=amount, returnable_qty=max(0,left_qty), remaining_amount=max(0,left_amount),
+                       refund_limit=max(0,left_amount), selected_item_id=chosen.get(row["item_id"]),
+                       occupied_returns=sorted({u["return_id"] for u in taken}),
+                       attributes=attrs.get(row["variant_id"],{}),attr_display=displays.get(row["variant_id"],""),models=models.get(row["variant_id"],[]))
+        return lines
+    def _limit(self, session, item):
+        if session["sale_id"] is None:
+            price = self.repo.one("SELECT price FROM Variant WHERE variant_id=?", (item["variant_id"],))["price"]
+            return None if price is None else price * item["qty"]
+        line = next((r for r in self._sale_lines(session) if r["item_id"] == item["sale_item_id"]), None)
+        if line is None: raise ConflictError("退貨品項不屬於原銷售單")
+        if item["qty"] > line["returnable_qty"]:
+            raise ConflictError(f"可退數量不足，已由退貨單 {line['occupied_returns']} 佔用")
+        return refund_limit(line["line_paid"],line["qty"],line["returnable_qty"],line["remaining_amount"],item["qty"])
+    def _check(self, rid, approved=False, require_amount=False, check_price=True):
+        session = self.repo.session(rid)
+        self.repo.check_kind(rid)
+        items = self.repo.all("SELECT * FROM ReturnItem WHERE return_id=?", (rid,))
+        total = 0
+        for item in items:
+            if (session["sale_id"] is None) != (item["sale_item_id"] is None):
+                raise ConflictError("退貨品項與原銷售單不一致")
+            if item["disposition"] == "reject": continue
+            amount = item["refund_approved" if approved else "refund_request"]
+            if session["kind"] == "normal" and require_amount and amount is None:
+                raise ConflictError("請抽回補填退貨價格" if approved else "請填寫退貨價格")
+            limit = self._limit(session,item) if session["sale_id"] is not None or check_price else None
+            if session["kind"] == "normal" and amount is not None and limit is not None and amount > limit:
+                raise ConflictError(f"退貨價格超過上限 {limit} 元")
+            total += amount or 0
+        if session["sale_id"] is not None:
+            used = self.repo.one("SELECT COALESCE(SUM(CASE WHEN s.business_date IS NOT NULL THEN i.refund_approved ELSE i.refund_request END),0) n FROM ReturnItem i JOIN ReturnSession s ON s.return_id=i.return_id WHERE s.sale_id=? AND s.return_id<>? AND s.status<>'cancelled' AND i.disposition<>'reject'", (session["sale_id"],rid))["n"]
+            sale = self.repo.one("SELECT total,voided_at FROM Sale WHERE sale_id=?", (session["sale_id"],))
+            if sale["voided_at"] is not None: raise ConflictError("原銷售單已作廢")
+            if total + used > sale["total"]: raise ConflictError("累計退款超過原銷售單應收")
+        return total
+    def load_sale(self, rid, sale_id):
+        session = self.repo.require_open(rid)
+        if session["sale_id"] is not None or self.repo.one("SELECT 1 FROM ReturnItem WHERE return_id=?", (rid,)):
+            raise ConflictError("請先清空品項再帶入銷售單")
+        self.repo.require_sale(sale_id)
+        sale = self.repo.one("SELECT member_id FROM Sale WHERE sale_id=?", (sale_id,))
+        self.repo.execute("UPDATE ReturnSession SET sale_id=?,member_id=? WHERE return_id=?", (sale_id,sale["member_id"],rid))
+        return {"ok": True}
+    def pick(self, rid, sale_item_id, qty):
+        session = self.repo.require_open(rid)
+        if session["sale_id"] is None: raise ConflictError("請先帶入銷售單")
+        line = next((r for r in self._sale_lines(session) if r["item_id"] == sale_item_id), None)
+        if line is None: raise NotFoundError("找不到原銷售明細")
+        item = {"variant_id":line["variant_id"],"sale_item_id":sale_item_id,"qty":qty}
+        limit = self._limit(session,item)
+        self.repo.execute("INSERT INTO ReturnItem(return_id,variant_id,sale_item_id,qty,disposition,refund_request) VALUES(?,?,?,?,?,?)", (rid,line["variant_id"],sale_item_id,qty,None if session["kind"] == "repair" else "restock",None if session["kind"] == "repair" else limit))
+        self._check(rid)
+        return {"ok":True}
+    def clear(self, rid):
+        self.repo.require_open(rid)
+        self.repo.execute("DELETE FROM ReturnItem WHERE return_id=?", (rid,))
+        self.repo.execute("UPDATE ReturnSession SET sale_id=NULL,member_id=NULL WHERE return_id=?", (rid,))
+        return {"ok":True}
+    def set_member(self, rid, member_id):
+        session = self.repo.require_open(rid)
+        if session["sale_id"] is not None: raise ConflictError("帶單退貨不可修改會員")
+        if member_id is not None and self.repo.one("SELECT 1 FROM Member WHERE member_id=? AND active=1", (member_id,)) is None:
+            raise ConflictError("會員不存在或已停用")
+        self.repo.execute("UPDATE ReturnSession SET member_id=? WHERE return_id=?", (member_id,rid))
+        return {"ok":True}
+    def set_refund(self, rid, item_id, amount, is_admin):
+        session = self.repo.session(rid)
+        if session is None: raise NotFoundError("找不到退貨單")
+        if session["status"] == "pending" and not is_admin: raise ForbiddenError()
+        if session["status"] not in ("open","pending"): raise ConflictError("退貨單已核准或作廢")
+        if session["kind"] != "normal": raise ConflictError("返修單不退款")
+        item = self._item(rid,item_id)
+        pending = session["status"] == "pending"
+        if pending and (item["refund_request"] is None or amount > item["refund_request"]):
+            raise ConflictError("管理者只能調低申請金額，請抽回補填退貨價格")
+        field = "refund_approved" if pending else "refund_request"
+        self.repo.execute(f"UPDATE ReturnItem SET {field}=? WHERE id=?", (amount,item_id))
+        self._check(rid,approved=pending,check_price=not pending)
+        return {"ok":True}
     # 退貨頁只列最近 10 筆;更早的到紀錄查詢頁看
-    def list(self): return [dict(r) for r in self.repo.all("SELECT * FROM ReturnSession ORDER BY return_id DESC LIMIT 10")]
+    def list(self): return [dict(r) for r in self.repo.all("SELECT s.*,m.name member_name,(SELECT SUM(CASE WHEN i.disposition='reject' THEN 0 ELSE COALESCE(i.refund_approved,i.refund_request,0) END) FROM ReturnItem i WHERE i.return_id=s.return_id) request_total FROM ReturnSession s LEFT JOIN Member m ON m.member_id=s.member_id ORDER BY s.return_id DESC LIMIT 10")]
     # 紀錄查詢分兩區:一般退貨列作廢以外的所有狀態;返修退貨的返修中一律列出(不論日期),完成的依完成日期篩
     def history(self, filters, kind="normal"):
         if kind == "repair":
@@ -148,7 +261,7 @@ class ReturnsService:
                                  "(status='closed'" + suffix + ")) ORDER BY return_id DESC", args)
         else:
             # 返修單核准前(進行中/待核准)仍算一般退貨,核准後才移到返修區
-            suffix, args = date_sql(filters, "COALESCE(approved_at,submitted_at,started_at)")
+            suffix, args = date_sql(filters, "COALESCE(business_date,approved_at,submitted_at,started_at)")
             rows = self.repo.all(f"SELECT return_id FROM ReturnSession WHERE status<>'cancelled' AND NOT "
                                  f"(status IN ('repairing','closed') AND {REPAIR_SQL})" + suffix + " ORDER BY return_id DESC", args)
         return self._details([r["return_id"] for r in rows])
@@ -159,8 +272,8 @@ class ReturnsService:
     def _details(self, rids):
         if not rids: return []
         marks = ",".join("?" * len(rids))
-        sessions = {r["return_id"]: r for r in self.repo.all(f"SELECT * FROM ReturnSession WHERE return_id IN ({marks})", rids)}
-        all_rows = self.repo.all("SELECT ri.*,p.name FROM ReturnItem ri JOIN Variant v ON ri.variant_id=v.variant_id "
+        sessions = {r["return_id"]: r for r in self.repo.all(f"SELECT s.*,m.name member_name FROM ReturnSession s LEFT JOIN Member m ON m.member_id=s.member_id WHERE return_id IN ({marks})", rids)}
+        all_rows = self.repo.all("SELECT ri.*,p.name,v.price FROM ReturnItem ri JOIN Variant v ON ri.variant_id=v.variant_id "
                                  f"JOIN Product p ON v.product_id=p.product_id WHERE ri.return_id IN ({marks}) ORDER BY ri.id", rids)
         vids = list(dict.fromkeys(r["variant_id"] for r in all_rows))
         attrs = product_data.attrs_by_variant(self.repo.connection, vids)
@@ -171,33 +284,40 @@ class ReturnsService:
         grouped = {rid: [] for rid in rids}
         for r in all_rows: grouped[r["return_id"]].append(r)
         out = [self._shape(sessions[rid], grouped[rid], attrs, disp, models, done, codes) for rid in rids]
+        for detail in out:
+            session = sessions[detail["return_id"]]
+            detail["approval_business_date"] = dayclose_service.current_business_date(self.repo.connection) if session["kind"] == "normal" else None
+            detail["sale_lines"] = self._sale_lines(session)
+            detail["sale"] = dict(self.repo.one("SELECT sale_id,ts,total,member_id FROM Sale WHERE sale_id=?", (session["sale_id"],))) if session["sale_id"] is not None else None
+            detail["sale_refunded"] = self.repo.one("SELECT COALESCE(SUM(refund_amount),0) n FROM ReturnSession WHERE sale_id=? AND return_id<>?", (session["sale_id"],session["return_id"]))["n"]
+            for item in detail["items"]:
+                try: item["refund_limit"] = self._limit(session,item)
+                except ConflictError: item["refund_limit"] = 0
         return correction_service.attach(self.repo.connection, "return", out, "return_id")
     @staticmethod
     def _shape(session, rows, attrs, disp, models, repaired, codes):
         items = [{"id": r["id"], "variant_id": r["variant_id"], "name": r["name"], "attributes": attrs.get(r["variant_id"], {}),
-                  "attr_display": disp.get(r["variant_id"], ""), "models": models.get(r["variant_id"], []), "qty": r["qty"], "sale_id": r["sale_id"], "reason": r["reason"],
+                  "attr_display": disp.get(r["variant_id"], ""), "models": models.get(r["variant_id"], []), "qty": r["qty"], "sale_item_id": r["sale_item_id"], "reason": r["reason"],
+                  "price": r["price"], "refund_request": r["refund_request"], "refund_approved": r["refund_approved"],
                   "disposition": r["disposition"], "closed_qty": r["closed_qty"], "closed_reason": r["closed_reason"],
                   "closed_at": r["closed_at"], "repaired_qty": repaired.get(r["id"], 0),
                   "label_barcode": codes.get(r["variant_id"])} for r in rows]
         return {**dict(session), "items": items}
     def scan(self, rid, vid, qty):
-        self.repo.require_open(rid)
+        session = self.repo.require_open(rid)
+        if session["sale_id"] is not None: raise ConflictError("已帶入銷售單，不可掃描其他商品")
         self.repo.require_variant(vid)
         # 新品項依單據種類:返修單(抽回後再掃)沒有個別處理方式,一般單預設加回庫存
         session = self.repo.session(rid)
         disp = None if session["kind"] == "repair" else "restock"
         self.repo.execute("INSERT INTO ReturnItem(return_id,variant_id,qty,disposition) VALUES(?,?,?,?) "
-                          "ON CONFLICT(return_id,variant_id) DO UPDATE SET qty=qty+excluded.qty", (rid, vid, qty, disp))
+                          "ON CONFLICT(return_id,variant_id) WHERE sale_item_id IS NULL DO UPDATE SET qty=qty+excluded.qty", (rid, vid, qty, disp))
         self.repo.check_kind(rid)
         return {"qty": self.repo.one("SELECT qty FROM ReturnItem WHERE return_id=? AND variant_id=?", (rid, vid))["qty"]}
     def set_qty(self, rid, item_id, qty):
         self.repo.require_open(rid)
         self.repo.update_item("UPDATE ReturnItem SET qty=? WHERE return_id=? AND id=?", (qty, rid, item_id))
-        return {"ok": True}
-    def set_sale(self, rid, item_id, sale_id):
-        self.repo.require_open(rid)
-        self.repo.require_sale(sale_id)
-        self.repo.update_item("UPDATE ReturnItem SET sale_id=? WHERE return_id=? AND id=?", (sale_id, rid, item_id))
+        self._check(rid)
         return {"ok": True}
     def set_reason(self, rid, item_id, reason):
         self.repo.require_open(rid)
@@ -211,10 +331,13 @@ class ReturnsService:
         self.repo.require_open(rid)
         if self.repo.one("SELECT 1 FROM ReturnItem WHERE return_id=? LIMIT 1", (rid,)) is None:
             raise ConflictError("退貨單沒有品項，無法送出")
+        self._check(rid,require_amount=True)
+        self.repo.execute("UPDATE ReturnItem SET refund_approved=refund_request WHERE return_id=?", (rid,))
         self.repo.execute("UPDATE ReturnSession SET status='pending',submitted_at=datetime('now','localtime') WHERE return_id=?", (rid,))
         return {"ok": True}
     def withdraw(self, rid):
         self.repo.require_pending(rid)
+        self.repo.execute("UPDATE ReturnItem SET refund_approved=NULL WHERE return_id=?", (rid,))
         self.repo.execute("UPDATE ReturnSession SET status='open',submitted_at=NULL WHERE return_id=?", (rid,))
         return {"ok": True}
     def set_disposition(self, rid, item_id, disposition):
@@ -223,31 +346,40 @@ class ReturnsService:
         if session["kind"] != "normal": raise ConflictError("返修單的品項不逐項選處理方式")
         self.repo.update_item("UPDATE ReturnItem SET disposition=? WHERE return_id=? AND id=?", (disposition, rid, item_id))
         self.repo.check_kind(rid)
+        self._check(rid,approved=True,check_price=False)
         return {"ok": True}
     def set_kind(self, rid, kind):
         # 整張單切換:切返修時品項處理方式全部清空,切回一般時全部設回加回庫存;
         # 種類沒變就不動,重送不得蓋掉已選的不入庫／不同意
-        session = self.repo.require_pending(rid)
+        session = self.repo.session(rid)
+        if session is None: raise NotFoundError("找不到退貨單")
+        # 送出後不可改種類:店員已退現金,改成返修會清掉金額而漏記退款;選錯就抽回重填
+        if session["status"] == "pending": raise ConflictError("退貨單已送出，請抽回後再變更退貨種類")
+        if session["status"] != "open": raise ConflictError("退貨單已核准或作廢")
         if session["kind"] == kind: return {"ok": True}
         self.repo.execute("UPDATE ReturnSession SET kind=? WHERE return_id=?", (kind, rid))
-        self.repo.execute("UPDATE ReturnItem SET disposition=? WHERE return_id=?",
+        self.repo.execute("UPDATE ReturnItem SET disposition=?,refund_request=NULL,refund_approved=NULL WHERE return_id=?",
                           (None if kind == "repair" else "restock", rid))
         self.repo.check_kind(rid)
         return {"ok": True}
-    def approve(self, rid, kind, items):
+    def approve(self, rid, kind, items, business_date=None):
         # 只有「加回庫存」的品項寫入庫存流水;不入庫與不同意只留在退貨單上
         session = self.repo.require_pending(rid)
         self.repo.check_kind(rid)
         # 確認框顯示的內容(種類、品項、數量、處理方式)必須等於資料庫現況;
         # 切換尚未讀回、或抽回改數量後重送,都拒絕,避免照未確認的內容入帳
-        saved = {r["id"]: (r["qty"], r["disposition"]) for r in self.repo.all("SELECT id,qty,disposition FROM ReturnItem WHERE return_id=?", (rid,))}
-        if session["kind"] != kind or saved != {it["item_id"]: (it["qty"], it["disposition"]) for it in items}:
+        saved = {r["id"]: (r["qty"], r["disposition"],r["refund_approved"]) for r in self.repo.all("SELECT id,qty,disposition,refund_approved FROM ReturnItem WHERE return_id=?", (rid,))}
+        if session["kind"] != kind or saved != {it["item_id"]: (it["qty"], it["disposition"],it["refund"]) for it in items}:
             raise ConflictError("退貨單內容已變更，請重新確認後再核准")
         if session["kind"] == "repair":
+            self._check(rid)
             # 返修品項等返新進貨或結案才完成,核准當下不動庫存
             self.repo.execute("UPDATE ReturnSession SET status='repairing',approved_at=datetime('now','localtime') WHERE return_id=?", (rid,))
             return {"ok": True}
-        self.repo.execute("UPDATE ReturnSession SET status='closed',approved_at=datetime('now','localtime') WHERE return_id=?", (rid,))
+        if business_date != dayclose_service.current_business_date(self.repo.connection):
+            raise ConflictError("退款帳日已變更，請重新確認後再核准")
+        amount = self._check(rid,approved=True,require_amount=True,check_price=False)
+        self.repo.execute("UPDATE ReturnSession SET status='closed',approved_at=datetime('now','localtime'),refund_amount=?,business_date=? WHERE return_id=?", (amount,business_date,rid))
         for row in self.repo.all("SELECT id FROM ReturnItem WHERE return_id=? AND disposition='restock' ORDER BY id", (rid,)):
             stock_ledger.post(self.repo.connection, "return", row["id"])
         return {"ok": True}
@@ -286,11 +418,11 @@ class ReturnsService:
         return {"count": self.repo.one("SELECT COUNT(*) AS n FROM ReturnSession WHERE status='pending'")["n"]}
 
 READ_ACTIONS = {"returns.list", "returns.history", "returns.detail", "returns.pending_count"}
-ADMIN_ONLY = {"returns.set_disposition", "returns.set_kind", "returns.approve", "returns.pending_count", "returns.close_item", "returns.reopen_item"}
+ADMIN_ONLY = {"returns.set_disposition", "returns.approve", "returns.pending_count", "returns.close_item", "returns.reopen_item"}
 
 class ReturnsFacade(BaseFacade):
     ACTIONS = {"returns.create", "returns.list", "returns.history", "returns.detail",
-               "returns.scan", "returns.set_qty", "returns.set_sale", "returns.set_reason", "returns.remove_item",
+               "returns.scan", "returns.set_qty", "returns.load_sale", "returns.pick", "returns.clear", "returns.set_refund", "returns.set_member", "returns.set_reason", "returns.remove_item",
                "returns.close", "returns.withdraw", "returns.set_disposition", "returns.set_kind", "returns.approve",
                "returns.cancel", "returns.pending_count", "returns.repair_receive", "returns.close_item", "returns.reopen_item"}
     ERROR_MESSAGE = "不支援的退貨操作"
@@ -311,14 +443,19 @@ class ReturnsFacade(BaseFacade):
             conn.execute("BEGIN IMMEDIATE")
         s = ReturnsService(ReturnsRepository(conn))
         p = payload
-        if action == "returns.create": return s.create(p["employee"])
+        if action == "returns.create": return s.create(p["employee"],p["kind"])
         if action == "returns.list": return s.list()
         if action == "returns.history":
             return s.history(date_range(p), p["kind"])
         if action == "returns.detail": return s.detail(p["return_id"])
         if action == "returns.scan": return s.scan(p["return_id"], p["variant_id"], p["qty"])
         if action == "returns.set_qty": return s.set_qty(p["return_id"], p["item_id"], p["qty"])
-        if action == "returns.set_sale": return s.set_sale(p["return_id"], p["item_id"], p["sale_id"])
+        if action == "returns.load_sale": return s.load_sale(p["return_id"],p["sale_id"])
+        if action == "returns.pick": return s.pick(p["return_id"],p["sale_item_id"],p["qty"])
+        if action == "returns.clear": return s.clear(p["return_id"])
+        if action == "returns.set_refund": return s.set_refund(p["return_id"],p["item_id"],p["amount"],self._is_admin())
+        if action == "returns.set_member": return s.set_member(p["return_id"],p["member_id"])
+        if action == "returns.set_kind": return s.set_kind(p["return_id"],p["kind"])
         if action == "returns.set_reason": return s.set_reason(p["return_id"], p["item_id"], p["reason"])
         if action == "returns.remove_item": return s.remove_item(p["return_id"], p["item_id"])
         if action == "returns.close": return s.close(p["return_id"])
@@ -328,8 +465,7 @@ class ReturnsFacade(BaseFacade):
         # 管理者動作在交易內再確認一次身分(確認視窗期間可能已閒置登出)
         if not self._is_admin(): raise ForbiddenError()
         if action == "returns.set_disposition": return s.set_disposition(p["return_id"], p["item_id"], p["disposition"])
-        if action == "returns.set_kind": return s.set_kind(p["return_id"], p["kind"])
-        if action == "returns.approve": return s.approve(p["return_id"], p["kind"], p["items"])
+        if action == "returns.approve": return s.approve(p["return_id"], p["kind"], p["items"],p.get("business_date"))
         if action == "returns.close_item": return s.close_item(p["return_id"], p["item_id"], p["reason"])
         if action == "returns.reopen_item": return s.reopen_item(p["return_id"], p["item_id"])
         return s.pending_count()

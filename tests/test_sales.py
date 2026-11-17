@@ -113,7 +113,7 @@ class TestSales(FacadeTestCase):
         today = datetime.date.today().isoformat()
         s = self.invoke("sales.summary", {"date": today})
         self.assertEqual(s["count"], 2)
-        self.assertEqual(s["by_payment"], [{"payment_id": 1, "payment": "現金", "count": 1, "total": 1000},
+        self.assertEqual(s["by_payment"], [{"payment_id": 1, "payment": "現金", "count": 1, "total": 1000, "cash_net":1000},
                                            {"payment_id": 2, "payment": "轉帳", "count": 1, "total": 1000},
                                            {"payment_id": 3, "payment": "LINE Pay", "count": 0, "total": 0}])   # 停用且沒交易的台灣Pay 不列
 

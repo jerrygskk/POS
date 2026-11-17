@@ -7,7 +7,7 @@
 - **VUE-1**: **設定頁（或任一頁）切入即整頁卡死、之後所有畫面更新拋 TypeError** → v-if/v-else(-if) 元素上掛了動態 `:key`，與 prod 版 Vue（`vue.global.prod.js`）`stringifyStatic` 靜態節點快取衝突：key 變動重建區塊後，快取 vnode 的 DOM 參照被清空。**勿在 v-if/v-else 元素掛動態 `:key`**，內容全走資料綁定即可。⚠️ dev 版 Vue 測不出來。
 - **VUE-2**: **bug 在 harness 瀏覽器／Bridge shim 下重現不了（或反之）** → 部分崩潰只在「真實 pywebview＋prod 版 Vue」穩定重現。前端改動最終驗證一律用真實 pywebview（以 `RuntimePaths` 指向 pos.db 副本＋repo static 開視窗走查）；Bridge shim 只供目視版面，**不是正式 runtime**。
 - **VUE-3**: **自動走查收不到 JS 錯誤，畫面明明壞了** → prod 版 Vue 的錯誤只進 `console.error`，光掛 `window.onerror` 收不到；收集器要 hook `console.error`＋`window.onerror` 兩邊。
-- **VUE-4**: **css／js 改了畫面沒變** → 忘記 bump `index.html` 的 `?v=`；css 與全部 js 共用同一版號，一起 bump。
+- **VUE-4**: **css／js 改了畫面沒變** → 忘記 bump `?v=`；css 與全部 js 共用同一版號，`static/` 下五個 html（`index`、`price_fill`、`field_editor`、`variant_batch`、`variant_editor`）一起 bump。⚠️ 不要用「同一行開檔寫入又讀取」的一行式取代：寫入模式一開檔就清空，讀到的是空檔。
 - **VUE-5**: **快速連點清單／分頁後，畫面停在「前一個」選擇的資料** → 載入函式內多個 `await`，慢回應後到蓋掉新資料。多段 await 的載入函式要加載入序號戳記，寫入 state 前比對仍是最新請求才寫（參考 `settings.js` `loadCategoryDetail`）。只有一個 `await` 的查詢也一樣：紀錄頁先查 10 月再查 11 月，10 月回應晚到就蓋掉 11 月，畫面條件與「複製成圖片」的資料對不上（`records.js` `reload` 以 `_loadSeq` 涵蓋全部類別）。舊請求的**錯誤訊息**也要丟，所以這種函式自己 try/catch、不走 `guard`；供匯出或複製用的資料在送出查詢時先清空。
 - **VUE-6**: **自動走查腳本一抓元件實例就 `Cannot read properties of undefined`** → prod 版 Vue 不掛 `__vueParentComponent`，`__vue_app__`／`app._instance` 也只在 dev 版才設；靠這些入口存取 Vue 狀態的走查腳本在真實 runtime 一定失敗。走查一律改走使用者真的會碰的 DOM（`setValue` 原生 setter＋派 `input`／`change`、點按鈕與 chip），順帶把事件繫結一起驗到。
 - **VUE-7**: **走查截圖抓到的是別的視窗（瀏覽器、桌面）** → `ImageGrab` 依螢幕座標抓，pywebview 視窗沒在前景就抓到前景程式的畫面，維護者同時在用電腦時必然發生。版面判斷改用 DOM 量測（`clientWidth`/`scrollWidth`/`getBoundingClientRect`），截圖只當輔助、不作為證據。

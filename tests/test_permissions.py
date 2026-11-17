@@ -23,7 +23,7 @@ EXPECTED_ADMIN_ACTIONS = frozenset({
     "payments.create", "payments.update", "payments.sort", "payments.delete",
     "dayclose.preview", "dayclose.close", "dayclose.list", "dayclose.set_float", "sales.void", "sales.set_payment", "corrections.set_employee",
     "sales.export", "sales.export_save", "stocktake.approve", "stocktake.return", "stocktake.pending_count",
-    "returns.set_disposition", "returns.set_kind", "returns.approve", "returns.pending_count", "returns.close_item", "returns.reopen_item",
+    "returns.set_disposition", "returns.approve", "returns.pending_count", "returns.close_item", "returns.reopen_item",
     "desktop.child_window.open",
 })
 

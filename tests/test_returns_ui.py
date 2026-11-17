@@ -44,6 +44,48 @@ const s=mk();s.scanCode="F7";await s.onScan();
 assert.deepEqual(scans,[[1,7,1]]);assert.deepEqual(details,[1]);assert.equal(s.scanCode,"");
 ''')
 
+    def test_refund_review_checks_permission_at_entry(self):
+        self._run(r'''
+const s=mk();s.detail={return_id:1,status:"pending",kind:"normal",items:[]};
+let writes=0;API.setReturnRefund=async()=>writes++;
+await s.setRefund({id:3}, {target:{value:"20"}});
+assert.equal(writes,0);assert.ok(errors.includes("需要管理者權限"));
+''')
+
+    def test_open_new_supplies_labels_to_shared_choice_dialog(self):
+        self._run(r'''
+const s=mk();let labels=[],sent=[];
+context.PosConfirm={choose:async opts=>{labels=opts.items.map(i=>i.label);return 0}};
+API.createReturn=async p=>{sent.push(p);return{return_id:5}};
+await s.openNew();assert.deepEqual(Array.from(labels),["一般退貨","返修"]);
+assert.deepEqual(JSON.parse(JSON.stringify(sent)),[{employee:1,kind:"normal"}]);
+''')
+
+    def test_rejected_line_does_not_block_resubmission_after_capacity_is_used(self):
+        self._run(r'''
+const s=mk();let sent=0;
+const rejected={id:3,disposition:"reject",qty:1,refund_request:100,refund_approved:null,refund_limit:0};
+s.detail={return_id:1,status:"open",kind:"normal",items:[rejected]};
+context.PosConfirm={ask:async()=>true,notify:async()=>{}};
+API.closeReturn=async()=>sent++;API.listReturns=async()=>[];
+context.window.PosAuthOps={refresh:async()=>{}};
+await s.close();assert.equal(sent,1);assert.equal(s.current,null);
+''')
+
+    def test_loaded_sale_blocks_scan_without_calling_lookup(self):
+        self._run(r'''
+const s=mk();s.detail.sale_id=4;s.scanCode="F7";
+await s.onScan();assert.deepEqual(scans,[]);
+''')
+
+    def test_refund_sends_whole_line_amount_and_refreshes(self):
+        self._run(r'''
+const s=mk();s.detail.kind="normal";let sent=[];
+API.setReturnRefund=async(...args)=>sent.push(args);
+await s.setRefund({id:3}, {target:{value:"80"}});
+assert.deepEqual(sent,[[1,3,80]]);assert.deepEqual(details,[1]);
+''')
+
     def test_switch_during_lookup_does_not_write(self):
         self._run(r'''
 const s=mk(),d=deferred();context.window.PosScan=()=>d.promise;

@@ -36,7 +36,7 @@ class PaymentTests(FacadeTestCase):
         p = self.invoke("dayclose.preview", {"business_date": business_date})
         self.invoke("dayclose.close", {"business_date": business_date, "counted_total": p["float_amount"] + p["cash_sales"],
                                        "reason": "", "employee": 1,
-                                       "expected": {"float_amount": p["float_amount"], "cash_sales": p["cash_sales"]}})
+                                       "expected": {"float_amount": p["float_amount"], "cash_sales": p["cash_sales"], "cash_refund": 0}})
 
     def blocked(self, sql, args=()):
         with self.assertRaises(sqlite3.IntegrityError, msg=sql):
@@ -236,7 +236,7 @@ class PaymentTests(FacadeTestCase):
         d = day(-1)
         self.raw_sale(d, 3, 100)
         self.assert_application_error("validation_error", "dayclose.close", {   # 有短溢卻沒填原因
-            "business_date": d, "counted_total": 5, "reason": "", "employee": 1, "expected": {"float_amount": 0, "cash_sales": 0}})
+            "business_date": d, "counted_total": 5, "reason": "", "employee": 1, "expected": {"float_amount": 0, "cash_sales": 0, "cash_refund": 0}})
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM DayClosePayment").fetchone()[0], 0)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM DayClose").fetchone()[0], 0)
 

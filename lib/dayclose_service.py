@@ -75,13 +75,14 @@ def _validate(action, payload):
         if len(reason) > REASON_MAX:
             raise ValidationError(f"短溢原因最多 {REASON_MAX} 字")
         expected = payload.get("expected")
-        if not isinstance(expected, Mapping) or set(expected) != {"float_amount", "cash_sales"}:
+        if not isinstance(expected, Mapping) or set(expected) != {"float_amount", "cash_sales", "cash_refund"}:
             raise ValidationError("立帳資料格式不正確")
         return {"business_date": _business_date(payload),
                 "counted_total": _amount(payload.get("counted_total"), "錢櫃現金（含預備金）"),
                 "reason": reason, "employee": payload["employee"],
                 "expected": {"float_amount": _amount(expected["float_amount"], "預備金"),
-                             "cash_sales": _amount(expected["cash_sales"], "現金銷售")}}
+                             "cash_sales": _amount(expected["cash_sales"], "現金銷售"),
+                             "cash_refund": _amount(expected["cash_refund"], "現金退款")}}
     return {}
 
 
@@ -111,6 +112,12 @@ class DayCloseService:
     def current(self):
         return {"business_date": current_business_date(self.conn), "today": today(self.conn)}
 
+    def _refunds(self, business_date):
+        return self.conn.execute("SELECT COUNT(*),COALESCE(SUM(refund_amount),0) FROM ReturnSession WHERE business_date=? AND kind='normal' AND status='closed'", (business_date,)).fetchone()
+
+    def _pending_returns(self):
+        return self.conn.execute("SELECT COUNT(*) FROM ReturnSession WHERE kind='normal' AND status='pending'").fetchone()[0]
+
     def preview(self, business_date):
         # 同一次預覽的數字要出自同一個時間點:先開讀取交易
         self.conn.execute("BEGIN")
@@ -120,8 +127,9 @@ class DayCloseService:
             "SELECT COUNT(*), COALESCE(SUM(total),0) FROM Sale WHERE business_date=? AND voided_at IS NOT NULL",
             (business_date,)).fetchone()
         day = today(self.conn)
+        refunds = self._refunds(business_date)
         unclosed = [row[0] for row in self.conn.execute(
-            "SELECT DISTINCT business_date FROM Sale s WHERE business_date<? "
+            "SELECT business_date FROM (SELECT business_date FROM Sale UNION SELECT business_date FROM ReturnSession WHERE business_date IS NOT NULL) s WHERE business_date<? "
             "AND NOT EXISTS(SELECT 1 FROM DayClose d WHERE d.business_date=s.business_date) "
             "ORDER BY business_date DESC", (day,))]
         return {"business_date": business_date, "today": day, "closed": record is not None, "record": record,
@@ -129,6 +137,8 @@ class DayCloseService:
                 "float_amount": record["float_amount"] if record else cash_float(self.conn),
                 "float_setting": cash_float(self.conn),
                 "cash_sales": record["cash_sales"] if record else self._cash_of(by_payment),
+                "cash_refund": record["cash_refund"] if record else refunds[1],
+                "refund_count": refunds[0], "pending_returns": self._pending_returns(),
                 "by_payment": [{"payment_id": b["payment_id"], "payment": b["name"], "count": b["count"],
                                 "total": b["total"]} for b in by_payment],
                 "void_count": void[0], "void_total": void[1],
@@ -141,12 +151,15 @@ class DayCloseService:
             raise ValidationError("不可替未來的帳日立帳")
         if is_closed(self.conn, business_date):
             raise ConflictError("此帳日已立帳")
+        pending = self._pending_returns()
+        if pending: raise ConflictError(f"尚有 {pending} 張退貨待核准，請先核准或作廢")
         # 現金銷售與快照出自同一份加總:兩邊不可能對不上
         by_payment = self._by_payment(business_date)
         float_amount, cash_sales = cash_float(self.conn), self._cash_of(by_payment)
-        if body["expected"] != {"float_amount": float_amount, "cash_sales": cash_sales}:
+        cash_refund = self._refunds(business_date)[1]
+        if body["expected"] != {"float_amount": float_amount, "cash_sales": cash_sales, "cash_refund": cash_refund}:
             raise ConflictError("金額已變動，請重新確認")
-        diff = body["counted_total"] - float_amount - cash_sales
+        diff = body["counted_total"] - float_amount - cash_sales + cash_refund
         if diff and not body["reason"]:
             raise ValidationError("有短溢時請填寫原因")
         # 快照先寫、主檔最後寫:主檔一寫入,資料庫就不再讓該帳日加明細。只存當天有交易的
@@ -155,9 +168,9 @@ class DayCloseService:
             [(business_date, b["payment_id"], b["name"], b["count"], b["total"], b["fee_rate"])
              for b in by_payment if b["count"]])
         self.conn.execute(
-            "INSERT INTO DayClose(business_date,employee,float_amount,counted_total,cash_sales,diff,reason) "
-            "VALUES(?,?,?,?,?,?,?)",
-            (business_date, body["employee"], float_amount, body["counted_total"], cash_sales, diff,
+            "INSERT INTO DayClose(business_date,employee,float_amount,counted_total,cash_sales,cash_refund,diff,reason) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (business_date, body["employee"], float_amount, body["counted_total"], cash_sales, cash_refund,diff,
              body["reason"] or None))
         return self._record(business_date)
 

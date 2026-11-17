@@ -35,7 +35,7 @@ class ReturnsBase(FacadeTestCase):
 class TestReturns(ReturnsBase):
     def setUp(self):
         super().setUp()
-        self.rid = self.invoke("returns.create", {"employee": 2})["return_id"]
+        self.rid = self.invoke("returns.create", {"kind":"normal","employee": 2})["return_id"]
 
     def fill(self):
         for vid in (self.v1, self.v2, self.v3):
@@ -54,13 +54,9 @@ class TestReturns(ReturnsBase):
         self.assertNotIn(self.v3, items)
 
     def test_approve_rejects_stale_confirmation(self):
-        # 確認框是舊內容(切換種類或改處理方式尚未讀回)時拒絕,不得照資料庫現況入帳
+        # 確認框是舊內容(改處理方式尚未讀回)時拒絕,不得照資料庫現況入帳
         self.fill()
-        self.invoke("returns.close", {"return_id": self.rid})
-        shown = self.approve_payload(self.rid)
-        self.invoke("returns.set_kind", {"return_id": self.rid, "kind": "repair"})
-        self.assert_application_error("conflict", "returns.approve", shown)
-        self.invoke("returns.set_kind", {"return_id": self.rid, "kind": "normal"})
+        self.submit_return(self.rid)
         shown = self.approve_payload(self.rid)
         self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "disposition": "reject"})
         self.assert_application_error("conflict", "returns.approve", shown)
@@ -69,24 +65,25 @@ class TestReturns(ReturnsBase):
         shown = self.approve_payload(self.rid)
         self.invoke("returns.withdraw", {"return_id": self.rid})
         self.invoke("returns.set_qty", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "qty": 3})
-        self.invoke("returns.close", {"return_id": self.rid})
+        self.submit_return(self.rid)
         self.assert_application_error("conflict", "returns.approve", shown)
         missing = self.approve_payload(self.rid); missing["items"].pop()
         self.assert_application_error("conflict", "returns.approve", missing)
         self.assertEqual(self.invoke("returns.detail", {"return_id": self.rid})["status"], "pending")
         self.assertEqual(self.stock(self.v1), 5)
 
-    def test_resending_same_kind_keeps_dispositions(self):
+    def test_set_kind_after_submit_is_rejected_and_keeps_dispositions(self):
         self.fill()
-        self.invoke("returns.close", {"return_id": self.rid})
+        self.submit_return(self.rid)
         self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "disposition": "reject"})
-        self.invoke("returns.set_kind", {"return_id": self.rid, "kind": "normal"})
+        for kind in ("normal", "repair"):
+            self.assert_application_error("conflict", "returns.set_kind", {"return_id": self.rid, "kind": kind})
         self.invoke("returns.approve", self.approve_payload(self.rid))
         self.assertEqual(self.stock(self.v1), 5)
 
     def test_approve_applies_only_restock(self):
         self.fill()
-        self.invoke("returns.close", {"return_id": self.rid})
+        self.submit_return(self.rid)
         self.assertEqual(self.stock(self.v1), 5)
         self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v2), "disposition": "discard"})
         self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v3), "disposition": "reject"})
@@ -101,7 +98,7 @@ class TestReturns(ReturnsBase):
 
     def test_no_edit_after_submit_and_withdraw_reopens(self):
         self.fill()
-        self.invoke("returns.close", {"return_id": self.rid})
+        self.submit_return(self.rid)
         self.assert_application_error("conflict", "returns.scan", {"return_id": self.rid, "variant_id": self.v1, "qty": 1})
         self.assert_application_error("conflict", "returns.set_qty", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "qty": 1})
         self.invoke("returns.withdraw", {"return_id": self.rid})
@@ -112,22 +109,23 @@ class TestReturns(ReturnsBase):
     def test_empty_return_cannot_submit(self):
         self.assert_application_error("conflict", "returns.close", {"return_id": self.rid})
 
-    def test_sale_id_per_item_optional_but_must_exist(self):
-        self.fill()
-        self.assert_application_error("not_found", "returns.set_sale", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "sale_id": 999})
+    def test_sale_is_loaded_on_header_and_items_must_be_picked(self):
+        self.assert_application_error("not_found", "returns.load_sale", {"return_id": self.rid, "sale_id": 999})
         sale = self.invoke("sales.checkout", {"payment_id": self.invoke("payments.list")[0]["payment_id"], "paid": 0, "employee": 1,
                                               "items": [{"variant_id": self.v1, "qty": 1, "unit_price": 0}]})
-        self.invoke("returns.set_sale", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "sale_id": sale["sale_id"]})
-        items = {i["variant_id"]: i for i in self.invoke("returns.detail", {"return_id": self.rid})["items"]}
-        self.assertEqual((items[self.v1]["sale_id"], items[self.v2]["sale_id"]), (sale["sale_id"], None))
-        self.invoke("returns.set_sale", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "sale_id": None})
-        self.assertIsNone(self.invoke("returns.detail", {"return_id": self.rid})["items"][0]["sale_id"])
-        self.assert_application_error("validation_error", "returns.set_sale", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1)})
+        self.invoke("returns.load_sale", {"return_id": self.rid, "sale_id": sale["sale_id"]})
+        detail = self.invoke("returns.detail", {"return_id":self.rid})
+        self.assertEqual(detail["sale_id"],sale["sale_id"])
+        self.assertEqual(detail["items"],[])
+        self.invoke("returns.pick", {"return_id":self.rid,"sale_item_id":detail["sale_lines"][0]["item_id"],"qty":1})
+        self.assertEqual(self.invoke("returns.detail", {"return_id":self.rid})["items"][0]["variant_id"],self.v1)
+        self.invoke("returns.clear", {"return_id":self.rid})
+        self.assertIsNone(self.invoke("returns.detail", {"return_id":self.rid})["sale_id"])
 
     def test_cancel_rules(self):
         self.fill()
         self.as_employee()
-        self.invoke("returns.close", {"return_id": self.rid})
+        self.submit_return(self.rid)
         self.assert_application_error("forbidden", "returns.cancel", {"return_id": self.rid, "employee": 2})
         self.as_admin()
         self.invoke("returns.cancel", {"return_id": self.rid, "employee": 3})
@@ -139,18 +137,18 @@ class TestReturns(ReturnsBase):
         self.assertNotIn(self.rid, [r["return_id"] for r in self.invoke("returns.history", {})])
         # 進行中員工可作廢;已核准不可作廢
         self.as_employee()
-        rid = self.invoke("returns.create", {"employee": 1})["return_id"]
+        rid = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
         self.invoke("returns.cancel", {"return_id": rid, "employee": 1})
         self.as_admin()
-        rid = self.invoke("returns.create", {"employee": 1})["return_id"]
+        rid = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
         self.invoke("returns.scan", {"return_id": rid, "variant_id": self.v1, "qty": 1})
-        self.invoke("returns.close", {"return_id": rid})
+        self.submit_return(rid)
         self.invoke("returns.approve", self.approve_payload(rid))
         self.assert_application_error("conflict", "returns.cancel", {"return_id": rid, "employee": 1})
 
     def test_employee_cannot_review(self):
         self.fill()
-        self.invoke("returns.close", {"return_id": self.rid})
+        self.submit_return(self.rid)
         self.as_employee()
         for action, payload in (("returns.approve", self.approve_payload(self.rid)),
                                 ("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "disposition": "discard"}),
@@ -162,7 +160,7 @@ class TestReturns(ReturnsBase):
 
     def test_pending_count_and_validation(self):
         self.fill()
-        self.invoke("returns.close", {"return_id": self.rid})
+        self.submit_return(self.rid)
         self.assertEqual(self.invoke("returns.pending_count"), {"count": 1})
         self.assert_application_error("validation_error", "returns.create", {})
         self.assert_application_error("validation_error", "returns.scan", {"return_id": self.rid, "variant_id": self.v1, "qty": 0})
@@ -174,7 +172,7 @@ class TestReturns(ReturnsBase):
         self.invoke("stocktake.scan", {"session_id": sid, "variant_id": self.v1, "qty": 5})
         self.invoke("stocktake.close", {"session_id": sid})
         self.fill()
-        self.invoke("returns.close", {"return_id": self.rid})
+        self.submit_return(self.rid)
         self.invoke("returns.approve", self.approve_payload(self.rid))
         self.invoke("stocktake.withdraw", {"session_id": sid})
         item = self.invoke("stocktake.detail", {"session_id": sid})["items"][0]
@@ -224,7 +222,7 @@ class DisplayModelsTest(FacadeTestCase):
         vid = self.invoke("products.create", {"name": "殼", "category_id": category_id, "variants": [
             {"attributes": {}, "model_ids": [model_id],
              "barcodes": [{"barcode": "M1", "source": "store"}]}]})["variant_ids"][0]
-        rid = self.invoke("returns.create", {"employee": 1})["return_id"]
+        rid = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
         self.invoke("returns.scan", {"return_id": rid, "variant_id": vid, "qty": 1})
         def shown():
             return (self.invoke("barcodes.scan", {"code": "M1"})["matches"][0]["models"],

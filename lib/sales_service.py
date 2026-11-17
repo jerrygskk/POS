@@ -265,8 +265,7 @@ class SalesService:
             raise ConflictError("此單已作廢")
         if sale["closed"]:
             raise ConflictError("此帳日已立帳，請改走退貨")
-        if conn.execute("SELECT 1 FROM ReturnItem i JOIN ReturnSession s ON s.return_id=i.return_id "
-                        "WHERE i.sale_id=? AND s.status<>'cancelled' LIMIT 1", (body["sale_id"],)).fetchone():
+        if conn.execute("SELECT 1 FROM ReturnSession WHERE sale_id=? AND status<>'cancelled' LIMIT 1", (body["sale_id"],)).fetchone():
             raise ConflictError("此單已有退貨單，不可作廢")
         # 條件式更新:連點兩次時第二次改不到列,不會重複沖回
         changed = conn.execute(
@@ -338,10 +337,24 @@ class SalesService:
 
     def summary(self, filters):
         # 筆數、總額、各付款方式只算未作廢;作廢另外回報
+        self.repo.connection.execute("BEGIN")
         rows = self.repo.summary_rows(filters)
         void = self.repo.void_summary(filters)
-        return {"count": sum(row["c"] for row in rows), "total": sum(row["t"] or 0 for row in rows),
+        result = {"count": sum(row["c"] for row in rows), "total": sum(row["t"] or 0 for row in rows),
                 "by_payment": self._by_payment(rows), "void_count": void["c"], "void_total": void["t"]}
+        result["refunds_included"] = filters["payment_id"] is None and not filters["member_phone"]
+        if result["refunds_included"]:
+            where, args = "", []
+            for key, op in (("date_from", ">="),("date_to", "<=")):
+                if filters[key]:
+                    where += f" AND business_date{op}?"
+                    args.append(filters[key])
+            refund = self.repo.one("SELECT COUNT(*) c,COALESCE(SUM(refund_amount),0) t FROM ReturnSession WHERE kind='normal' AND status='closed' AND business_date IS NOT NULL" + where,args)
+            result.update(refund_count=refund["c"],refund_total=refund["t"],net_total=result["total"]-refund["t"])
+            cash_ids = {p["payment_id"] for p in self.repo.payments() if p["is_cash"]}
+            for item in result["by_payment"]:
+                if item["payment_id"] in cash_ids: item["cash_net"] = item["total"]-refund["t"]
+        return result
 
     # 依設定順序列出付款方式,名稱用現在的:啟用中的沒交易也列 0;停用的只在查詢範圍內有交易時才列
     def _by_payment(self, rows):

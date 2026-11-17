@@ -41,7 +41,7 @@ class DayCloseTest(FacadeTestCase):
         preview = self.invoke("dayclose.preview", {"business_date": business_date})
         return self.invoke("dayclose.close", {
             "business_date": business_date, "counted_total": counted, "reason": reason, "employee": employee,
-            "expected": expected or {"float_amount": preview["float_amount"], "cash_sales": preview["cash_sales"]}})
+            "expected": expected or {"float_amount": preview["float_amount"], "cash_sales": preview["cash_sales"], "cash_refund": 0}})
 
     def sale_date(self, sale_id):
         return self.conn.execute("SELECT business_date FROM Sale WHERE sale_id=?", (sale_id,)).fetchone()[0]
@@ -123,24 +123,24 @@ class DayCloseTest(FacadeTestCase):
         self.assertEqual(self.close(day(-2), 3050, reason="多收")["diff"], 50)
         self.assert_application_error("validation_error", "dayclose.close", {
             "business_date": day(-4), "counted_total": 1, "reason": "字" * 61, "employee": 1,
-            "expected": {"float_amount": 3000, "cash_sales": 0}})
+            "expected": {"float_amount": 3000, "cash_sales": 0, "cash_refund": 0}})
 
     def test_closing_twice_is_conflict(self):
         self.close(day(-1), 0)
         self.assert_application_error("conflict", "dayclose.close", {
             "business_date": day(-1), "counted_total": 0, "reason": "", "employee": 1,
-            "expected": {"float_amount": 0, "cash_sales": 0}})
+            "expected": {"float_amount": 0, "cash_sales": 0, "cash_refund": 0}})
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM DayClose").fetchone()[0], 1)
 
     def test_future_day_is_rejected(self):
         self.assert_application_error("validation_error", "dayclose.close", {
             "business_date": day(1), "counted_total": 0, "reason": "", "employee": 1,
-            "expected": {"float_amount": 0, "cash_sales": 0}})
+            "expected": {"float_amount": 0, "cash_sales": 0, "cash_refund": 0}})
 
     def test_expected_amounts_must_match_current_values(self):
         d = day()
         preview = self.invoke("dayclose.preview", {"business_date": d})
-        expected = {"float_amount": preview["float_amount"], "cash_sales": preview["cash_sales"]}
+        expected = {"float_amount": preview["float_amount"], "cash_sales": preview["cash_sales"], "cash_refund": 0}
         self.checkout()   # 預覽後又結了一筆現金
         error = self.assert_application_error("conflict", "dayclose.close", {
             "business_date": d, "counted_total": 0, "reason": "", "employee": 1, "expected": expected})
@@ -148,7 +148,7 @@ class DayCloseTest(FacadeTestCase):
         self.invoke("dayclose.set_float", {"amount": 500})   # 預覽後預備金被改
         self.assert_application_error("conflict", "dayclose.close", {
             "business_date": d, "counted_total": 100, "reason": "", "employee": 1,
-            "expected": {"float_amount": 0, "cash_sales": 100}})
+            "expected": {"float_amount": 0, "cash_sales": 100, "cash_refund": 0}})
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM DayClose").fetchone()[0], 0)
 
     def test_previous_day_can_be_closed_later_without_touching_today(self):
@@ -216,7 +216,7 @@ class DayCloseTest(FacadeTestCase):
         for action, payload in (("dayclose.preview", {"business_date": day()}), ("dayclose.list", {}),
                                 ("dayclose.set_float", {"amount": 9}),
                                 ("dayclose.close", {"business_date": day(), "counted_total": 0, "reason": "",
-                                                    "employee": 1, "expected": {"float_amount": 0, "cash_sales": 0}})):
+                                                    "employee": 1, "expected": {"float_amount": 0, "cash_sales": 0, "cash_refund": 0}})):
             self.assertEqual(bridge.invoke(action, payload)["error"]["code"], "forbidden", action)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM DayClose").fetchone()[0], 0)
         self.assertEqual(self.conn.execute("SELECT value FROM Setting WHERE key='cash_float'").fetchone()[0], "0")

@@ -105,8 +105,22 @@ class FacadeTestCase(unittest.TestCase):
     def approve_payload(self, rid):
         """核准退貨要附上確認框看到的種類與品項處理方式;測試直接取資料庫現況。"""
         detail = self.invoke("returns.detail", {"return_id": rid})
-        return {"return_id": rid, "kind": detail["kind"],
-                "items": [{"item_id": i["id"], "qty": i["qty"], "disposition": i["disposition"]} for i in detail["items"]]}
+        payload = {"return_id": rid, "kind": detail["kind"],
+                "items": [{"item_id": i["id"], "qty": i["qty"], "disposition": i["disposition"], "refund": i["refund_approved"]} for i in detail["items"]]}
+        if detail["kind"] == "normal": payload["business_date"] = detail["approval_business_date"]
+        return payload
+
+    def fill_return_prices(self, rid, amount=0):
+        """非金額測試仍須明確準備合法的零元退款，不替正式 API 補預設值。"""
+        detail = self.invoke("returns.detail", {"return_id": rid})
+        if detail["kind"] == "normal":
+            for item in detail["items"]:
+                if item["refund_request"] is None:
+                    self.invoke("returns.set_refund", {"return_id":rid,"item_id":item["id"],"amount":amount})
+
+    def submit_return(self, rid):
+        self.fill_return_prices(rid)
+        return self.invoke("returns.close", {"return_id":rid})
 
     def invoke_envelope(self, action, payload=None):
         return self.bridge.invoke(action, payload)

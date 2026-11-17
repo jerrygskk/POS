@@ -250,16 +250,25 @@ CREATE TABLE IF NOT EXISTS ReturnSession(      -- 退貨單:送審後由管理�
   employee INTEGER CHECK(employee BETWEEN 1 AND 6),
   cancelled_by INTEGER CHECK(cancelled_by BETWEEN 1 AND 6),
   status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','pending','repairing','closed','cancelled')),
-  refund_amount INTEGER,                        -- 退款金額:預留,尚未使用
+  sale_id INTEGER REFERENCES Sale(sale_id),
+  member_id INTEGER REFERENCES Member(member_id),
+  business_date TEXT CHECK(business_date IS NULL OR business_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  refund_amount INTEGER CHECK(refund_amount IS NULL OR refund_amount >= 0),
   completed_at TEXT,                            -- 返修單全部品項返新或結案的時間
-  kind TEXT NOT NULL DEFAULT 'normal' CHECK(kind IN ('normal','repair'))  -- 整張單的模式:一般／返修
+  kind TEXT NOT NULL DEFAULT 'normal' CHECK(kind IN ('normal','repair')),
+  CHECK((refund_amount IS NULL) = (business_date IS NULL)),
+  CHECK(kind='normal' OR refund_amount IS NULL)
 );
+CREATE INDEX IF NOT EXISTS idx_return_business_date ON ReturnSession(business_date) WHERE business_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_return_sale ON ReturnSession(sale_id);
 CREATE TABLE IF NOT EXISTS ReturnItem(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   return_id INTEGER NOT NULL REFERENCES ReturnSession(return_id),
   variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
   qty INTEGER NOT NULL CHECK(qty > 0),
-  sale_id INTEGER REFERENCES Sale(sale_id),     -- 原銷售單(選填)
+  sale_item_id INTEGER,
+  refund_request INTEGER CHECK(refund_request IS NULL OR refund_request >= 0),
+  refund_approved INTEGER CHECK(refund_approved IS NULL OR (refund_request IS NOT NULL AND refund_approved BETWEEN 0 AND refund_request)),
   reason TEXT,
   -- 一般退貨:加回庫存／退貨不入庫／不同意。返修單的品項為 NULL
   -- (與父單 kind 一致由 returns_service._check_kind 在同一交易檢查)
@@ -270,9 +279,12 @@ CREATE TABLE IF NOT EXISTS ReturnItem(
   CHECK(closed_qty BETWEEN 0 AND qty),
   CHECK(closed_qty = 0 OR (closed_reason IS NOT NULL AND closed_at IS NOT NULL)),
   CHECK(closed_qty = 0 OR disposition IS NULL),  -- 只有返修品項能結案
-  UNIQUE(return_id, variant_id),
+  CHECK(disposition IS NOT NULL OR (refund_request IS NULL AND refund_approved IS NULL)),
+  FOREIGN KEY(sale_item_id, variant_id) REFERENCES SaleItem(item_id, variant_id),
   UNIQUE(id, variant_id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_returnitem_scan ON ReturnItem(return_id,variant_id) WHERE sale_item_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_returnitem_sale ON ReturnItem(return_id,sale_item_id) WHERE sale_item_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS Setting(
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -307,9 +319,10 @@ CREATE TABLE IF NOT EXISTS DayClose(           -- 每日立帳:一個帳日一�
   float_amount INTEGER NOT NULL CHECK(float_amount >= 0),    -- 立帳當下的預備金
   counted_total INTEGER NOT NULL CHECK(counted_total >= 0),  -- 輸入的錢櫃總額(含預備金)
   cash_sales INTEGER NOT NULL CHECK(cash_sales >= 0),        -- 立帳當下的現金銷售(不含作廢)
+  cash_refund INTEGER NOT NULL DEFAULT 0 CHECK(cash_refund >= 0),
   diff INTEGER NOT NULL,                                     -- 短溢,負＝短
   reason TEXT,
-  CHECK(diff = counted_total - float_amount - cash_sales),
+  CHECK(diff = counted_total - float_amount - cash_sales + cash_refund),
   CHECK(diff = 0 OR (reason IS NOT NULL AND length(trim(reason)) > 0))
 );
 CREATE TABLE IF NOT EXISTS DayClosePayment(    -- 立帳當下各付款方式的快照:只存當天有交易的,不可改刪
@@ -362,7 +375,7 @@ CREATE TRIGGER IF NOT EXISTS trg_stocktakeitem_lock_delete BEFORE DELETE ON Stoc
   WHEN EXISTS(SELECT 1 FROM StockMovement WHERE stocktake_item_id=OLD.id)
   BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_returnitem_lock_update BEFORE UPDATE ON ReturnItem
-  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE return_item_id=OLD.id) AND (OLD.return_id IS NOT NEW.return_id OR OLD.variant_id IS NOT NEW.variant_id OR OLD.qty IS NOT NEW.qty OR OLD.disposition IS NOT NEW.disposition)
+  WHEN EXISTS(SELECT 1 FROM StockMovement WHERE return_item_id=OLD.id) AND (OLD.return_id IS NOT NEW.return_id OR OLD.variant_id IS NOT NEW.variant_id OR OLD.qty IS NOT NEW.qty OR OLD.disposition IS NOT NEW.disposition OR OLD.sale_item_id IS NOT NEW.sale_item_id OR OLD.refund_approved IS NOT NEW.refund_approved)
   BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_returnitem_lock_delete BEFORE DELETE ON ReturnItem
   WHEN EXISTS(SELECT 1 FROM StockMovement WHERE return_item_id=OLD.id)
@@ -387,7 +400,7 @@ CREATE TRIGGER IF NOT EXISTS trg_stocktakeitem_lock_replace BEFORE INSERT ON Sto
   BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_returnitem_lock_replace BEFORE INSERT ON ReturnItem
   WHEN EXISTS(SELECT 1 FROM ReturnItem i JOIN StockMovement m ON m.return_item_id=i.id
-              WHERE i.id=NEW.id OR (i.return_id=NEW.return_id AND i.variant_id=NEW.variant_id))
+              WHERE i.id=NEW.id OR (i.return_id=NEW.return_id AND ((i.sale_item_id IS NULL AND NEW.sale_item_id IS NULL AND i.variant_id=NEW.variant_id) OR i.sale_item_id=NEW.sale_item_id)))
   BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_sale_lock_replace BEFORE INSERT ON Sale
   WHEN EXISTS(SELECT 1 FROM SaleItem si JOIN StockMovement m ON m.sale_item_id=si.item_id WHERE si.sale_id=NEW.sale_id)
@@ -411,8 +424,40 @@ CREATE TRIGGER IF NOT EXISTS trg_stocktakeitem_lock_update_replace BEFORE UPDATE
   BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_returnitem_lock_update_replace BEFORE UPDATE ON ReturnItem
   WHEN EXISTS(SELECT 1 FROM ReturnItem i JOIN StockMovement m ON m.return_item_id=i.id
-              WHERE i.id<>OLD.id AND (i.id=NEW.id OR (i.return_id=NEW.return_id AND i.variant_id=NEW.variant_id)))
+              WHERE i.id<>OLD.id AND (i.id=NEW.id OR (i.return_id=NEW.return_id AND ((i.sale_item_id IS NULL AND NEW.sale_item_id IS NULL AND i.variant_id=NEW.variant_id) OR i.sale_item_id=NEW.sale_item_id))))
   BEGIN SELECT RAISE(ABORT, '已入帳明細不可修改或刪除'); END;
+-- 不入庫的退款沒有庫存異動，退款鎖定須看父單的入帳日。
+CREATE TRIGGER IF NOT EXISTS trg_return_booked_insert BEFORE INSERT ON ReturnSession
+  WHEN EXISTS(SELECT 1 FROM DayClose WHERE business_date=NEW.business_date)
+    OR EXISTS(SELECT 1 FROM ReturnSession WHERE return_id=NEW.return_id AND business_date IS NOT NULL)
+  BEGIN SELECT RAISE(ABORT, '已入帳退貨單不可新增或修改'); END;
+CREATE TRIGGER IF NOT EXISTS trg_return_booked_update BEFORE UPDATE ON ReturnSession
+  WHEN (OLD.business_date IS NOT NULL AND (OLD.return_id IS NOT NEW.return_id
+    OR OLD.business_date IS NOT NEW.business_date OR OLD.refund_amount IS NOT NEW.refund_amount
+    OR OLD.kind IS NOT NEW.kind OR OLD.sale_id IS NOT NEW.sale_id OR OLD.status IS NOT NEW.status))
+    OR (NEW.business_date IS NOT OLD.business_date AND EXISTS(SELECT 1 FROM DayClose WHERE business_date=NEW.business_date))
+    OR (NEW.return_id IS NOT OLD.return_id AND EXISTS(SELECT 1 FROM ReturnSession WHERE return_id=NEW.return_id AND business_date IS NOT NULL))
+  BEGIN SELECT RAISE(ABORT, '已入帳退貨單不可修改'); END;
+CREATE TRIGGER IF NOT EXISTS trg_return_booked_delete BEFORE DELETE ON ReturnSession
+  WHEN OLD.business_date IS NOT NULL
+  BEGIN SELECT RAISE(ABORT, '已入帳退貨單不可刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_returnitem_booked_insert BEFORE INSERT ON ReturnItem
+  WHEN EXISTS(SELECT 1 FROM ReturnSession WHERE return_id=NEW.return_id AND business_date IS NOT NULL)
+    OR EXISTS(SELECT 1 FROM ReturnItem i JOIN ReturnSession s ON s.return_id=i.return_id
+              WHERE s.business_date IS NOT NULL AND i.id=NEW.id)
+  BEGIN SELECT RAISE(ABORT, '已入帳退貨明細不可新增或修改'); END;
+CREATE TRIGGER IF NOT EXISTS trg_returnitem_booked_update BEFORE UPDATE ON ReturnItem
+  WHEN (EXISTS(SELECT 1 FROM ReturnSession WHERE return_id IN (OLD.return_id,NEW.return_id) AND business_date IS NOT NULL)
+    AND (OLD.id IS NOT NEW.id OR OLD.return_id IS NOT NEW.return_id OR OLD.variant_id IS NOT NEW.variant_id
+      OR OLD.qty IS NOT NEW.qty OR OLD.disposition IS NOT NEW.disposition OR OLD.sale_item_id IS NOT NEW.sale_item_id
+      OR OLD.refund_request IS NOT NEW.refund_request OR OLD.refund_approved IS NOT NEW.refund_approved))
+    OR EXISTS(SELECT 1 FROM ReturnItem i JOIN ReturnSession s ON s.return_id=i.return_id
+      WHERE s.business_date IS NOT NULL AND i.id<>OLD.id AND (i.id=NEW.id OR
+        (i.return_id=NEW.return_id AND ((i.sale_item_id IS NULL AND NEW.sale_item_id IS NULL AND i.variant_id=NEW.variant_id) OR i.sale_item_id=NEW.sale_item_id))))
+  BEGIN SELECT RAISE(ABORT, '已入帳退貨明細不可修改'); END;
+CREATE TRIGGER IF NOT EXISTS trg_returnitem_booked_delete BEFORE DELETE ON ReturnItem
+  WHEN EXISTS(SELECT 1 FROM ReturnSession WHERE return_id=OLD.return_id AND business_date IS NOT NULL)
+  BEGIN SELECT RAISE(ABORT, '已入帳退貨明細不可刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_replace BEFORE INSERT ON StockMovement
   WHEN EXISTS(SELECT 1 FROM StockMovement WHERE move_id=NEW.move_id
               OR receipt_item_id=NEW.receipt_item_id

@@ -41,7 +41,7 @@ class CorrectionsTest(FacadeTestCase):
         p = self.invoke("dayclose.preview", {"business_date": TODAY})
         self.invoke("dayclose.close", {"business_date": TODAY, "counted_total": p["float_amount"] + p["cash_sales"],
                                        "reason": "", "employee": 1,
-                                       "expected": {"float_amount": p["float_amount"], "cash_sales": p["cash_sales"]}})
+                                       "expected": {"float_amount": p["float_amount"], "cash_sales": p["cash_sales"], "cash_refund": 0}})
 
     def sale_row(self, sale):
         return next(s for s in self.invoke("sales.list", {}) if s["sale_id"] == sale)
@@ -85,9 +85,9 @@ class CorrectionsTest(FacadeTestCase):
     # ---- 員工 ----
     def test_employee_correction_on_all_four_documents(self):
         sale = self.checkout()
-        rid = self.invoke("returns.create", {"employee": 1})["return_id"]
+        rid = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
         self.invoke("returns.scan", {"return_id": rid, "variant_id": self.vid, "qty": 1})
-        self.invoke("returns.close", {"return_id": rid})
+        self.submit_return(rid)
         self.invoke("returns.approve", self.approve_payload(rid))
         sid = self.invoke("stocktake.create", {"employee": 1})["session_id"]
         self.invoke("stocktake.scan", {"session_id": sid, "variant_id": self.vid, "qty": 20})

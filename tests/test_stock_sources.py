@@ -48,9 +48,9 @@ class StockSourcesTest(FacadeTestCase):
         sale = self.invoke("sales.checkout", {"payment_id": 1, "paid": 100, "employee": 2,
                                               "items": [{"variant_id": self.v1, "qty": 1, "unit_price": 100}]})
         self.assertEqual(self.stock(self.v1), 6)
-        ret = self.invoke("returns.create", {"employee": 3})["return_id"]
+        ret = self.invoke("returns.create", {"kind":"normal","employee": 3})["return_id"]
         self.invoke("returns.scan", {"return_id": ret, "variant_id": self.v1, "qty": 1})
-        self.invoke("returns.close", {"return_id": ret})
+        self.submit_return(ret)
         self.invoke("returns.approve", self.approve_payload(ret))
         self.assertEqual(self.stock(self.v1), 7)
         sid = self.invoke("stocktake.create", {"employee": 4})["session_id"]
@@ -58,11 +58,10 @@ class StockSourcesTest(FacadeTestCase):
         self.invoke("stocktake.close", {"session_id": sid})
         self.invoke("stocktake.approve", {"session_id": sid})
         self.assertEqual(self.stock(self.v2), 3)
-        rep = self.invoke("returns.create", {"employee": 5})["return_id"]
+        rep = self.invoke("returns.create", {"kind":"repair","employee": 5})["return_id"]
         self.invoke("returns.scan", {"return_id": rep, "variant_id": self.v2, "qty": 2})
         rep_item = self.return_item_id(rep, self.v2)
-        self.invoke("returns.close", {"return_id": rep})
-        self.invoke("returns.set_kind", {"return_id": rep, "kind": "repair"})
+        self.submit_return(rep)
         self.invoke("returns.approve", self.approve_payload(rep))
         for n in (1, 1):  # 分批返新合法
             self.invoke("returns.repair_receive", {"return_id": rep, "employee": 6, "items": [{"item_id": rep_item, "qty": n}]})
@@ -205,7 +204,8 @@ class StockSourcesTest(FacadeTestCase):
         free_take = conn.execute("INSERT INTO StocktakeItem(session_id,variant_id,system_qty,counted_qty) VALUES(?,?,0,0)", (sid, self.v1)).lastrowid
         rid, rvid = conn.execute("SELECT return_id,variant_id FROM ReturnItem WHERE id=?", (ids["return_item"],)).fetchone()
         other_vid = self.v2 if rvid == self.v1 else self.v1
-        free_ret = conn.execute("INSERT INTO ReturnItem(return_id,variant_id,qty) VALUES(?,?,1)", (rid, other_vid)).lastrowid
+        free_rid = conn.execute("INSERT INTO ReturnSession(employee) VALUES(1)").lastrowid
+        free_ret = conn.execute("INSERT INTO ReturnItem(return_id,variant_id,qty) VALUES(?,?,1)", (free_rid, other_vid)).lastrowid
         cases = {
             "進貨明細主鍵": ("UPDATE OR REPLACE ReceiptItem SET receipt_item_id=? WHERE receipt_item_id=?", (ids["receipt_item"], free_receipt_item)),
             "銷售明細主鍵": ("UPDATE OR REPLACE SaleItem SET item_id=? WHERE item_id=?", (ids["sale_item"], free_sale_item)),
@@ -213,7 +213,7 @@ class StockSourcesTest(FacadeTestCase):
             "盤點明細主鍵": ("UPDATE OR REPLACE StocktakeItem SET id=? WHERE id=?", (ids["stocktake_item"], free_take)),
             "盤點明細同單同款": ("UPDATE OR REPLACE StocktakeItem SET variant_id=? WHERE id=?", (self.v2, free_take)),
             "退貨品項主鍵": ("UPDATE OR REPLACE ReturnItem SET id=? WHERE id=?", (ids["return_item"], free_ret)),
-            "退貨品項同單同款": ("UPDATE OR REPLACE ReturnItem SET variant_id=? WHERE id=?", (rvid, free_ret)),
+            "退貨品項同單同款": ("UPDATE OR REPLACE ReturnItem SET return_id=?,variant_id=? WHERE id=?", (rid,rvid, free_ret)),
         }
         for name, (sql, args) in cases.items():
             with self.subTest(name), self.assertRaises(sqlite3.IntegrityError):
@@ -236,11 +236,10 @@ class StockSourcesTest(FacadeTestCase):
         conn.execute("DELETE FROM ReturnItem WHERE id=?", (item,))
         conn.commit()
         # 返修結案與撤回結案(閉合欄位不在鎖定範圍):已部分返新的品項
-        rep = self.invoke("returns.create", {"employee": 1})["return_id"]
+        rep = self.invoke("returns.create", {"kind":"repair","employee": 1})["return_id"]
         self.invoke("returns.scan", {"return_id": rep, "variant_id": self.v1, "qty": 3})
         rep_item = self.return_item_id(rep, self.v1)
-        self.invoke("returns.close", {"return_id": rep})
-        self.invoke("returns.set_kind", {"return_id": rep, "kind": "repair"})
+        self.submit_return(rep)
         self.invoke("returns.approve", self.approve_payload(rep))
         self.invoke("returns.repair_receive", {"return_id": rep, "employee": 1, "items": [{"item_id": rep_item, "qty": 1}]})
         self.invoke("returns.close_item", {"return_id": rep, "item_id": rep_item, "reason": "廠商不換"})
@@ -256,7 +255,7 @@ class StockSourcesTest(FacadeTestCase):
         sid = self.invoke("stocktake.create", {"employee": 1})["session_id"]
         self.invoke("stocktake.scan", {"session_id": sid, "variant_id": self.v1, "qty": 2})
         item = self.one("SELECT id FROM StocktakeItem WHERE session_id=?", (sid,))[0]
-        ret = self.invoke("returns.create", {"employee": 1})["return_id"]
+        ret = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
         self.invoke("returns.scan", {"return_id": ret, "variant_id": self.v1, "qty": 1})
         conn = self.raw()
         with self.assertRaises(ConflictError):
@@ -300,21 +299,20 @@ class StockSourcesTest(FacadeTestCase):
         self.assertEqual(self.one("SELECT status FROM StocktakeSession WHERE session_id=?", (sid,))[0], "pending")
         self.assertEqual(self.counts("StockMovement"), [base_moves])
 
-        ret = self.invoke("returns.create", {"employee": 1})["return_id"]
+        ret = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
         for vid in (self.v1, self.v2):
             self.invoke("returns.scan", {"return_id": ret, "variant_id": vid, "qty": 1})
-        self.invoke("returns.close", {"return_id": ret})
+        self.submit_return(ret)
         with self.fail_on_second_post(), self.assertRaises(RuntimeError):
             self.invoke("returns.approve", self.approve_payload(ret))
         self.assertEqual(self.one("SELECT status FROM ReturnSession WHERE return_id=?", (ret,))[0], "pending")
         self.assertEqual(self.counts("StockMovement"), [base_moves])
 
-        rep = self.invoke("returns.create", {"employee": 1})["return_id"]
+        rep = self.invoke("returns.create", {"kind":"repair","employee": 1})["return_id"]
         for vid in (self.v1, self.v2):
             self.invoke("returns.scan", {"return_id": rep, "variant_id": vid, "qty": 1})
         items = [self.return_item_id(rep, v) for v in (self.v1, self.v2)]
-        self.invoke("returns.close", {"return_id": rep})
-        self.invoke("returns.set_kind", {"return_id": rep, "kind": "repair"})
+        self.submit_return(rep)
         self.invoke("returns.approve", self.approve_payload(rep))
         with self.fail_on_second_post(), self.assertRaises(RuntimeError):
             self.invoke("returns.repair_receive", {"return_id": rep, "employee": 1,

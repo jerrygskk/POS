@@ -11,11 +11,11 @@ from test_returns import ReturnsBase
 class TestRepair(ReturnsBase):
     def setUp(self):
         super().setUp()
-        self.rid = self.invoke("returns.create", {"employee": 2})["return_id"]
+        self.rid = self.invoke("returns.create", {"kind":"normal","employee": 2})["return_id"]
         self.invoke("returns.scan", {"return_id": self.rid, "variant_id": self.v1, "qty": 2})
         self.invoke("returns.scan", {"return_id": self.rid, "variant_id": self.v2, "qty": 1})
         self.invoke("returns.scan", {"return_id": self.rid, "variant_id": self.v3, "qty": 1})
-        self.invoke("returns.close", {"return_id": self.rid})
+        self.submit_return(self.rid)
 
     def disp(self, vid, value):
         self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, vid), "disposition": value})
@@ -27,7 +27,9 @@ class TestRepair(ReturnsBase):
         return self.invoke("returns.set_kind", {"return_id": self.rid, "kind": kind})
 
     def start_repair(self):
+        self.invoke("returns.withdraw", {"return_id": self.rid})
         self.set_kind("repair")
+        self.invoke("returns.close", {"return_id": self.rid})
         self.invoke("returns.approve", self.approve_payload(self.rid))
 
     def receive(self, vid, qty, employee=1):
@@ -38,7 +40,7 @@ class TestRepair(ReturnsBase):
         return self.invoke("returns.detail", {"return_id": self.rid})["status"]
 
     def test_set_kind_switches_whole_sheet(self):
-        self.disp(self.v3, "reject")
+        self.invoke("returns.withdraw", {"return_id": self.rid})
         self.set_kind("repair")
         detail = self.invoke("returns.detail", {"return_id": self.rid})
         self.assertEqual((detail["kind"], {i["disposition"] for i in detail["items"]}), ("repair", {None}))
@@ -53,36 +55,19 @@ class TestRepair(ReturnsBase):
                                       {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v2), "disposition": "repair"})
         self.assert_application_error("validation_error", "returns.set_kind", {"return_id": self.rid, "kind": "other"})
 
-    def test_set_kind_only_while_pending(self):
+    def test_set_kind_allowed_while_open(self):
         self.invoke("returns.withdraw", {"return_id": self.rid})
-        self.assert_application_error("conflict", "returns.set_kind", {"return_id": self.rid, "kind": "repair"})
-        empty = self.invoke("returns.create", {"employee": 1})["return_id"]
-        self.assert_application_error("conflict", "returns.set_kind", {"return_id": empty, "kind": "repair"})
-
-    def test_set_kind_requires_admin_even_after_confirm(self):
         self.as_employee()
-        self.assert_application_error("forbidden", "returns.set_kind", {"return_id": self.rid, "kind": "repair"})
-        self.as_admin()
-        # 外層檢查時是管理者,進交易後已閒置登出(確認框期間):交易內再查一次仍擋下且不寫入
-        from lib.returns_service import ReturnsFacade
-        from lib.application_errors import ForbiddenError
-        answers = iter([True, False])
+        self.invoke("returns.set_kind", {"return_id":self.rid,"kind":"repair"})
+        empty = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
+        self.invoke("returns.set_kind", {"return_id":empty,"kind":"repair"})
 
-        class FlakySession:
-            def is_admin(self):
-                return next(answers, False)
-        with self.assertRaises(ForbiddenError):
-            ReturnsFacade(self.db, session=FlakySession()).invoke("returns.set_kind", {"return_id": self.rid, "kind": "repair"})
+    def test_set_kind_rejected_after_submit(self):
+        # 送出後店員已退現金:管理者與店員都不能再改種類,選錯要抽回
+        for role in (self.as_admin, self.as_employee):
+            role()
+            self.assert_application_error("conflict", "returns.set_kind", {"return_id": self.rid, "kind": "repair"})
         self.assertEqual(self.invoke("returns.detail", {"return_id": self.rid})["kind"], "normal")
-
-    def test_empty_pending_sheet_can_switch(self):
-        # 抽回、刪光品項是進行中,不能送審;直接在資料庫造一張空的待核准單,切換仍一致
-        empty = self.invoke("returns.create", {"employee": 1})["return_id"]
-        with get_conn(self.db) as conn:
-            conn.execute("UPDATE ReturnSession SET status='pending' WHERE return_id=?", (empty,))
-            conn.commit()
-        self.invoke("returns.set_kind", {"return_id": empty, "kind": "repair"})
-        self.assertEqual(self.invoke("returns.detail", {"return_id": empty})["kind"], "repair")
 
     def test_database_rejects_bad_dispositions_and_close_fields(self):
         conn = get_conn(self.db)
@@ -144,7 +129,7 @@ class TestRepair(ReturnsBase):
         self.assert_application_error("validation_error", "returns.close_item", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v2), "reason": "  "})
 
     def test_reason_limited_to_30_chars(self):
-        rid = self.invoke("returns.create", {"employee": 1})["return_id"]
+        rid = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
         self.invoke("returns.scan", {"return_id": rid, "variant_id": self.v1, "qty": 1})
         self.invoke("returns.set_reason", {"return_id": rid, "item_id": self.return_item_id(rid, self.v1), "reason": "字" * 30})
         self.assert_application_error("validation_error", "returns.set_reason",
@@ -158,9 +143,9 @@ class TestRepair(ReturnsBase):
         self.receive(self.v1, 1)  # 返新進貨店員可做
 
     def test_history_splits_normal_and_repair(self):
-        normal = self.invoke("returns.create", {"employee": 1})["return_id"]
+        normal = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
         self.invoke("returns.scan", {"return_id": normal, "variant_id": self.v1, "qty": 1})
-        cancelled = self.invoke("returns.create", {"employee": 1})["return_id"]
+        cancelled = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
         self.invoke("returns.cancel", {"return_id": cancelled, "employee": 1})
         self.start_repair()
         ids = lambda kind: [r["return_id"] for r in self.invoke("returns.history", {"kind": kind})]

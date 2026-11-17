@@ -30,7 +30,7 @@ window.PosPages["page-records"] = {
     // 短溢＝錢櫃現金總額 − 預備金 − 現金銷售;還沒輸入數字時為 null
     dcDiff() {
       const p = this.dc.preview, text = this.dc.counted.trim();
-      return p && /^\d+$/.test(text) ? Number(text) - p.float_amount - p.cash_sales : null;
+      return p && /^\d+$/.test(text) ? Number(text) - p.float_amount - p.cash_sales + p.cash_refund : null;
     },
     // 立帳紀錄的付款方式欄:每一列順序相同,取第一列;沒有紀錄時用設定清單
     dcPayments() {
@@ -50,6 +50,8 @@ window.PosPages["page-records"] = {
       // 「金額×比例」先整個區間加總、最後才四捨五入一次;逐日四捨五入再加總會有累積誤差
       const fees = by_payment.map((_, i) => Math.round(sum(r => r.by_payment[i].total * r.by_payment[i].fee_rate) / 10000));
       const fee_total = fees.reduce((a, b) => a + b, 0);
+      const cash_refund = sum(r => r.cash_refund);
+      const cashIds = new Set(this.payments.filter(p => p.is_cash).map(p => p.payment_id));
       // rates:各付款方式實際用到的比例(只算有金額的日子,依日期由舊到新、不重複),月中換比例時會有多個。
       // 從頭到尾都不抽成的留空;抽過成又改成 0 的,0% 也要列,否則看起來整段都是同一個比例
       const rates = by_payment.map((_, i) => {
@@ -57,8 +59,9 @@ window.PosPages["page-records"] = {
           .filter(r => r.by_payment[i].total).map(r => r.by_payment[i].fee_rate))];
         return used.some(rate => rate) ? used.map(rate => rate / 100 + "%") : [];
       });
-      return { by_payment, sales_total, diff: sum(r => r.diff), fees, fee_total, rates,
-               net: by_payment.map((total, i) => total - fees[i]), net_total: sales_total - fee_total };
+      return { by_payment, sales_total, cash_refund, diff: sum(r => r.diff), fees, fee_total, rates,
+               net: by_payment.map((total, i) => total - fees[i] - (cashIds.has(this.dc.records[0]?.by_payment[i].payment_id) ? cash_refund : 0)),
+               net_total: sales_total - fee_total - cash_refund };
     },
     // 目前類別每一列的開合鍵,與範本的 isOpen／toggle 共用
     rowKeys() {
@@ -169,6 +172,7 @@ window.PosPages["page-records"] = {
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
       const p = this.dc.preview;
       if (!p || p.closed || this.dc.busy) return;
+      if (p.pending_returns) { this.showError(`尚有 ${p.pending_returns} 張退貨待核准，請先核准或作廢`); return; }
       if (this.dcDiff === null) { this.showError("請輸入錢櫃現金（含預備金）"); return; }
       const employee = window.PosEmployee.id;
       if (!employee) { this.showError("請選擇員工代號（1～6）"); return; }
@@ -176,7 +180,7 @@ window.PosPages["page-records"] = {
       if (this.dcDiff !== 0 && !reason) { this.showError("有短溢時請填寫原因"); return; }
       // 按下當下把內容固定成一份:確認框回來後送出的是同一份,不讀輸入框當下的值
       const body = { business_date: p.business_date, counted_total: Number(this.dc.counted.trim()), reason, employee,
-                     expected: { float_amount: p.float_amount, cash_sales: p.cash_sales } };
+                     expected: { float_amount: p.float_amount, cash_sales: p.cash_sales, cash_refund: p.cash_refund } };
       // 確認框掛在頁面最外層,管理者逾時後清不掉:只放帳日,不放實點與短溢
       if (!await PosConfirm.ask(`確定完成 ${p.business_date} 的立帳？立帳後此帳日的銷售單不可再作廢或更正付款方式。`)) return;
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
@@ -200,16 +204,16 @@ window.PosPages["page-records"] = {
       // 一列:第一格與最後一格(原因)靠左,中間的金額靠右;bold 的列用粗體
       const line = (bold, ...texts) => texts.map((text, i, all) => ({ text: String(text), num: i > 0 && i < all.length - 1, bold }));
       const minus = n => n ? "−" + n : "";
-      const rows = [line(true, "立帳日", ...this.dcPayments, "銷售合計", "短溢", "原因"),
-                    ...records.map(r => line(false, r.business_date, ...r.by_payment.map(b => b.total), r.sales_total,
+      const rows = [line(true, "立帳日", ...this.dcPayments, "銷售合計", "現金退款", "短溢", "原因"),
+                    ...records.map(r => line(false, r.business_date, ...r.by_payment.map(b => b.total), r.sales_total,r.cash_refund,
                                              this.signedText(r.diff), r.reason || "")),
-                    line(true, "合計", ...totals.by_payment, totals.sales_total, this.signedText(totals.diff), "")];
+                    line(true, "合計", ...totals.by_payment, totals.sales_total,totals.cash_refund, this.signedText(totals.diff), "")];
       // 有手續費才多三列:抽成比例、抽成金額、實收
       if (totals.fee_total) {
-        rows.push(line(false, "抽成比例", ...totals.rates.map(list => list.join("／")), "", "", ""),
-                  line(false, "抽成金額", ...totals.fees.map(minus), minus(totals.fee_total), "", ""),
-                  line(true, "實收", ...totals.net, totals.net_total, "", ""));
+        rows.push(line(false, "抽成比例", ...totals.rates.map(list => list.join("／")), "", "", "", ""),
+                  line(false, "抽成金額", ...totals.fees.map(minus), minus(totals.fee_total), "", "", ""));
       }
+      if (totals.fee_total || totals.cash_refund) rows.push(line(true, "實收", ...totals.net, totals.net_total, "", "", ""));
       const title = `立帳紀錄　${records[0].business_date} ～ ${records[records.length - 1].business_date}`;
       const font = '15px "Microsoft JhengHei", sans-serif', pad = 10, rowH = 30, titleH = 40, scale = 2;
       const canvas = document.createElement("canvas"), g = canvas.getContext("2d");

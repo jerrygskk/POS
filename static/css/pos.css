@@ -267,7 +267,16 @@ tr.inactive > td { opacity: 0.55; }
 /* 鎖定時不轉灰:外觀與可按時相同,只是點不動(滑鼠提示說明原因) */
 .chip-toggle:disabled { cursor: default; }
 /* 同頁兩種模式切換(進貨一般／返新、紀錄查詢退貨一般／返修),與員工代號同一排 */
-.mode-switch { display: inline-flex; gap: 6px; margin-left: 16px; }
+/* 兩段連成一條、高度字級同旁邊的按鈕:看得出是二選一,放在掃描列也不會被拉成橢圓 */
+.mode-switch { display: inline-flex; align-items: center; margin-left: 16px; }
+.mode-switch .chip-toggle { font-size: 15px; padding: 8px 16px; border-radius: 0; color: var(--text); align-self: stretch; }
+.mode-switch .chip-toggle:first-of-type { border-radius: 8px 0 0 8px; }
+.mode-switch .chip-toggle:last-of-type { border-radius: 0 8px 8px 0; }
+/* 相鄰邊框疊成一條;選中的那段墊高,主色邊框才不會被隔壁蓋住 */
+.mode-switch .chip-toggle + .chip-toggle { margin-left: -1px; }
+.mode-switch .chip-toggle.on { background: var(--primary); border-color: var(--primary); color: #fff; position: relative; }
+.mode-switch .chip-toggle.on:hover:not(:disabled) { background: var(--primary-hover); }
+.mode-switch-label { margin-right: 8px; color: var(--text-2); white-space: nowrap; }
 .chip-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* 群組標題→說明→新增列拉開距離,三段黏在一起看起來很擠 */
 .cat-detail .grp-title { margin: 16px 0 4px; font-size: 16px; color: var(--text); }
@@ -821,3 +830,15 @@ tr.sale-void > td { text-decoration: line-through; color: var(--text-2); }
 .member-phone-row { display: flex; align-items: center; gap: 6px; }
 .member-phone-row > input { flex: 1; min-width: 0; }
 .records-member { margin: 2px 0 6px; font-weight: 600; }
+/* 未勾選的原單明細保留位置，勾選框仍可操作。 */
+.detail-table tr.return-unpicked td:not(:first-child) { opacity: .45; }
+/* 自畫勾選框:原生的框線太淡,和反灰的列分不出能不能勾;[type=checkbox] 是為了蓋過 .fixed-table 的輸入框滿寬 */
+.detail-table td input[type=checkbox].return-pick { appearance: none; width: 24px; height: 24px; margin: 0; padding: 0;
+  display: block; border: 2px solid var(--text-2); border-radius: 5px; background: var(--surface); cursor: pointer; }
+.detail-table td input[type=checkbox].return-pick:checked { border-color: var(--primary);
+  background: var(--primary) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.5 10.5l3.5 3.5 7.5-8' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 18px no-repeat; }
+.detail-table td input[type=checkbox].return-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.detail-table td input[type=checkbox].return-pick:disabled { cursor: default; }
+.return-done { white-space: nowrap; }
+.detail-table tr.return-rejected td:not(:last-child) { text-decoration: line-through; }
+.detail-table tr.return-rejected input { text-decoration: line-through; }
