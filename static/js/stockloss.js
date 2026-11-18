@@ -28,13 +28,17 @@ window.PosComponents["stock-loss"] = {
       const code = this.code;
       this.code = "";
       if (!code.trim() || this.busy) return;
-      this.error = "";
+      // 報損送出後無法更正:重新掃描當下就清掉舊商品,查詢失敗或未完成時才不會扣到上一件
+      const seq = this._scanSeq = (this._scanSeq || 0) + 1;
+      this.item = null; this.qty = 1; this.reason = ""; this.error = "";
       try {
         const found = await window.PosScan(code);
-        if (!found) return;
-        this.item = found.data; this.qty = 1;
+        if (seq !== this._scanSeq || !found) return;
+        this.item = found.data;
         this.$nextTick(() => this.$refs.qty?.focus());
-      } catch (e) { this.error = `條碼 ${code}：${e.message}`; }
+      } catch (e) {
+        if (seq === this._scanSeq) this.error = `條碼 ${code}：${e.message}`;
+      }
     },
     async submit() {
       if (this.busy || !this.item) return;
