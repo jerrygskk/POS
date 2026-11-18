@@ -3,12 +3,14 @@
 帳日以 00:00 為界;當天已立帳後才結的單算隔天的帳(由結帳的 INSERT 決定)。
 立帳後該帳日的銷售單由資料庫 trigger 鎖住,所以現金銷售與預備金存當下的快照。
 """
+import os
 from collections.abc import Mapping
 
 from lib.application import BaseFacade
 from lib.application_errors import ConflictError, ValidationError
 from lib.product_rules import date_range, is_int, require_employee
 from lib.sales_service import SalesRepository
+from lib.backup import offsite_ready
 
 REASON_MAX = 60
 AMOUNT_MAX = 99_999_999
@@ -38,6 +40,15 @@ def cash_float(conn):
         return 0
 
 
+BACKUP_DIR_KEY = "backup_extra_dir"
+BACKUP_DIR_MAX = 260  # Windows 傳統路徑長度上限
+
+
+def backup_extra_dir(conn):
+    row = conn.execute("SELECT value FROM Setting WHERE key=?", (BACKUP_DIR_KEY,)).fetchone()
+    return row[0] if row and row[0] else ""
+
+
 def _amount(value, label):
     if not is_int(value) or value < 0 or value > AMOUNT_MAX:
         raise ValidationError(f"{label}須為 0 以上的整數")
@@ -54,9 +65,21 @@ def _business_date(payload):
 def _validate(action, payload):
     allowed = {"dayclose.current": set(), "dayclose.preview": {"business_date"},
                "dayclose.close": {"business_date", "counted_total", "reason", "employee", "expected"},
-               "dayclose.list": {"date_from", "date_to"}, "dayclose.set_float": {"amount"}}[action]
+               "dayclose.list": {"date_from", "date_to"}, "dayclose.set_float": {"amount"},
+               "dayclose.backup_dir": set(), "dayclose.set_backup_dir": {"path"}}[action]
     if set(payload) - allowed:
         raise ValidationError("立帳資料格式不正確")
+    if action == "dayclose.set_backup_dir":
+        path = payload.get("path")
+        if not isinstance(path, str):
+            raise ValidationError("備份資料夾格式不正確")
+        path = path.strip().strip('"')
+        if len(path) > BACKUP_DIR_MAX:
+            raise ValidationError("備份資料夾路徑太長")
+        # 平時連不上會靜靜略過,所以設定當下要確認找得到,打錯字才不會一直沒備份
+        if path and not offsite_ready(path):
+            raise ValidationError("找不到這個資料夾，請確認隨身碟已插上或路徑正確")
+        return {"path": path}
     if action == "dayclose.preview":
         return {"business_date": _business_date(payload)}
     if action == "dayclose.list":
@@ -113,10 +136,16 @@ class DayCloseService:
         return {"business_date": current_business_date(self.conn), "today": today(self.conn)}
 
     def _refunds(self, business_date):
-        return self.conn.execute("SELECT COUNT(*),COALESCE(SUM(refund_amount),0) FROM ReturnSession WHERE business_date=? AND kind='normal' AND status='closed'", (business_date,)).fetchone()
+        return self.conn.execute(
+            "SELECT COUNT(*),COALESCE(SUM(refund_amount),0) FROM ReturnSession "
+            "WHERE business_date=? AND kind='normal' AND status='closed'", (business_date,)).fetchone()
 
     def _pending_returns(self):
-        return self.conn.execute("SELECT COUNT(*) FROM ReturnSession WHERE kind='normal' AND status='pending'").fetchone()[0]
+        # 店員先退現金再送審:進行中的單只要填了金額也可能已付錢,一併擋下立帳
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM ReturnSession s WHERE s.kind='normal' AND (s.status='pending' OR "
+            "(s.status='open' AND EXISTS(SELECT 1 FROM ReturnItem i WHERE i.return_id=s.return_id "
+            "AND i.refund_request IS NOT NULL)))").fetchone()[0]
 
     def preview(self, business_date):
         # 同一次預覽的數字要出自同一個時間點:先開讀取交易
@@ -129,7 +158,8 @@ class DayCloseService:
         day = today(self.conn)
         refunds = self._refunds(business_date)
         unclosed = [row[0] for row in self.conn.execute(
-            "SELECT business_date FROM (SELECT business_date FROM Sale UNION SELECT business_date FROM ReturnSession WHERE business_date IS NOT NULL) s WHERE business_date<? "
+            "SELECT business_date FROM (SELECT business_date FROM Sale UNION "
+            " SELECT business_date FROM ReturnSession WHERE business_date IS NOT NULL) s WHERE business_date<? "
             "AND NOT EXISTS(SELECT 1 FROM DayClose d WHERE d.business_date=s.business_date) "
             "ORDER BY business_date DESC", (day,))]
         return {"business_date": business_date, "today": day, "closed": record is not None, "record": record,
@@ -152,7 +182,7 @@ class DayCloseService:
         if is_closed(self.conn, business_date):
             raise ConflictError("此帳日已立帳")
         pending = self._pending_returns()
-        if pending: raise ConflictError(f"尚有 {pending} 張退貨待核准，請先核准或作廢")
+        if pending: raise ConflictError(f"尚有 {pending} 張退貨未送出或待核准，請先處理")
         # 現金銷售與快照出自同一份加總:兩邊不可能對不上
         by_payment = self._by_payment(business_date)
         float_amount, cash_sales = cash_float(self.conn), self._cash_of(by_payment)
@@ -202,9 +232,14 @@ class DayCloseService:
         self.conn.execute("INSERT OR REPLACE INTO Setting(key,value) VALUES('cash_float',?)", (str(amount),))
         return {"amount": amount}
 
+    def set_backup_dir(self, path):
+        self.conn.execute("INSERT OR REPLACE INTO Setting(key,value) VALUES(?,?)", (BACKUP_DIR_KEY, path))
+        return {"path": path}
+
 
 class DayCloseFacade(BaseFacade):
-    ACTIONS = {"dayclose.current", "dayclose.preview", "dayclose.close", "dayclose.list", "dayclose.set_float"}
+    ACTIONS = {"dayclose.current", "dayclose.preview", "dayclose.close", "dayclose.list", "dayclose.set_float",
+               "dayclose.backup_dir", "dayclose.set_backup_dir"}
 
     ERROR_MESSAGE = "立帳操作不正確"
 
@@ -217,4 +252,6 @@ class DayCloseFacade(BaseFacade):
         if action == "dayclose.preview": return service.preview(payload["business_date"])
         if action == "dayclose.close": return service.close(payload)
         if action == "dayclose.list": return service.list(payload)
+        if action == "dayclose.backup_dir": return {"path": backup_extra_dir(connection)}
+        if action == "dayclose.set_backup_dir": return service.set_backup_dir(payload["path"])
         return service.set_float(payload["amount"])

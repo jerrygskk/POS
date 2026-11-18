@@ -15,26 +15,31 @@ window.PosPages["page-receive"] = {
   },
   mounted() { this.$refs.scan?.focus(); },
   methods: {
-    async onScan() {
+    // 先取出條碼並清空輸入框，再排隊依序處理：處理完才清空會把掃描槍接著打入的下一筆黏在一起
+    onScan() {
+      const code = String(this.scanCode || "").trim();
+      this.scanCode = "";
       if (this.draft.locked) {
         this.showError("進貨清單處理中，請稍候再掃描。");
-        this.scanCode = "";
         this.$refs.scan?.focus();
         return;
       }
-      const code = String(this.scanCode || "").trim(), gen = this.draft.generation;
+      if (!code) return;
+      const gen = this.draft.generation;
+      this._scanChain = (this._scanChain || Promise.resolve()).then(() => this.scanOne(code, gen));
+      return this._scanChain;
+    },
+    async scanOne(code, gen) {
       try {
         const query = await window.PosScan(code);
-        if (query === null) { this.scanCode = ""; return; }
+        if (query === null) return;
         if (this.draft.locked || this.draft.generation !== gen) {
           this.showError("掃描期間進貨清單已變動，請重新掃描。");
-          this.scanCode = "";
           return;
         }
         const data = query.data;
         this.draft.notFound = "";
         this.draft.doneMsg = "";
-        this.scanCode = "";
         // 查找必須在掃描回來之後，兩次快掃才不會產生重複列。
         const index = this.draft.rows.findIndex(r => r.variant_id === data.variant_id);
         let row;
@@ -53,8 +58,11 @@ window.PosPages["page-receive"] = {
           if (this.draft.highlightKey === row.variant_id) this.draft.highlightKey = null;
         }, 1500);
       } catch (e) {
-        if (e.status === 404) { this.draft.notFound = code; this.scanCode = ""; }
-        else this.showError(e.message);
+        if (e.status === 404) this.draft.notFound = code;
+        else {
+          // 失敗的條碼只顯示在訊息:放回輸入框會和掃描槍的下一筆黏在一起
+          this.showError(`條碼 ${code}：${e.message}`);
+        }
       } finally { this.$refs.scan?.focus(); }
     },
     setQty(row, event) {

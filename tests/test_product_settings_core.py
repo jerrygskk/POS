@@ -227,6 +227,15 @@ class TestProductAndBrand(FacadeTestCase):
             new_brand_id = conn.execute("SELECT brand_id FROM Brand WHERE name='new brand'").fetchone()[0]
             self.assertIsNotNone(conn.execute("SELECT 1 FROM BrandCategory WHERE brand_id=? AND category_id=?", (new_brand_id, self.cid)).fetchone())
 
+    def test_update_product_with_new_brand_name(self):
+        old = self.invoke("brands.create", {"name": "OLD"})["brand_id"]
+        pid = self.invoke("products.create", {"name": "p", "category_id": self.cid, "brand_id": old, "variants": []})["product_id"]
+        self.invoke("products.update", {"id": pid, "fields": {"brand_name": "全新廠牌"}})
+        with get_conn(self.db) as conn:
+            new = conn.execute("SELECT brand_id FROM Brand WHERE name='全新廠牌'").fetchone()
+            self.assertIsNotNone(new)
+            self.assertEqual(conn.execute("SELECT brand_id FROM Product WHERE product_id=?", (pid,)).fetchone()[0], new[0])
+
     def test_referenced_brand_delete_conflicts(self):
         brand_id = self.invoke("brands.create", {"name": "HODA"})["brand_id"]
         self.invoke("products.create", {"name": "product", "category_id": self.cid, "brand_id": brand_id, "variants": []})

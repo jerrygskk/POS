@@ -26,8 +26,16 @@ class TestRepair(ReturnsBase):
     def set_kind(self, kind):
         return self.invoke("returns.set_kind", {"return_id": self.rid, "kind": kind})
 
+    def reopen(self):
+        # 送出後已無法退回進行中;這裡只為了準備「進行中的單」的測試資料
+        conn = get_conn(self.db)
+        conn.execute("UPDATE ReturnItem SET refund_approved=NULL WHERE return_id=?", (self.rid,))
+        conn.execute("UPDATE ReturnSession SET status='open',submitted_at=NULL WHERE return_id=?", (self.rid,))
+        conn.commit()
+        conn.close()
+
     def start_repair(self):
-        self.invoke("returns.withdraw", {"return_id": self.rid})
+        self.reopen()
         self.set_kind("repair")
         self.invoke("returns.close", {"return_id": self.rid})
         self.invoke("returns.approve", self.approve_payload(self.rid))
@@ -40,7 +48,7 @@ class TestRepair(ReturnsBase):
         return self.invoke("returns.detail", {"return_id": self.rid})["status"]
 
     def test_set_kind_switches_whole_sheet(self):
-        self.invoke("returns.withdraw", {"return_id": self.rid})
+        self.reopen()
         self.set_kind("repair")
         detail = self.invoke("returns.detail", {"return_id": self.rid})
         self.assertEqual((detail["kind"], {i["disposition"] for i in detail["items"]}), ("repair", {None}))
@@ -56,14 +64,14 @@ class TestRepair(ReturnsBase):
         self.assert_application_error("validation_error", "returns.set_kind", {"return_id": self.rid, "kind": "other"})
 
     def test_set_kind_allowed_while_open(self):
-        self.invoke("returns.withdraw", {"return_id": self.rid})
+        self.reopen()
         self.as_employee()
         self.invoke("returns.set_kind", {"return_id":self.rid,"kind":"repair"})
         empty = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
         self.invoke("returns.set_kind", {"return_id":empty,"kind":"repair"})
 
     def test_set_kind_rejected_after_submit(self):
-        # 送出後店員已退現金:管理者與店員都不能再改種類,選錯要抽回
+        # 送出後店員已退現金:管理者與店員都不能再改種類
         for role in (self.as_admin, self.as_employee):
             role()
             self.assert_application_error("conflict", "returns.set_kind", {"return_id": self.rid, "kind": "repair"})
@@ -149,7 +157,7 @@ class TestRepair(ReturnsBase):
         self.invoke("returns.cancel", {"return_id": cancelled, "employee": 1})
         self.start_repair()
         ids = lambda kind: [r["return_id"] for r in self.invoke("returns.history", {"kind": kind})]
-        self.assertEqual(ids("normal"), [normal])
+        self.assertEqual(ids("normal"), [cancelled, normal])  # 作廢單也要查得到
         self.assertEqual(ids("repair"), [self.rid])
         # 返修中不論日期都列出
         self.assertEqual([r["return_id"] for r in self.invoke("returns.history",

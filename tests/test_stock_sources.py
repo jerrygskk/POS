@@ -102,7 +102,7 @@ class StockSourcesTest(FacadeTestCase):
     def test_database_rejects_bad_sources(self):
         ids = self.build_flow()
         conn = self.raw()
-        conn.execute("INSERT INTO SaleItem(sale_id,variant_id,qty,unit_price) VALUES(?,?,1,100)", (ids["sale"], self.v1))
+        conn.execute("INSERT INTO SaleItem(sale_id,variant_id,qty,unit_price,name) VALUES(?,?,1,100,'測試')", (ids["sale"], self.v1))
         fresh_sale_item = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         bad = {
             "來源不存在": ("INSERT INTO StockMovement(variant_id,qty,kind,receipt_item_id) VALUES(?,1,'purchase',99999)", (self.v1,)),
@@ -199,13 +199,13 @@ class StockSourcesTest(FacadeTestCase):
         receipt = conn.execute("INSERT INTO Receipt(employee) VALUES(1)").lastrowid
         free_receipt_item = conn.execute("INSERT INTO ReceiptItem(receipt_id,variant_id,qty) VALUES(?,?,1)", (receipt, self.v1)).lastrowid
         free_sale = conn.execute("INSERT INTO Sale(payment_id,payment,total,paid,business_date) VALUES(1,'現金',0,0,'2026-01-01')").lastrowid
-        free_sale_item = conn.execute("INSERT INTO SaleItem(sale_id,variant_id,qty,unit_price) VALUES(?,?,1,1)", (free_sale, self.v1)).lastrowid
+        free_sale_item = conn.execute("INSERT INTO SaleItem(sale_id,variant_id,qty,unit_price,name) VALUES(?,?,1,1,'測試')", (free_sale, self.v1)).lastrowid
         sid = conn.execute("SELECT session_id FROM StocktakeItem WHERE id=?", (ids["stocktake_item"],)).fetchone()[0]
         free_take = conn.execute("INSERT INTO StocktakeItem(session_id,variant_id,system_qty,counted_qty) VALUES(?,?,0,0)", (sid, self.v1)).lastrowid
         rid, rvid = conn.execute("SELECT return_id,variant_id FROM ReturnItem WHERE id=?", (ids["return_item"],)).fetchone()
         other_vid = self.v2 if rvid == self.v1 else self.v1
         free_rid = conn.execute("INSERT INTO ReturnSession(employee) VALUES(1)").lastrowid
-        free_ret = conn.execute("INSERT INTO ReturnItem(return_id,variant_id,qty) VALUES(?,?,1)", (free_rid, other_vid)).lastrowid
+        free_ret = conn.execute("INSERT INTO ReturnItem(return_id,variant_id,qty,name) VALUES(?,?,1,'測試')", (free_rid, other_vid)).lastrowid
         cases = {
             "進貨明細主鍵": ("UPDATE OR REPLACE ReceiptItem SET receipt_item_id=? WHERE receipt_item_id=?", (ids["receipt_item"], free_receipt_item)),
             "銷售明細主鍵": ("UPDATE OR REPLACE SaleItem SET item_id=? WHERE item_id=?", (ids["sale_item"], free_sale_item)),
@@ -231,7 +231,7 @@ class StockSourcesTest(FacadeTestCase):
         conn.execute("UPDATE ReturnSession SET status='closed' WHERE return_id=?", (ids["return"],))
         # 未入帳明細照常可改可刪
         open_ret = conn.execute("INSERT INTO ReturnSession(employee) VALUES(1)").lastrowid
-        item = conn.execute("INSERT INTO ReturnItem(return_id,variant_id,qty) VALUES(?,?,1)", (open_ret, self.v1)).lastrowid
+        item = conn.execute("INSERT INTO ReturnItem(return_id,variant_id,qty,name) VALUES(?,?,1,'測試')", (open_ret, self.v1)).lastrowid
         conn.execute("UPDATE ReturnItem SET qty=3, disposition='discard' WHERE id=?", (item,))
         conn.execute("DELETE FROM ReturnItem WHERE id=?", (item,))
         conn.commit()

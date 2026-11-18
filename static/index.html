@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>膜型機門市管理系統</title>
-<link rel="stylesheet" href="css/pos.css?v=370">
+<link rel="stylesheet" href="css/pos.css?v=377">
 </head>
 <body>
 <div id="app">
   <nav :class="{admin: auth.isAdmin}">
-    <img class="nav-logo" src="img/logo.png?v=370" alt="膜型機品牌標誌">
+    <img class="nav-logo" src="img/logo.png?v=377" alt="膜型機品牌標誌">
     <button v-for="[key, label] in pages" :key="key"
             :class="{active: page===key}" @click="goPage(key)">{{ label }}<span
               v-if="key==='stocktake' && auth.isAdmin && auth.pendingStocktakes > 0"
@@ -299,7 +299,6 @@
         <td><div class="card-actions">
             <button v-if="s.status==='open'" @click="enter(s.return_id)">繼續</button>
             <button v-else @click="enter(s.return_id)">{{ s.status==='pending' && isAdmin ? '審核' : '檢視' }}</button>
-            <button v-if="s.status==='pending'" @click="withdraw(s.return_id)">抽回修改</button>
             <button v-if="s.status==='open' || (s.status==='pending' && isAdmin)"
                     @click="cancel(s)">作廢</button></div></td>
       </tr></tbody>
@@ -420,7 +419,7 @@
           <span v-for="b in dc.preview.by_payment" :key="b.payment_id">{{ b.payment }}：{{ b.count }} 筆 {{ b.total }} 元</span>
           <span v-if="dc.preview.void_count">已作廢：{{ dc.preview.void_count }} 筆 {{ dc.preview.void_total }} 元</span>
         </div>
-        <div v-if="dc.preview && !dc.preview.closed && dc.preview.pending_returns" class="error-bar">尚有 {{ dc.preview.pending_returns }} 張退貨待核准，請先核准或作廢</div>
+        <div v-if="dc.preview && !dc.preview.closed && dc.preview.pending_returns" class="error-bar">尚有 {{ dc.preview.pending_returns }} 張退貨未送出或待核准，請先處理</div>
         <div v-if="dc.preview && !dc.preview.closed" class="scan-row dayclose-row">
           <label>錢櫃現金（含預備金） <input ref="dcCounted" class="w100" inputmode="numeric" v-model="dc.counted" @keydown.enter="dcClose"></label>
           <span>短溢 <b :class="{neg: dcDiff}">{{ dcDiff === null ? '—' : signedText(dcDiff) }}</b></span>
@@ -580,12 +579,13 @@
                 <thead><tr><th>商品</th><th class="num">數量</th><th class="num">銷售單</th><th class="num">退款</th><th>處理方式</th><th>原因</th></tr></thead>
                 <tbody><tr v-for="it in t.items">
                   <td>{{ it.name }} <span class="records-spec">{{ specText(it) }}</span></td>
-                  <td class="num">{{ it.qty }}</td><td class="num">{{ t.sale_id || '—' }}</td><td class="num">{{ t.kind==='repair' ? '—' : it.disposition==='reject' ? 0 : (it.refund_approved ?? it.refund_request ?? '—') }}</td>
-                  <td>{{ ['open','pending'].includes(t.status) ? '—' : dispositionText(it.disposition) }}</td><td>{{ it.reason || '—' }}</td>
+                  <td class="num">{{ it.qty }}</td><td class="num">{{ t.sale_id || '—' }}</td><td class="num">{{ t.kind==='repair' || t.status==='cancelled' ? '—' : it.disposition==='reject' ? 0 : (it.refund_approved ?? it.refund_request ?? '—') }}</td>
+                  <td>{{ ['open','pending','cancelled'].includes(t.status) ? '—' : dispositionText(it.disposition) }}</td><td>{{ it.reason || '—' }}</td>
                 </tr></tbody>
               </table>
+              <div v-if="t.status==='cancelled'" class="records-member">作廢　{{ t.cancelled_at }}　員工 {{ t.cancelled_by }}</div>
               <div v-for="c in (t.corrections || [])" class="records-member">更正　{{ correctionText(c) }}</div>
-              <div v-if="isAdmin" class="records-ops">
+              <div v-if="isAdmin && t.status!=='cancelled'" class="records-ops">
                 <button class="btn-sm subtle" @click="openCorrect('employee', 'return', t)">修正操作者</button>
               </div>
             </td></tr>
@@ -914,6 +914,15 @@
           <button type="button" class="primary" @click="saveIdleLogout">儲存</button>
         </div>
       </div>
+      <div class="card">
+        <div class="card-head"><h3>異地備份資料夾</h3></div>
+        <div v-if="pageError && errorScope==='backup'" class="error-bar section-bar">⚠ {{ pageError }}</div>
+        <div class="create-form">
+          <label>資料夾 <input v-model="backupDir" maxlength="260" placeholder="例如 E:\POS備份" @keyup.enter="saveBackupDir"></label>
+          <small class="hint">每日開啟程式及每次立帳後，也備份一份到這裡（隨身碟、網路資料夾或雲端同步資料夾）。連線不到時自動略過。留白為不使用。</small>
+          <button type="button" class="primary" @click="saveBackupDir">儲存</button>
+        </div>
+      </div>
     </section>
 
     <!-- 基礎資料:付款方式(新增、排序、停用、改抽成比例;每個動作即時存檔) -->
@@ -1142,29 +1151,29 @@
 
 </div>
 </template>
-<script src="js/vue.global.prod.js?v=370"></script>
-<script src="js/api.js?v=370"></script>
-<script src="js/confirm.js?v=370"></script>
-<script src="js/auth.js?v=370"></script>
-<script src="js/pos_shared.js?v=370"></script>
-<script src="js/catalogfields.js?v=370"></script>
-<script src="js/checkout.js?v=370"></script>
-<script src="js/receive.js?v=370"></script>
-<script src="js/stocktake.js?v=370"></script>
-<script src="js/returns.js?v=370"></script>
-<script src="js/records.js?v=370"></script>
-<script src="js/catalog.js?v=370"></script>
-<script src="js/sortable.js?v=370"></script>
-<script src="js/combobox.js?v=370"></script>
-<script src="js/optpicker.js?v=370"></script>
-<script src="js/modelpicker.js?v=370"></script>
-<script src="js/employeepicker.js?v=370"></script>
-<script src="js/membereditor.js?v=370"></script>
-<script src="js/doccorrect.js?v=370"></script>
-<script src="js/attrfields.js?v=370"></script>
-<script src="js/settings.js?v=370"></script>
-<script src="js/labels.js?v=370"></script>
-<script src="js/app_update.js?v=370"></script>
-<script src="js/app.js?v=370"></script>
+<script src="js/vue.global.prod.js?v=377"></script>
+<script src="js/api.js?v=377"></script>
+<script src="js/confirm.js?v=377"></script>
+<script src="js/auth.js?v=377"></script>
+<script src="js/pos_shared.js?v=377"></script>
+<script src="js/catalogfields.js?v=377"></script>
+<script src="js/checkout.js?v=377"></script>
+<script src="js/receive.js?v=377"></script>
+<script src="js/stocktake.js?v=377"></script>
+<script src="js/returns.js?v=377"></script>
+<script src="js/records.js?v=377"></script>
+<script src="js/catalog.js?v=377"></script>
+<script src="js/sortable.js?v=377"></script>
+<script src="js/combobox.js?v=377"></script>
+<script src="js/optpicker.js?v=377"></script>
+<script src="js/modelpicker.js?v=377"></script>
+<script src="js/employeepicker.js?v=377"></script>
+<script src="js/membereditor.js?v=377"></script>
+<script src="js/doccorrect.js?v=377"></script>
+<script src="js/attrfields.js?v=377"></script>
+<script src="js/settings.js?v=377"></script>
+<script src="js/labels.js?v=377"></script>
+<script src="js/app_update.js?v=377"></script>
+<script src="js/app.js?v=377"></script>
 </body>
 </html>

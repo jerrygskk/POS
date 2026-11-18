@@ -1,4 +1,4 @@
-"""第 2 組修正：返修單紀錄分區、抽回後新品項處理方式、結案理由長度、紀錄查詢批次撈取。"""
+"""第 2 組修正：返修單紀錄分區、新品項處理方式、結案理由長度、紀錄查詢批次撈取。"""
 from test_returns import ReturnsBase
 from lib.application_errors import ConflictError, ValidationError
 from lib.db import get_conn
@@ -20,20 +20,18 @@ class TestFixG2Returns(ReturnsBase):
     def test_unapproved_repair_listed_in_normal(self):
         rid = self.make_repair(approve=False)
         self.assertIn(rid, self.ids("normal")); self.assertNotIn(rid, self.ids("repair"))
-        self.invoke("returns.withdraw", {"return_id": rid})
-        self.assertIn(rid, self.ids("normal")); self.assertNotIn(rid, self.ids("repair"))
 
     def test_approved_repair_moves_to_repair(self):
         rid = self.make_repair()
         self.assertNotIn(rid, self.ids("normal")); self.assertIn(rid, self.ids("repair"))
 
-    def test_scan_after_withdraw_keeps_repair_mode(self):
-        rid = self.make_repair(approve=False)
-        self.invoke("returns.withdraw", {"return_id": rid})
+    def test_scan_keeps_repair_mode(self):
+        rid = self.invoke("returns.create", {"kind":"repair","employee": 2})["return_id"]
         self.invoke("returns.scan", {"return_id": rid, "variant_id": self.v2, "qty": 1})
         items = {i["variant_id"]: i["disposition"] for i in self.invoke("returns.detail", {"return_id": rid})["items"]}
         self.assertIsNone(items[self.v2])   # 依單據種類:返修單品項沒有個別處理方式
         self.submit_return(rid)
+        self.as_admin()
         self.invoke("returns.approve", self.approve_payload(rid))
         self.assertEqual(self.invoke("returns.detail", {"return_id": rid})["status"], "repairing")
 

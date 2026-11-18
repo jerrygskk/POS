@@ -40,7 +40,7 @@ def _validate_variant(value):
     value = _mapping(value, "子產品")
     _allow(value, {"attributes", "price", "active", "model_ids", "barcodes"})
     if "attributes" in value: _mapping(value["attributes"], "規格")
-    if value.get("price") is not None and not _is_int(value["price"]): raise ValidationError("售價格式不正確")
+    if value.get("price") is not None and (not _is_int(value["price"]) or value["price"] < 0): raise ValidationError("售價須為 0 以上的整數")
     if value.get("active") is not None and not _is_int(value["active"]): raise ValidationError("啟用狀態格式不正確")
     if "model_ids" in value: _int_list(value["model_ids"], "型號")
     if "barcodes" in value:
@@ -52,8 +52,8 @@ def _validate_editor_fields(value):
     value = _mapping(value, "更新欄位")
     _allow(value, {"attributes", "price"})
     if "attributes" in value: _mapping(value["attributes"], "規格")
-    if value.get("price") is not None and not _is_int(value["price"]):
-        raise ValidationError("售價格式不正確")
+    if value.get("price") is not None and (not _is_int(value["price"]) or value["price"] < 0):
+        raise ValidationError("售價須為 0 以上的整數")
 
 
 def _validate_draft(value):
@@ -62,7 +62,7 @@ def _validate_draft(value):
     if value.get("draft_id") is not None and not isinstance(value["draft_id"], str):
         raise ValidationError("draft_id 格式不正確")
     if "attributes" in value: _mapping(value["attributes"], "規格")
-    if value.get("price") is not None and not _is_int(value["price"]): raise ValidationError("售價格式不正確")
+    if value.get("price") is not None and (not _is_int(value["price"]) or value["price"] < 0): raise ValidationError("售價須為 0 以上的整數")
     if value.get("active") is not None and not _is_int(value["active"]): raise ValidationError("啟用狀態格式不正確")
     if "model_ids" in value: _int_list(value["model_ids"], "型號")
     if "barcodes" in value:
@@ -341,13 +341,13 @@ class ProductService:
         category_id = fields.get("category_id") if fields.get("category_id") is not None else row["category_id"]
         if fields.get("category_id") is not None: self.repo.require_active_category(fields["category_id"])
         # 廠牌 inline 新增(brand_name)或指定 brand_id
-        if fields.pop("brand_name", None) is not None or "brand_id" in fields:
-            brand_id = self._resolve_brand(category_id, fields.get("brand_id"), fields.get("brand_name"))
+        brand_name = fields.pop("brand_name", None)
+        if brand_name is not None or "brand_id" in fields:
+            brand_id = self._resolve_brand(category_id, fields.get("brand_id"), brand_name)
             fields["brand_id"] = brand_id
             if brand_id is not None and category_id is not None:
                 self.repo.execute("INSERT OR IGNORE INTO BrandCategory(brand_id,category_id) VALUES(?,?)",
                                   (brand_id, category_id))
-        fields.pop("brand_name", None)
         if fields.get("name") is not None and category_id is not None:
             if self._same_category_name_exists(category_id, fields["name"], exclude_pid=pid):
                 raise ConflictError("此種類已有同名產品")
@@ -457,30 +457,47 @@ class ProductService:
         from lib.variant_issue_service import VariantIssueService
         return VariantIssueService(self.repo.connection).summary()
 
+    def _require_deletable(self, vids, subject):
+        if product_data.has_records(self.repo.connection, vids):
+            raise ConflictError(f"{subject}已有交易紀錄，無法刪除")
+        # 進行中或已作廢的盤點單、退貨單仍保留這筆款式的明細,刪了單據就對不到商品
+        marks = in_clause(vids)
+        for table, label in (("StocktakeItem", "盤點單"), ("ReturnItem", "退貨單")):
+            if self.repo.one(f"SELECT 1 FROM {table} WHERE variant_id IN ({marks}) LIMIT 1", vids):
+                raise ConflictError(f"{subject}已列在{label}中，無法刪除，請改用停用")
+
+    def _delete_variant_rows(self, vids):
+        """刪款式本身與附屬資料;待處理標記一併清掉,被它標成重複的其他款式重新驗證。"""
+        conn = self.repo.connection
+        marks = in_clause(vids)
+        touched = {r["option_id"] for r in self.repo.all(
+            f"SELECT DISTINCT option_id FROM VariantAttribute WHERE variant_id IN ({marks}) AND option_id IS NOT NULL", vids)}
+        related = {r["variant_id"] for r in self.repo.all(
+            f"SELECT variant_id FROM VariantIssue WHERE related_variant_id IN ({marks})", vids)} - set(vids)
+        self.repo.execute(f"DELETE FROM VariantIssue WHERE variant_id IN ({marks}) OR related_variant_id IN ({marks})",
+                          (*vids, *vids))
+        for table in ("VariantAttribute", "VariantModel", "Barcode", "Variant"):
+            self.repo.execute(f"DELETE FROM {table} WHERE variant_id IN ({marks})", vids)
+        product_data.cleanup_unused_options(conn, touched)
+        if related:
+            from lib.variant_issue_service import VariantIssueService
+            service = VariantIssueService(conn)
+            for other in sorted(related):
+                service.revalidate(other)
+
     def delete_variant(self, vid):
         self.repo.require_variant(vid)
-        if product_data.has_records(self.repo.connection, [vid]): raise ConflictError("子產品已有交易紀錄，無法刪除")
-        touched = {r["option_id"] for r in self.repo.all(
-            "SELECT DISTINCT option_id FROM VariantAttribute WHERE variant_id=? AND option_id IS NOT NULL", (vid,))}
-        for table in ("VariantAttribute", "VariantModel", "Barcode"):
-            self.repo.execute(f"DELETE FROM {table} WHERE variant_id=?", (vid,))
-        self.repo.execute("DELETE FROM Variant WHERE variant_id=?", (vid,))
-        product_data.cleanup_unused_options(self.repo.connection, touched)
+        self._require_deletable([vid], "子產品")
+        self._delete_variant_rows([vid])
         return {"ok": True}
 
     def delete_product(self, pid):
         self.repo.require_product(pid)
         vids = [r["variant_id"] for r in self.repo.all("SELECT variant_id FROM Variant WHERE product_id=?", (pid,))]
-        if product_data.has_records(self.repo.connection, vids): raise ConflictError("商品已有交易紀錄，無法刪除")
-        touched = set()
         if vids:
-            qs = in_clause(vids)
-            touched = {r["option_id"] for r in self.repo.all(
-                f"SELECT DISTINCT option_id FROM VariantAttribute WHERE variant_id IN ({qs}) AND option_id IS NOT NULL", vids)}
-            for table in ("VariantAttribute", "VariantModel", "Barcode", "Variant"):
-                self.repo.execute(f"DELETE FROM {table} WHERE variant_id IN ({qs})", vids)
+            self._require_deletable(vids, "商品")
+            self._delete_variant_rows(vids)
         self.repo.execute("DELETE FROM Product WHERE product_id=?", (pid,))
-        product_data.cleanup_unused_options(self.repo.connection, touched)
         return {"ok": True}
 
 

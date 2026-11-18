@@ -80,6 +80,18 @@ class StartupTest(unittest.TestCase):
             with self.assertRaisesRegex(Exception, "file is not a database"):
                 main.prepare_runtime(self.paths)
 
+    def test_startup_backup_also_writes_configured_offsite_folder(self):
+        import sqlite3
+        init_db(self.paths.db_path)
+        offsite = self.root / "offsite"
+        offsite.mkdir()
+        conn = sqlite3.connect(self.paths.db_path)
+        conn.execute("INSERT OR REPLACE INTO Setting(key,value) VALUES('backup_extra_dir',?)", (str(offsite),))
+        conn.commit()
+        conn.close()
+        main.prepare_runtime(self.paths)
+        self.assertEqual(len(list(offsite.glob("pos_day_*.db"))), 1)
+
     def test_backup_accepts_explicit_directory(self):
         init_db(self.paths.db_path)
         custom = self.root / "custom-backups"

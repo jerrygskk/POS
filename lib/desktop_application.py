@@ -1,4 +1,5 @@
 import logging
+import os
 from collections.abc import Mapping
 
 from lib import selfupdate
@@ -9,7 +10,9 @@ from lib.settings_service import SettingsFacade
 from lib.product_service import ProductFacade
 from lib.stock_service import StockFacade
 from lib.sales_service import SalesFacade
-from lib.dayclose_service import DayCloseFacade
+from lib.backup import backup_after_close
+from lib.dayclose_service import DayCloseFacade, backup_extra_dir
+from lib.db import db_conn
 from lib.correction_service import CorrectionFacade
 from lib.stocktake_service import StocktakeFacade
 from lib.returns_service import ReturnsFacade
@@ -24,7 +27,10 @@ MAIN_MIN_SIZE = (940, 600)
 
 
 class DesktopFacade:
-    def __init__(self, db_path):
+    def __init__(self, db_path, backup_dir=None):
+        self.db_path = db_path
+        self.backup_dir = backup_dir if backup_dir is not None else os.path.join(
+            os.path.dirname(os.path.abspath(db_path)), "backups")
         self.session = AdminSession(db_path)
         self.settings = SettingsFacade(db_path)
         self.products = ProductFacade(db_path)
@@ -53,7 +59,10 @@ class DesktopFacade:
         if action in CorrectionFacade.ACTIONS:
             return self.corrections.invoke(action, payload)
         if action in DayCloseFacade.ACTIONS:
-            return self.dayclose.invoke(action, payload)
+            result = self.dayclose.invoke(action, payload)
+            if action == "dayclose.close":
+                result = {**result, "backup_failed": self._backup_after_close(result["business_date"])}
+            return result
         if action in StocktakeFacade.ACTIONS:
             return self.stocktake.invoke(action, payload)
         if action in ReturnsFacade.ACTIONS:
@@ -63,6 +72,15 @@ class DesktopFacade:
         if action in PrintingFacade.ACTIONS:
             return self.printing.invoke(action, payload)
         return self.settings.invoke(action, payload)
+
+    def _backup_after_close(self, business_date):
+        # 立帳交易已提交才備份;備份失敗不撤銷立帳,只回報給畫面提示
+        try:
+            with db_conn(self.db_path) as conn:
+                extra = backup_extra_dir(conn)
+        except Exception:
+            extra = ""
+        return backup_after_close(self.db_path, self.backup_dir, business_date, extra or None)
 
     def _auth(self, action, payload):
         rules = {
@@ -111,7 +129,7 @@ class DesktopApplication:
             logger.setLevel(logging.ERROR)
             logger.propagate = False
             logger.addHandler(logging.FileHandler(paths.error_log_path, encoding="utf-8"))
-            bridge = DesktopBridge(logger=logger, facade=DesktopFacade(paths.db_path))
+            bridge = DesktopBridge(logger=logger, facade=DesktopFacade(paths.db_path, paths.backup_dir))
         self.bridge = bridge
         self.bridge._set_updater(updater)
         self._webview_module = webview_module

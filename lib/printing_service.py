@@ -54,7 +54,8 @@ def _validate(action, payload):
 class PrintingRepository(BaseRepository):
     def label_content(self, variant_id, barcode):
         """Return content and ownership; a missing variant has no content."""
-        row = self.one("SELECT p.name,v.price FROM Variant v JOIN Product p ON p.product_id=v.product_id WHERE v.variant_id=?", (variant_id,))
+        row = self.one("SELECT p.name,v.price FROM Variant v JOIN Product p ON p.product_id=v.product_id "
+                       "WHERE v.variant_id=?", (variant_id,))
         if row is None:
             return None, False
         owner = self.one("SELECT 1 FROM Barcode WHERE barcode=? AND variant_id=?", (barcode, variant_id))

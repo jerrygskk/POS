@@ -56,6 +56,18 @@ class RefundTest(FacadeTestCase):
         self.approve(rid)
         self.assertEqual(self.invoke("returns.detail", {"return_id": rid})["refund_amount"], 100)
 
+    def test_open_return_with_amount_blocks_dayclose(self):
+        # 進行中的單店員可能已退現金:填了金額就要擋立帳;沒填金額的進行中單不擋
+        blank = self.create()
+        self.scan(blank, None)
+        self.assertEqual(self.invoke("dayclose.preview", {"business_date": self.today})["pending_returns"], 0)
+        rid = self.create()
+        self.scan(rid)
+        self.assertEqual(self.invoke("dayclose.preview", {"business_date": self.today})["pending_returns"], 1)
+        self.assert_application_error("conflict", "dayclose.close", {"business_date": self.today,
+            "counted_total": 0, "reason": "", "employee": 1,
+            "expected": {"float_amount": 0, "cash_sales": 0, "cash_refund": 0}})
+
     def test_cash_refund_pending_block_and_snapshot(self):
         rid = self.create()
         item = self.scan(rid)
@@ -135,8 +147,6 @@ class RefundTest(FacadeTestCase):
         self.invoke("returns.load_sale", {"return_id":b,"sale_id":sale})
         self.invoke("returns.pick", {"return_id":b,"sale_item_id":line,"qty":2})
         self.assert_application_error("conflict","returns.set_disposition",{"return_id":a,"item_id":item,"disposition":"restock"})
-        self.invoke("returns.withdraw", {"return_id":a})
-        self.invoke("returns.close", {"return_id":a})
         self.approve(a)
         self.assertEqual(self.invoke("returns.detail", {"return_id":a})["refund_amount"],0)
 

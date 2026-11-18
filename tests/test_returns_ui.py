@@ -104,6 +104,24 @@ assert.deepEqual(scans,[[1,7,1]]);assert.deepEqual(details,[]);
 assert.equal(s.detail.return_id,2);assert.equal(s.scanCode,"B 單輸入");
 ''')
 
+    def test_fast_second_scan_is_queued_not_merged(self):
+        self._run(r'''
+const s=mk(),d=deferred(),asked=[];
+context.window.PosScan=async code=>{asked.push(code);return{code,data:{variant_id:code==="F7"?7:8}}};
+API.returnScan=(...args)=>{scans.push(args);return args[1]===7?d.promise:Promise.resolve()};
+s.scanCode="F7";const first=s.onScan();assert.equal(s.scanCode,"");
+s.scanCode="F8";const second=s.onScan();await tick();
+d.resolve();await first;await second;
+assert.deepEqual(asked,["F7","F8"]);assert.deepEqual(scans,[[1,7,1],[1,8,1]]);assert.equal(s.scanCode,"");
+''')
+
+    def test_not_found_scan_keeps_input_empty(self):
+        self._run(r'''
+const s=mk();context.window.PosScan=async()=>{throw new Error("找不到此條碼")};
+s.scanCode="X9";await s.onScan();
+assert.equal(s.scanCode,"");assert.deepEqual(errors,["條碼 X9：找不到此條碼"]);
+''')
+
     def test_switch_during_refresh_keeps_new_detail(self):
         self._run(r'''
 const s=mk(),d=deferred();API.returnDetail=rid=>{details.push(rid);return d.promise};

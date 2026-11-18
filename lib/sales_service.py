@@ -163,10 +163,11 @@ class SalesRepository(BaseRepository):
     def member_is_active(self, member_id):
         return self.connection.execute("SELECT 1 FROM Member WHERE member_id=? AND active=1", (member_id,)).fetchone() is not None
 
-    def add_item(self, sale_id, item):
+    def add_item(self, sale_id, item, name, spec):
+        # 品名、規格存成交當下的文字:商品日後改名或刪規格,舊單仍顯示當時賣的內容
         item_id = self.connection.execute(
-            "INSERT INTO SaleItem(sale_id,variant_id,qty,unit_price,discount) VALUES(?,?,?,?,?)",
-            (sale_id, item["variant_id"], item["qty"], item["unit_price"], item["discount"])).lastrowid
+            "INSERT INTO SaleItem(sale_id,variant_id,qty,unit_price,discount,name,spec) VALUES(?,?,?,?,?,?,?)",
+            (sale_id, item["variant_id"], item["qty"], item["unit_price"], item["discount"], name, spec)).lastrowid
         stock_ledger.post(self.connection, "sale", item_id)
 
     @staticmethod
@@ -185,11 +186,11 @@ class SalesRepository(BaseRepository):
             args.append(filters["member_phone"])
         return sql, args
 
-    SALE_ROWS_SQL = ("SELECT s.*,i.variant_id,i.qty,i.unit_price,i.discount,p.name,m.name member_name,"
-                     "(SELECT group_concat(phone,'、') FROM (SELECT phone FROM MemberPhone mp WHERE mp.member_id=s.member_id ORDER BY phone)) member_phones,"
+    SALE_ROWS_SQL = ("SELECT s.*,i.variant_id,i.qty,i.unit_price,i.discount,i.name,i.spec,m.name member_name,"
+                     "(SELECT group_concat(phone,'、') FROM "
+                     " (SELECT phone FROM MemberPhone mp WHERE mp.member_id=s.member_id ORDER BY phone)) member_phones,"
                      "EXISTS(SELECT 1 FROM DayClose d WHERE d.business_date=s.business_date) day_closed FROM Sale s "
-                     "JOIN SaleItem i ON s.sale_id=i.sale_id JOIN Variant v ON i.variant_id=v.variant_id "
-                     "JOIN Product p ON v.product_id=p.product_id LEFT JOIN Member m ON m.member_id=s.member_id WHERE 1=1")
+                     "JOIN SaleItem i ON s.sale_id=i.sale_id LEFT JOIN Member m ON m.member_id=s.member_id WHERE 1=1")
 
     def sale_rows(self, filters):
         suffix, args = self.filter_sql(filters)
@@ -197,13 +198,15 @@ class SalesRepository(BaseRepository):
 
     def recent_rows(self, limit):
         return self.connection.execute(
-            self.SALE_ROWS_SQL + " AND s.sale_id IN (SELECT sale_id FROM Sale WHERE date(ts)=date('now','localtime') ORDER BY sale_id DESC LIMIT ?)"
+            self.SALE_ROWS_SQL + " AND s.sale_id IN (SELECT sale_id FROM Sale WHERE date(ts)=date('now','localtime') "
+            "ORDER BY sale_id DESC LIMIT ?)"
             " ORDER BY s.sale_id DESC", (limit,)).fetchall()
 
     def summary_rows(self, filters):
         suffix, args = self.filter_sql(filters, "")
         return self.connection.execute(
-            "SELECT payment_id,COUNT(*) c,SUM(total) t FROM Sale WHERE voided_at IS NULL" + suffix + " GROUP BY payment_id", args).fetchall()
+            "SELECT payment_id,COUNT(*) c,SUM(total) t FROM Sale WHERE voided_at IS NULL" + suffix
+            + " GROUP BY payment_id", args).fetchall()
 
     def void_summary(self, filters):
         suffix, args = self.filter_sql(filters, "")
@@ -247,8 +250,9 @@ class SalesService:
             raise ValidationError("實收金額不足，請確認實收金額")
         sale_id = self.repo.create_sale(payment, body["order_discount"], body["member_discount"], total, body["paid"],
                                        body["employee"], body["member_id"])
+        specs = product_data.display_attrs(self.repo.connection, list(variant_rows))
         for item in body["items"]:
-            self.repo.add_item(sale_id, item)
+            self.repo.add_item(sale_id, item, variant_rows[item["variant_id"]]["name"], specs.get(item["variant_id"], ""))
         return {"sale_id": sale_id, "total": total, "change": body["paid"] - total}
 
     def void(self, body):
@@ -309,18 +313,15 @@ class SalesService:
         correction_service.record(conn, "sale", body["sale_id"], "payment", sale["payment"], payment["name"])
         return {"ok": True}
 
-    def list_sales(self, filters, load_attrs=True):
-        sales = self._group(self.repo.sale_rows(filters), load_attrs)
+    def list_sales(self, filters):
+        sales = self._group(self.repo.sale_rows(filters))
         return correction_service.attach(self.repo.connection, "sale", sales, "sale_id")
 
     # 收銀頁下方只列本日最近 5 筆;其餘到紀錄查詢頁看
     def recent(self):
         return self._group(self.repo.recent_rows(5))
 
-    def _group(self, rows, load_attrs=True):
-        vids = [row["variant_id"] for row in rows]
-        attrs = product_data.attrs_by_variant(self.repo.connection, vids) if load_attrs else {}
-        display = product_data.display_attrs(self.repo.connection, vids)
+    def _group(self, rows):
         out = {}
         for row in rows:
             sale = out.setdefault(row["sale_id"], {"sale_id": row["sale_id"], "ts": row["ts"],
@@ -330,8 +331,9 @@ class SalesService:
                 "voided_at": row["voided_at"], "void_reason": row["void_reason"],
                 "member_id": row["member_id"], "member_name": row["member_name"],
                 "member_phones": row["member_phones"], "items": []})
+            # 規格只給成交當下的文字;不帶目前的 attributes,免得前端在規格空白時改顯示現況
             sale["items"].append({"variant_id": row["variant_id"], "name": row["name"],
-                "attributes": attrs.get(row["variant_id"], {}), "attr_display": display.get(row["variant_id"], ""),
+                "attributes": {}, "attr_display": row["spec"],
                 "qty": row["qty"], "unit_price": row["unit_price"], "discount": row["discount"]})
         return list(out.values())
 
@@ -349,7 +351,9 @@ class SalesService:
                 if filters[key]:
                     where += f" AND business_date{op}?"
                     args.append(filters[key])
-            refund = self.repo.one("SELECT COUNT(*) c,COALESCE(SUM(refund_amount),0) t FROM ReturnSession WHERE kind='normal' AND status='closed' AND business_date IS NOT NULL" + where,args)
+            refund = self.repo.one(
+                "SELECT COUNT(*) c,COALESCE(SUM(refund_amount),0) t FROM ReturnSession "
+                "WHERE kind='normal' AND status='closed' AND business_date IS NOT NULL" + where, args)
             result.update(refund_count=refund["c"],refund_total=refund["t"],net_total=result["total"]-refund["t"])
             cash_ids = {p["payment_id"] for p in self.repo.payments() if p["is_cash"]}
             for item in result["by_payment"]:
@@ -365,14 +369,13 @@ class SalesService:
 
     def export(self, filters):
         rows = self.repo.sale_rows(filters)
-        display = product_data.display_attrs(self.repo.connection, [row["variant_id"] for row in rows])
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow(["銷售編號", "時間", "員工", "會員", "付款方式", "商品", "規格", "數量", "原價", "單項折扣", "訂單折扣", "會員折扣", "總額",
                          "帳日", "狀態", "作廢原因"])
         for row in rows:
             writer.writerow([row["sale_id"], row["ts"], row["employee"], _csv_text(row["member_name"] or ""),
-                _csv_text(row["payment"]), _csv_text(row["name"]), _csv_text(display.get(row["variant_id"], "")), row["qty"], row["unit_price"], row["discount"],
+                _csv_text(row["payment"]), _csv_text(row["name"]), _csv_text(row["spec"]), row["qty"], row["unit_price"], row["discount"],
                 row["order_discount"], row["member_discount"], row["total"],
                 row["business_date"], "已作廢" if row["voided_at"] else "", _csv_text(row["void_reason"] or "")])
         return {"filename": "sales.csv", "content": "\ufeff" + buf.getvalue()}

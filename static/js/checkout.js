@@ -119,26 +119,33 @@ window.PosPages["page-checkout"] = {
       if (this.draft.submitting) return;
       this.draft.cart.splice(i, 1);
     },
-    async onScan() {
+    // 先取出條碼並清空輸入框，再排隊依序處理：處理完才清空會把掃描槍接著打入的下一筆黏在一起
+    onScan() {
+      const code = this.scanCode;
+      this.scanCode = "";
       if (this.draft.submitting) {
         this.showError("結帳處理中，請稍候。");
-        this.scanCode = "";
         this.$refs?.scan?.focus();
         return;
       }
+      if (!String(code || "").trim()) return;
       const gen = this.draft.generation;
-      await this.guard(async () => {  // 查無條碼:保留輸入
-        const query = await window.PosScan(this.scanCode, { sellableOnly: true });
+      this._scanChain = (this._scanChain || Promise.resolve()).then(() => this.scanOne(code, gen));
+      return this._scanChain;
+    },
+    async scanOne(code, gen) {
+      try {
+        const query = await window.PosScan(code, { sellableOnly: true });
         // 只看鎖定擋不住結帳完成後才回來的舊掃描，批次編號也必須相同。
         if (this.draft.submitting || this.draft.generation !== gen) {
           this.showError("結帳期間購物車已變動，請重新加入。");
-          this.scanCode = "";
           return;
         }
-        if (!query) { this.scanCode = ""; return; }
-        await this.addItem(query.data, gen);
-        this.scanCode = "";
-      });
+        if (query) await this.addItem(query.data, gen);
+      } catch (e) {
+        // 失敗的條碼只顯示在訊息:放回輸入框會和掃描槍的下一筆黏在一起
+        this.showError(`條碼 ${code}：${e.message}`);
+      }
     },
     async onSearch() {
       if (!this.searchQ.trim()) return;

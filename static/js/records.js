@@ -172,7 +172,7 @@ window.PosPages["page-records"] = {
       if (!this.isAdmin) { this.showError("需要管理者權限"); return; }
       const p = this.dc.preview;
       if (!p || p.closed || this.dc.busy) return;
-      if (p.pending_returns) { this.showError(`尚有 ${p.pending_returns} 張退貨待核准，請先核准或作廢`); return; }
+      if (p.pending_returns) { this.showError(`尚有 ${p.pending_returns} 張退貨未送出或待核准，請先處理`); return; }
       if (this.dcDiff === null) { this.showError("請輸入錢櫃現金（含預備金）"); return; }
       const employee = window.PosEmployee.id;
       if (!employee) { this.showError("請選擇員工代號（1～6）"); return; }
@@ -187,7 +187,11 @@ window.PosPages["page-records"] = {
       if (this.dc.busy) return;
       this.dc.busy = true;
       try {
-        await this.guard(async () => { await API.dayCloseClose(body); });
+        await this.guard(async () => {
+          const result = await API.dayCloseClose(body);
+          // 立帳已完成;備份失敗只提示,讓管理者去檢查隨身碟或資料夾
+          if (result.backup_failed?.length) this.showError(`立帳完成，但${result.backup_failed.join("、")}備份失敗，請檢查`);
+        });
       } finally {
         this.dc.busy = false;
         // 成敗都重讀:失敗可能是金額已變動或已被立帳,不可留舊數字

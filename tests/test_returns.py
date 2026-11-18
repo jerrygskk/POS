@@ -53,19 +53,26 @@ class TestReturns(ReturnsBase):
         self.assertEqual(items[self.v1]["disposition"], "restock")
         self.assertNotIn(self.v3, items)
 
+    def test_reducing_qty_clears_refund_over_new_limit(self):
+        with get_conn(self.db) as conn:
+            conn.execute("UPDATE Variant SET price=100 WHERE variant_id IN (?,?)", (self.v1, self.v2))
+        self.fill()
+        i1, i2 = self.return_item_id(self.rid, self.v1), self.return_item_id(self.rid, self.v2)
+        self.invoke("returns.set_qty", {"return_id": self.rid, "item_id": i2, "qty": 2})
+        self.invoke("returns.set_refund", {"return_id": self.rid, "item_id": i1, "amount": 200})
+        self.invoke("returns.set_refund", {"return_id": self.rid, "item_id": i2, "amount": 80})
+        self.invoke("returns.set_qty", {"return_id": self.rid, "item_id": i1, "qty": 1})
+        self.invoke("returns.set_qty", {"return_id": self.rid, "item_id": i2, "qty": 1})
+        items = {i["variant_id"]: i for i in self.invoke("returns.detail", {"return_id": self.rid})["items"]}
+        self.assertEqual((items[self.v1]["qty"], items[self.v1]["refund_request"]), (1, None))
+        self.assertEqual((items[self.v2]["qty"], items[self.v2]["refund_request"]), (1, 80))
+
     def test_approve_rejects_stale_confirmation(self):
         # 確認框是舊內容(改處理方式尚未讀回)時拒絕,不得照資料庫現況入帳
         self.fill()
         self.submit_return(self.rid)
         shown = self.approve_payload(self.rid)
         self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "disposition": "reject"})
-        self.assert_application_error("conflict", "returns.approve", shown)
-        # 確認後店員抽回改數量再送出:舊確認不得照新數量入帳
-        self.invoke("returns.set_disposition", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "disposition": "restock"})
-        shown = self.approve_payload(self.rid)
-        self.invoke("returns.withdraw", {"return_id": self.rid})
-        self.invoke("returns.set_qty", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "qty": 3})
-        self.submit_return(self.rid)
         self.assert_application_error("conflict", "returns.approve", shown)
         missing = self.approve_payload(self.rid); missing["items"].pop()
         self.assert_application_error("conflict", "returns.approve", missing)
@@ -96,15 +103,13 @@ class TestReturns(ReturnsBase):
         history = self.invoke("returns.history", {})
         self.assertEqual([h["return_id"] for h in history], [self.rid])
 
-    def test_no_edit_after_submit_and_withdraw_reopens(self):
+    def test_no_edit_or_withdraw_after_submit(self):
         self.fill()
         self.submit_return(self.rid)
         self.assert_application_error("conflict", "returns.scan", {"return_id": self.rid, "variant_id": self.v1, "qty": 1})
         self.assert_application_error("conflict", "returns.set_qty", {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "qty": 1})
-        self.invoke("returns.withdraw", {"return_id": self.rid})
-        self.invoke("returns.scan", {"return_id": self.rid, "variant_id": self.v1, "qty": 1})
-        self.assert_application_error("conflict", "returns.set_disposition",
-                                      {"return_id": self.rid, "item_id": self.return_item_id(self.rid, self.v1), "disposition": "discard"})
+        self.assertFalse(self.invoke_envelope("returns.withdraw", {"return_id": self.rid})["ok"])
+        self.assertEqual(self.invoke("returns.detail", {"return_id": self.rid})["status"], "pending")
 
     def test_empty_return_cannot_submit(self):
         self.assert_application_error("conflict", "returns.close", {"return_id": self.rid})
@@ -133,8 +138,9 @@ class TestReturns(ReturnsBase):
         self.assertEqual((detail["status"], detail["cancelled_by"]), ("cancelled", 3))
         self.assertEqual(self.stock(self.v1), 5)
         self.assert_application_error("conflict", "returns.cancel", {"return_id": self.rid, "employee": 3})
-        # 紀錄查詢不列作廢單
-        self.assertNotIn(self.rid, [r["return_id"] for r in self.invoke("returns.history", {})])
+        # 紀錄查詢列出作廢單,但不記退款
+        row = next(r for r in self.invoke("returns.history", {}) if r["return_id"] == self.rid)
+        self.assertEqual((row["status"], row["cancelled_by"], row["refund_amount"]), ("cancelled", 3, None))
         # 進行中員工可作廢;已核准不可作廢
         self.as_employee()
         rid = self.invoke("returns.create", {"kind":"normal","employee": 1})["return_id"]
@@ -156,7 +162,6 @@ class TestReturns(ReturnsBase):
             with self.subTest(action=action):
                 self.assertEqual(self.invoke_envelope(action, payload)["error"]["code"], "forbidden")
         self.assertEqual(self.stock(self.v1), 5)
-        self.invoke("returns.withdraw", {"return_id": self.rid})
 
     def test_pending_count_and_validation(self):
         self.fill()

@@ -1,5 +1,6 @@
 import traceback
-from lib.db import (DatabaseTooNewError, DatabaseTooOldError, check_supported_version, init_db,
+from lib.dayclose_service import backup_extra_dir
+from lib.db import (DatabaseTooNewError, DatabaseTooOldError, check_supported_version, db_conn, init_db,
                     read_schema_version)
 from lib.db_schema import SCHEMA_VERSION
 from lib.backup import backup_before_upgrade, run_auto_backup
@@ -44,10 +45,13 @@ def prepare_runtime(paths):
         raise
 
     try:
+        with db_conn(paths.db_path) as conn:
+            extra_dir = backup_extra_dir(conn)
         run_auto_backup(
             paths.db_path,
             paths.backup_dir,
             on_error=lambda message, exc: try_log_runtime_error(paths, message, exc),
+            extra_dir=extra_dir,
         )
     except Exception as exc:
         try_log_runtime_error(paths, "自動備份失敗", exc)

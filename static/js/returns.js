@@ -78,20 +78,27 @@ window.PosPages["page-returns"] = {
       return ok;
     },
     // 查詢與寫入都要等待，期間可能換到別張單：寫入用開始時的單號，回來後換單就不動新畫面
-    async onScan() {
+    // 先取出條碼並清空輸入框，再排隊依序處理：處理完才清空會把掃描槍接著打入的下一筆黏在一起
+    onScan() {
       if (!this.canEdit || this.detail.sale_id || this.busy || this.kindBusy) return;
-      const rid = this.current;
-      await this.guard(async () => {
-        const query = await window.PosScan(this.scanCode);
-        if (this.current !== rid) return;
-        if (!query) { this.scanCode = ""; return; }
-        if (!this.canEdit) return;
+      const rid = this.current, code = this.scanCode;
+      this.scanCode = "";
+      if (!String(code || "").trim()) return;
+      this._scanChain = (this._scanChain || Promise.resolve()).then(() => this.scanOne(rid, code));
+      return this._scanChain;
+    },
+    async scanOne(rid, code) {
+      if (this.current !== rid) return;
+      try {
+        const query = await window.PosScan(code);
+        if (this.current !== rid || !query || !this.canEdit) return;
         await API.returnScan(rid, query.data.variant_id, 1);
         if (this.current !== rid) return;
         await this.refreshDetail();
-        if (this.current !== rid) return;
-        this.scanCode = "";
-      });
+      } catch (e) {
+        // 失敗的條碼只顯示在訊息:放回輸入框會和掃描槍的下一筆黏在一起
+        this.showError(`條碼 ${code}：${e.message}`);
+      }
     },
     digits(event) { event.target.value = event.target.value.replace(/\D/g, ""); },
     refundValue(it) { return this.refundEdits[it.id] ?? (this.canEdit ? it.refund_request : it.refund_approved) ?? ""; },
@@ -172,7 +179,7 @@ window.PosPages["page-returns"] = {
     },
     // 返修是整張單的模式:切換一次改全部品項;切換中不可重按,成敗都重讀單據
     async setKind(kind) {
-      if (!this.canEdit) { this.showError("退貨單已送出，請抽回後再變更退貨種類"); await this.guard(() => this.refreshDetail()); return; }
+      if (!this.canEdit) { this.showError("退貨單已送出，無法變更退貨種類"); await this.guard(() => this.refreshDetail()); return; }
       if (this.kindBusy || this.busy || this.detail.kind === kind) return;
       const rid = this.current;
       this.kindBusy = true;
@@ -194,7 +201,7 @@ window.PosPages["page-returns"] = {
       const rid = this.current;
       if (this.detail.items.some(i => this.refundInvalid(i))) { this.showError("請修正超過上限的退貨價格"); return; }
       if (this.detail.kind === "normal" && this.detail.items.some(i => i.disposition !== "reject" && i.refund_request === null)) { this.showError("請填寫退貨價格"); return; }
-      const message = this.detail.kind === "normal" ? `共 ${this.detail.items.length} 項，退款合計 ${this.refundTotal} 元。請確認已退現金給客人，送出後由管理者核准。` : `共 ${this.detail.items.length} 項。返修不退款，送出後由管理者核准。`;
+      const message = this.detail.kind === "normal" ? `共 ${this.detail.items.length} 項，退款合計 ${this.refundTotal} 元。請確認已退現金給客人，送出後無法修改，由管理者核准。` : `共 ${this.detail.items.length} 項。返修不退款，送出後無法修改，由管理者核准。`;
       if (!await PosConfirm.ask(message)) return;
       if (this.current !== rid || !this.canEdit) return;
       if (this.busy) return;
@@ -208,12 +215,6 @@ window.PosPages["page-returns"] = {
         await PosConfirm.notify("已送交管理者核准。");
       });
       } finally { this.busy = false; }
-    },
-    async withdraw(rid) {
-      if (!await PosConfirm.ask("抽回後退貨單回到進行中，可修改後再次送出。確定抽回?")) return;
-      try { await API.withdrawReturn(rid); } catch (e) { this.showError(e.message); }
-      await this.guard(() => this.reload());
-      await this.guard(() => window.PosAuthOps.refresh());
     },
     async cancel(s) {
       if (!this.employee.id) { this.showError("請先選擇員工代號"); return; }

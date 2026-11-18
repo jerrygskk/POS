@@ -180,7 +180,6 @@ ACTION_CONTRACTS = {
     "returns.set_reason": schema([I("return_id", required=True), I("item_id", required=True), S("reason", required=True, nullable=True, blank="accept")]),
     "returns.remove_item": schema([I("return_id", required=True), I("item_id", required=True)]),
     "returns.close": schema([I("return_id", required=True)]),
-    "returns.withdraw": schema([I("return_id", required=True)]),
     "returns.set_kind": schema([I("return_id", required=True), S("kind", required=True, constraint="normal|repair", blank="reject")]),
     "returns.set_disposition": schema([I("return_id", required=True), I("item_id", required=True), S("disposition", required=True, constraint="restock|discard|reject", blank="reject")]),
     "returns.approve": schema([I("return_id", required=True), S("kind", required=True, constraint="normal|repair", blank="reject"), field("items", "list[ApproveItem]", required=True, wrong="x", list_element={"expect":"reject","value":"x"}), I("items[].item_id", required=True), I("items[].qty", required=True, constraint=">0"), S("items[].disposition", required=True, nullable=True, constraint="restock|discard|reject", blank="reject"), I("items[].refund",required=True,nullable=True,constraint=">=0"), S("business_date",required=True,blank="reject",constraint="YYYY-MM-DD")], notes=("確認框顯示的種類與品項數量、處理方式;與資料庫現況不同回衝突。",)),
@@ -207,6 +206,8 @@ ACTION_CONTRACTS = {
     "dayclose.close": schema([S("business_date", required=True, constraint="YYYY-MM-DD", blank="reject"), I("counted_total", required=True, constraint=">=0"), S("reason", required=True, blank="accept"), I("employee", required=True, constraint="1..6"), M("expected", required=True), I("expected.float_amount", required=True, constraint=">=0"), I("expected.cash_sales", required=True, constraint=">=0"), I("expected.cash_refund", required=True, constraint=">=0")], notes=("Admin only; expected carries the previewed amounts and must match current values.",)),
     "dayclose.list": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject")], notes=("Admin only.",)),
     "dayclose.set_float": schema([I("amount", required=True, constraint=">=0")], notes=("Admin only.",)),
+    "dayclose.backup_dir": schema([], notes=("Admin only.",)),
+    "dayclose.set_backup_dir": schema([S("path", required=True, constraint="empty|existing folder", blank="accept")], notes=("Admin only.",)),
     "members.lookup": schema([S("query", required=True, blank="reject")]),
     "members.list": schema([S("query", required=True, blank="accept")]),
     "members.create": schema([S("name", required=True, blank="reject"), field("phones", "list[str]", required=True, constraint="min_length=1", wrong="x", list_element={"expect":"reject","value":1})]),
@@ -262,11 +263,12 @@ TARGET_BY_ACTION = {
     "stocktake.cancel":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     **{action:"lib.returns_service.ReturnsFacade._prepare_payload -> _validate" for action in (
         "returns.create","returns.list","returns.history","returns.detail","returns.scan",
-        "returns.set_qty","returns.load_sale","returns.pick","returns.clear","returns.set_refund","returns.set_member","returns.set_reason","returns.remove_item","returns.close","returns.withdraw",
+        "returns.set_qty","returns.load_sale","returns.pick","returns.clear","returns.set_refund","returns.set_member","returns.set_reason","returns.remove_item","returns.close",
         "returns.set_disposition","returns.set_kind","returns.approve","returns.cancel","returns.pending_count",
         "returns.repair_receive","returns.close_item","returns.reopen_item")},
     **{action:"lib.dayclose_service.DayCloseFacade._prepare_payload -> _validate" for action in (
-        "dayclose.current", "dayclose.preview", "dayclose.close", "dayclose.list", "dayclose.set_float")},
+        "dayclose.current", "dayclose.preview", "dayclose.close", "dayclose.list", "dayclose.set_float",
+        "dayclose.backup_dir", "dayclose.set_backup_dir")},
     "payments.list":"lib.sales_service.SalesFacade._prepare_payload -> _strict_mapping",
     **{action:"lib.sales_service.SalesFacade._prepare_payload -> lib.payment_service.prepare" for action in (
         "payments.create", "payments.update", "payments.sort", "payments.delete")},
@@ -598,7 +600,7 @@ class ActionContractTests(FacadeTestCase):
             "returns.set_refund":{"return_id":self.return_id,"item_id":self.return_item_id,"amount":0},
             "returns.set_member":{"return_id":self.return_id,"member_id":None},
             "returns.set_reason":{"return_id":self.return_id,"item_id":self.return_item_id,"reason":None}, "returns.remove_item":{"return_id":self.return_id,"item_id":self.return_item_id},
-            "returns.close":{"return_id":self.return_id}, "returns.withdraw":{"return_id":self.return_id},
+            "returns.close":{"return_id":self.return_id},
             "returns.set_disposition":{"return_id":self.return_id,"item_id":self.return_item_id,"disposition":"discard"},
             "returns.set_kind":{"return_id":self.return_id,"kind":"repair"},
             "returns.approve":{"return_id":self.return_id,"kind":"normal","business_date":self.invoke("dayclose.current")["business_date"],"items":[{"item_id":self.return_item_id,"qty":1,"disposition":"restock","refund":0}]}, "returns.cancel":{"return_id":self.return_id,"employee":1}, "returns.pending_count":{},
@@ -613,7 +615,7 @@ class ActionContractTests(FacadeTestCase):
             "corrections.set_employee":{"doc_type":"sale","doc_id":self.sale_id,"employee":2,"expected_employee":1},
             "dayclose.current":{}, "dayclose.preview":{"business_date":"2026-08-10"},
             "dayclose.close":{"business_date":"2026-08-10","counted_total":0,"reason":"","employee":1,"expected":{"float_amount":0,"cash_sales":0, "cash_refund": 0}},
-            "dayclose.list":{}, "dayclose.set_float":{"amount":3000},
+            "dayclose.list":{}, "dayclose.set_float":{"amount":3000}, "dayclose.backup_dir":{}, "dayclose.set_backup_dir":{"path":""},
             "members.lookup":{"query":"111"}, "members.list":{"query":""},
             "members.create":{"name":"契約會員","phones":["0912000111"]},
             "members.update":{"member_id":self.member_id,"name":"契約會員","phones":["0912000111"]},
@@ -642,7 +644,7 @@ class ActionContractTests(FacadeTestCase):
                              self.facade.stocktake.ACTIONS, self.facade.returns.ACTIONS,
                              self.facade.printing.ACTIONS, self.facade.members.ACTIONS,
                              self.facade.dayclose.ACTIONS, self.facade.corrections.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 126)
+        self.assertEqual(len(ACTION_CONTRACTS), 127)
         self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS | AUTH_ACTIONS | DESKTOP_UPDATE_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
@@ -806,8 +808,14 @@ class ActionContractTests(FacadeTestCase):
             self.invoke("stocktake.close", {"session_id": self.session_id})
             if action == "stocktake.create":
                 self.invoke("stocktake.approve", {"session_id": self.session_id})
-        if action in {"returns.withdraw", "returns.set_disposition", "returns.approve"}:
+        if action in {"returns.set_disposition", "returns.approve"}:
             self.submit_return(self.return_id)
+        if action == "categories.delete_field":
+            # 空規格的待刪款式與契約款式只差顏色,刪欄後會一模一樣而被擋;先移除它
+            self.invoke("variants.delete", {"id": self.delete_variant_id})
+        if action == "dayclose.close":
+            # 共用的進行中退貨單已填金額,會擋立帳(店員可能已退現金)
+            self.invoke("returns.cancel", {"return_id": self.return_id, "employee": 1})
         if action == "returns.reopen_item":
             self.invoke("returns.close_item", {"return_id": self.repair_id, "item_id": self.repair_item_id, "reason": "x"})
         if contract["valid_error"] == "validation_error":

@@ -6,6 +6,7 @@ from lib.application_errors import ConflictError, NotFoundError, ValidationError
 from lib.db import in_clause, next_sort
 from lib import product_data, product_rules
 from lib.product_rules import FIELD_TYPES
+from lib.normalize import normalize_key
 
 
 _ACTION_RULES = {
@@ -150,8 +151,25 @@ class SettingsService:
         where = "" if all or kind in self.NO_ACTIVE else " WHERE active=1"
         return self.repo.rows(f"SELECT * FROM {table}{where} ORDER BY sort,{id_col}")
 
+    def _named_write(self, kind, sql, args):
+        # 名稱有 UNIQUE:撞名時回明確訊息,不要讓店員只看到「資料庫操作失敗」
+        label = self.SIMPLE[kind][3].removeprefix("查無此")
+        try:
+            return self.repo.execute(sql, args)
+        except sqlite3.IntegrityError as exc:
+            if "UNIQUE" in str(exc):
+                raise ConflictError(f"已有同名{label}") from exc
+            raise
+
+    def _clean_name(self, kind, name):
+        name = name.strip()
+        if not name:
+            raise ValidationError(f"請輸入{self.SIMPLE[kind][3].removeprefix('查無此')}名稱")
+        return name
+
     def simple_create(self, kind, payload):
         table, _, result_key, _ = self.SIMPLE[kind]
+        name = self._clean_name(kind, payload["name"])
         sort = payload.get("sort")
         if sort is None:
             sort = next_sort(self.repo.connection, table)
@@ -159,10 +177,10 @@ class SettingsService:
             mode = payload.get("model_mode") or "hidden"
             if mode not in MODEL_MODES:
                 raise ValidationError("適用型號模式不正確")
-            cur = self.repo.execute("INSERT INTO Category(name,sort,model_mode) VALUES(?,?,?)",
-                                    (payload["name"], sort, mode))
+            cur = self._named_write(kind, "INSERT INTO Category(name,sort,model_mode) VALUES(?,?,?)",
+                                    (name, sort, mode))
         else:
-            cur = self.repo.execute(f"INSERT INTO {table}(name,sort) VALUES(?,?)", (payload["name"], sort))
+            cur = self._named_write(kind, f"INSERT INTO {table}(name,sort) VALUES(?,?)", (name, sort))
         return {result_key: cur.lastrowid}
 
     def simple_update(self, kind, item_id, fields):
@@ -174,9 +192,11 @@ class SettingsService:
             if fields.get("model_mode") is not None and fields["model_mode"] not in MODEL_MODES:
                 raise ValidationError("適用型號模式不正確")
         fields = {k: v for k, v in fields.items() if k in allowed}
+        if "name" in fields:
+            fields["name"] = self._clean_name(kind, fields["name"])
         if fields:
             sets = ",".join(f"{key}=?" for key in fields)
-            self.repo.execute(f"UPDATE {table} SET {sets} WHERE {id_col}=?", (*fields.values(), item_id))
+            self._named_write(kind, f"UPDATE {table} SET {sets} WHERE {id_col}=?", (*fields.values(), item_id))
         return {"ok": True}
 
     def simple_delete(self, kind, item_id):
@@ -225,7 +245,8 @@ class SettingsService:
             return self.repo.rows(sql, (category_id,) if category_id is not None else ())
         if category_id is None:
             return self.simple_list("brands", all)
-        return self.repo.rows("SELECT b.* FROM Brand b JOIN BrandCategory bc ON b.brand_id=bc.brand_id WHERE bc.category_id=? ORDER BY b.sort,b.brand_id", (category_id,))
+        return self.repo.rows("SELECT b.* FROM Brand b JOIN BrandCategory bc ON b.brand_id=bc.brand_id "
+                              "WHERE bc.category_id=? ORDER BY b.sort,b.brand_id", (category_id,))
 
     def set_brand_categories(self, item_id, ids):
         self.repo.require("Brand", "brand_id", item_id, "查無此廠牌")
@@ -269,7 +290,8 @@ class SettingsService:
         fields = {k:v for k,v in fields.items() if k in {"phone_brand_id","device_type_id","name","alias","sort","active"}}
         self._check_model_refs(fields)
         if fields:
-            self._write_model("UPDATE PhoneModel SET " + ",".join(f"{k}=?" for k in fields) + " WHERE model_id=?", (*fields.values(), item_id))
+            self._write_model("UPDATE PhoneModel SET " + ",".join(f"{k}=?" for k in fields) + " WHERE model_id=?",
+                              (*fields.values(), item_id))
         return {"ok": True}
 
     def delete_model(self, item_id):
@@ -352,19 +374,30 @@ class SettingsService:
         return {"ok": True}
 
     def list_options(self, field_id, all=False, model_ids=None):
-        sql = "SELECT o.*,COUNT(DISTINCT va.variant_id) usage_count FROM AttributeOption o LEFT JOIN VariantAttribute va ON va.option_id=o.option_id WHERE o.field_id=?"; args=[field_id]
+        sql = ("SELECT o.*,COUNT(DISTINCT va.variant_id) usage_count FROM AttributeOption o "
+               "LEFT JOIN VariantAttribute va ON va.option_id=o.option_id WHERE o.field_id=?")
+        args = [field_id]
         if not all: sql += " AND o.active=1"
         if model_ids:
-            qs=in_clause(model_ids); sql += f" AND (NOT EXISTS(SELECT 1 FROM OptionModel om WHERE om.option_id=o.option_id) OR EXISTS(SELECT 1 FROM OptionModel om WHERE om.option_id=o.option_id AND om.model_id IN ({qs})))"; args += model_ids
+            qs = in_clause(model_ids)
+            sql += (" AND (NOT EXISTS(SELECT 1 FROM OptionModel om WHERE om.option_id=o.option_id) "
+                    f"OR EXISTS(SELECT 1 FROM OptionModel om WHERE om.option_id=o.option_id AND om.model_id IN ({qs})))")
+            args += model_ids
         opts=self.repo.rows(sql+" GROUP BY o.option_id ORDER BY usage_count DESC,o.sort,o.option_id",args)
-        for o in opts: o["model_ids"]=[r[0] for r in self.repo.execute("SELECT model_id FROM OptionModel WHERE option_id=? ORDER BY model_id",(o["option_id"],))]
+        for o in opts:
+            o["model_ids"] = [r[0] for r in self.repo.execute(
+                "SELECT model_id FROM OptionModel WHERE option_id=? ORDER BY model_id", (o["option_id"],))]
         # 玻璃貼材質等固定次序的值排最前(product_rules.PINNED_OPTION_VALUES)
         return product_rules.sort_pinned_options(opts)
 
     def create_option(self,p):
         self.repo.require("AttributeField","field_id",p["field_id"],"查無此規格欄")
-        sort=next_sort(self.repo.connection,"AttributeOption","field_id=?",(p["field_id"],)); self.repo.execute("INSERT OR IGNORE INTO AttributeOption(field_id,value,sort) VALUES(?,?,?)",(p["field_id"],p["value"],sort))
-        if p.get("reactivate"): self.repo.execute("UPDATE AttributeOption SET active=1 WHERE field_id=? AND value=?",(p["field_id"],p["value"]))
+        sort = next_sort(self.repo.connection, "AttributeOption", "field_id=?", (p["field_id"],))
+        self.repo.execute("INSERT OR IGNORE INTO AttributeOption(field_id,value,sort) VALUES(?,?,?)",
+                          (p["field_id"], p["value"], sort))
+        if p.get("reactivate"):
+            self.repo.execute("UPDATE AttributeOption SET active=1 WHERE field_id=? AND value=?",
+                              (p["field_id"], p["value"]))
         return {"ok":True}
 
     def update_option(self,item_id,fields):
@@ -374,14 +407,20 @@ class SettingsService:
         if fields.get("active")==0:
             self.repo.execute("UPDATE AttributeField SET default_option_id=NULL WHERE default_option_id=?",(item_id,))
         try:
-            if fields:self.repo.execute("UPDATE AttributeOption SET "+",".join(f"{k}=?" for k in fields)+" WHERE option_id=?",(*fields.values(),item_id))
+            if fields:
+                self.repo.execute("UPDATE AttributeOption SET " + ",".join(f"{k}=?" for k in fields)
+                                  + " WHERE option_id=?", (*fields.values(), item_id))
         except sqlite3.IntegrityError as exc: raise ConflictError("此選項值已存在") from exc
         return {"ok":True}
 
     def delete_option(self,item_id):
-        self.repo.require("AttributeOption","option_id",item_id,"查無此選項"); count=self.repo.one("SELECT COUNT(DISTINCT variant_id) FROM VariantAttribute WHERE option_id=?",(item_id,))[0]
-        self.repo.execute("UPDATE AttributeField SET default_option_id=NULL WHERE default_option_id=?",(item_id,)); self.repo.execute("DELETE FROM OptionModel WHERE option_id=?",(item_id,))
-        self.repo.execute("UPDATE AttributeOption SET active=0 WHERE option_id=?" if count else "DELETE FROM AttributeOption WHERE option_id=?",(item_id,)); return {"ok":True,"deleted":not bool(count)}
+        self.repo.require("AttributeOption", "option_id", item_id, "查無此選項")
+        count = self.repo.one("SELECT COUNT(DISTINCT variant_id) FROM VariantAttribute WHERE option_id=?", (item_id,))[0]
+        self.repo.execute("UPDATE AttributeField SET default_option_id=NULL WHERE default_option_id=?", (item_id,))
+        self.repo.execute("DELETE FROM OptionModel WHERE option_id=?", (item_id,))
+        self.repo.execute("UPDATE AttributeOption SET active=0 WHERE option_id=?" if count
+                          else "DELETE FROM AttributeOption WHERE option_id=?", (item_id,))
+        return {"ok": True, "deleted": not bool(count)}
 
     def cleanup_options(self, field_id=None):
         """手動清理未使用選項:使用數為 0 且非任何規格欄 default_option_id 者硬刪。
@@ -398,7 +437,9 @@ class SettingsService:
         return {"ok": True, "deleted": len(deleted)}
 
     def option_models(self,item_id):
-        self.repo.require("AttributeOption","option_id",item_id,"查無此選項"); return {"model_ids":[r[0] for r in self.repo.execute("SELECT model_id FROM OptionModel WHERE option_id=? ORDER BY model_id",(item_id,))]}
+        self.repo.require("AttributeOption", "option_id", item_id, "查無此選項")
+        return {"model_ids": [r[0] for r in self.repo.execute(
+            "SELECT model_id FROM OptionModel WHERE option_id=? ORDER BY model_id", (item_id,))]}
 
     def set_option_models(self,item_id,ids):
         self.repo.require("AttributeOption","option_id",item_id,"查無此選項"); self.repo.replace_links("OptionModel","option_id",item_id,"model_id",ids,"型號不存在"); return {"ok":True}
@@ -420,7 +461,9 @@ class SettingsService:
                 "SELECT o.option_id,o.value,o.sort FROM AttributeOption o "
                 "LEFT JOIN VariantAttribute va ON va.option_id=o.option_id "
                 "WHERE o.field_id=? AND o.active=1 GROUP BY o.option_id "
-                "ORDER BY COUNT(DISTINCT va.variant_id) DESC,o.sort,o.option_id",(f["field_id"],)); dv=self.repo.one("SELECT value FROM AttributeOption WHERE option_id=?",(f["default_option_id"],)) if f["default_option_id"] is not None else None
+                "ORDER BY COUNT(DISTINCT va.variant_id) DESC,o.sort,o.option_id",(f["field_id"],))
+            dv = None if f["default_option_id"] is None else self.repo.one(
+                "SELECT value FROM AttributeOption WHERE option_id=?", (f["default_option_id"],))
             out.append({"field_id":f["field_id"],"name":f["name"],"field_type":f["field_type"],"required":f["required"],"default_option_id":f["default_option_id"],"default_value":dv[0] if dv else None,"options":opts})
         return out
 
@@ -468,11 +511,35 @@ class SettingsService:
             "  AND vi.issue_type='missing_required' AND vi.field_id=?)",
             (field_id, category_id, field_id, field_id))
 
+    def _duplicates_without_field(self, category_id, field_id):
+        """拿掉此欄後,同商品內簽章相同的款式組數(簽章規則同 product_data.variant_signature)。"""
+        conn = self.repo.connection
+        feature_id = next((r["field_id"] for r in self.repo.execute(
+            "SELECT field_id, name FROM AttributeField WHERE category_id=? ORDER BY field_id", (category_id,))
+            if normalize_key(r["name"]) == product_data.FEATURE_FIELD_KEY), None)
+        seen, pairs = {}, 0
+        for row in self.repo.execute(
+                "SELECT v.variant_id, v.product_id FROM Variant v JOIN Product p ON p.product_id=v.product_id "
+                "WHERE p.category_id=?", (category_id,)).fetchall():
+            sig = frozenset(e for e in product_data.variant_signature(conn, row["variant_id"], feature_id)
+                            if e[0] != field_id)
+            key = (row["product_id"], sig)
+            if key in seen:
+                pairs += 1
+            else:
+                seen[key] = row["variant_id"]
+        return pairs
+
     def delete_field(self, category_id, field_id):
         """刪除本種類的規格欄:清掉填過的值、待補問題、選項與欄位本身。
 
         規格欄隸屬單一種類,不跨種類共用,所以沒有「只解除掛勾、保留欄位」的情況。"""
         self._require_category_field(category_id, field_id)
+        # 規格是區分款式的依據:刪掉後若同商品有兩筆變得一模一樣,掃描與庫存會混在一起;
+        # 已售出的款式又不能刪,所以在刪欄前擋下,而不是事後標待處理
+        same = self._duplicates_without_field(category_id, field_id)
+        if same:
+            raise ConflictError(f"刪除後會有 {same} 組款式規格完全相同，請先修改其中一筆的規格再刪除")
         removed = self.repo.one(
             "SELECT COUNT(DISTINCT variant_id) c FROM VariantAttribute WHERE field_id=?", (field_id,))[0]
         self.repo.execute("DELETE FROM VariantAttribute WHERE field_id=?", (field_id,))

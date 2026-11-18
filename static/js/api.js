@@ -29,9 +29,9 @@ const API = {
       "variants.batch_create", "variants.batch_precheck", "variants.field_usage", "variants.model_usage", "variants.activate", "variants.issues", "variants.price_list", "variants.price_save",
       "barcodes.scan", "stock.receive", "stock.detail", "stock.receipts",
       "stocktake.create", "stocktake.list", "stocktake.history", "stocktake.detail", "stocktake.scan", "stocktake.set_counted", "stocktake.remove_item", "stocktake.close", "stocktake.withdraw", "stocktake.return", "stocktake.approve", "stocktake.pending_count", "stocktake.set_note", "stocktake.cancel",
-      "returns.create", "returns.list", "returns.history", "returns.detail", "returns.scan", "returns.set_qty", "returns.load_sale", "returns.pick", "returns.clear", "returns.set_refund", "returns.set_member", "returns.set_reason", "returns.remove_item", "returns.close", "returns.withdraw", "returns.set_disposition", "returns.set_kind", "returns.approve", "returns.cancel", "returns.pending_count", "returns.repair_receive", "returns.close_item", "returns.reopen_item",
+      "returns.create", "returns.list", "returns.history", "returns.detail", "returns.scan", "returns.set_qty", "returns.load_sale", "returns.pick", "returns.clear", "returns.set_refund", "returns.set_member", "returns.set_reason", "returns.remove_item", "returns.close", "returns.set_disposition", "returns.set_kind", "returns.approve", "returns.cancel", "returns.pending_count", "returns.repair_receive", "returns.close_item", "returns.reopen_item",
       "payments.list", "payments.create", "payments.update", "payments.sort", "payments.delete", "sales.checkout", "sales.list", "sales.recent", "sales.summary", "sales.export_save", "sales.void", "sales.set_payment", "corrections.set_employee",
-      "dayclose.current", "dayclose.preview", "dayclose.close", "dayclose.list", "dayclose.set_float", "printing.barcode", "printing.preview", "printing.check",
+      "dayclose.current", "dayclose.preview", "dayclose.close", "dayclose.list", "dayclose.set_float", "dayclose.backup_dir", "dayclose.set_backup_dir", "printing.barcode", "printing.preview", "printing.check",
       "members.lookup", "members.list", "members.create", "members.update", "members.phone_owners", "members.delete",
       "desktop.child_window.open", "desktop.child_window.context", "desktop.child_window.close",
       "desktop.update.check", "desktop.update.start", "desktop.update.status", "desktop.update.restart", "desktop.update.busy"
@@ -77,7 +77,7 @@ const API = {
   setReturnMember: (return_id, member_id) => API.invoke("returns.set_member", {return_id, member_id}),
   setReturnReason: (return_id, item_id, reason) => API.invoke("returns.set_reason", {return_id, item_id, reason}),
   removeReturnItem: (return_id, item_id) => API.invoke("returns.remove_item", {return_id, item_id}),
-  closeReturn: return_id => API.invoke("returns.close", {return_id}), withdrawReturn: return_id => API.invoke("returns.withdraw", {return_id}),
+  closeReturn: return_id => API.invoke("returns.close", {return_id}),
   setReturnDisposition: (return_id, item_id, disposition) => API.invoke("returns.set_disposition", {return_id, item_id, disposition}),
   setReturnKind: (return_id, kind) => API.invoke("returns.set_kind", {return_id, kind}),
   approveReturn: (return_id, kind, items, business_date) => API.invoke("returns.approve", {return_id, kind, items, ...(kind === "normal" ? {business_date} : {})}),
@@ -113,6 +113,7 @@ const API = {
   dayCloseCurrent: () => API.invoke("dayclose.current", {}), dayClosePreview: business_date => API.invoke("dayclose.preview", {business_date}),
   dayCloseClose: p => API.invoke("dayclose.close", p), dayCloseList: p => API.invoke("dayclose.list", p),
   dayCloseSetFloat: amount => API.invoke("dayclose.set_float", {amount}),
+  backupDir: () => API.invoke("dayclose.backup_dir", {}), setBackupDir: path => API.invoke("dayclose.set_backup_dir", {path}),
   updateVariantDetails(id, fields, modelIds) {
     return this.invoke("variants.update_details", {
       id, fields, model_ids: modelIds

@@ -51,7 +51,9 @@ class StocktakeRepository(BaseRepository):
         if self.one("SELECT 1 FROM Variant WHERE variant_id=?", (vid,)) is None:
             raise NotFoundError("找不到子產品")
     def close_open(self, sid):
-        return self.execute("UPDATE StocktakeSession SET status='pending',submitted_at=datetime('now','localtime') WHERE session_id=? AND status='open'", (sid,)).rowcount
+        return self.execute(
+            "UPDATE StocktakeSession SET status='pending',submitted_at=datetime('now','localtime') "
+            "WHERE session_id=? AND status='open'", (sid,)).rowcount
     def require_recounted(self, sid):
         count = self.one("SELECT COUNT(*) AS n FROM StocktakeItem WHERE session_id=? AND needs_recount=1", (sid,))["n"]
         if count:
@@ -119,7 +121,8 @@ class StocktakeService:
             raise ConflictError("盤點作業已結案")
         # 手動填實盤視為現場重新清點:系統數量與快照編號一起重抓,這個數字才和當下庫存對得上。
         # 已知限制:只改正打錯的數字而沒重數、中間又有賣出時,差額會少算賣出的件數
-        if self.repo.execute("UPDATE StocktakeItem SET counted_qty=?,system_qty=?,snapshot_move_id=?,needs_recount=0 WHERE session_id=? AND variant_id=?",
+        if self.repo.execute("UPDATE StocktakeItem SET counted_qty=?,system_qty=?,snapshot_move_id=?,needs_recount=0 "
+                             "WHERE session_id=? AND variant_id=?",
                              (counted,product_data.stock_of(self.repo.connection,vid),self._last_move_id(),sid,vid)).rowcount==0: raise NotFoundError("找不到盤點品項")
         return {"ok":True}
     def remove_item(self, sid, vid):
@@ -147,7 +150,8 @@ class StocktakeService:
     def detail(self,sid):
         session=self.repo.session(sid)
         if session is None: raise NotFoundError("找不到盤點作業")
-        rows=self.repo.all("SELECT si.*,p.name FROM StocktakeItem si JOIN Variant v ON si.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id WHERE si.session_id=?",(sid,))
+        rows=self.repo.all("SELECT si.*,p.name FROM StocktakeItem si JOIN Variant v ON si.variant_id=v.variant_id "
+                           "JOIN Product p ON v.product_id=p.product_id WHERE si.session_id=?",(sid,))
         vids=[r["variant_id"] for r in rows]; attrs=product_data.attrs_by_variant(self.repo.connection,vids); disp=product_data.display_attrs(self.repo.connection,vids)
         items=[self._item(r,attrs,disp) for r in rows]
         return {**dict(session),"items":items}
@@ -160,7 +164,8 @@ class StocktakeService:
         if self.repo.close_open(sid)==0: self.repo.require_open(sid)
         return {"ok":True}
     def withdraw(self, sid):
-        if self.repo.execute("UPDATE StocktakeSession SET status='open',submitted_at=NULL WHERE session_id=? AND status='pending'", (sid,)).rowcount == 0:
+        if self.repo.execute("UPDATE StocktakeSession SET status='open',submitted_at=NULL "
+                             "WHERE session_id=? AND status='pending'", (sid,)).rowcount == 0:
             raise ConflictError("盤點單不是待核准狀態")
         # 系統數量與實盤數量一起平移、差額不變,所以不更新 snapshot_move_id:
         # 更新了,作廢「清點後才賣」的單會把系統數量多加一次
@@ -182,7 +187,9 @@ class StocktakeService:
         return self.withdraw(sid)
     def approve(self, sid):
         self.repo.require_recounted(sid)
-        if self.repo.execute("UPDATE StocktakeSession SET status='closed',approved_at=datetime('now','localtime'),ended_at=datetime('now','localtime') WHERE session_id=? AND status='pending'", (sid,)).rowcount == 0:
+        if self.repo.execute(
+                "UPDATE StocktakeSession SET status='closed',approved_at=datetime('now','localtime'),"
+                "ended_at=datetime('now','localtime') WHERE session_id=? AND status='pending'", (sid,)).rowcount == 0:
             raise ConflictError("盤點單不是待核准狀態")
         for row in self.repo.all("SELECT id FROM StocktakeItem WHERE session_id=? ORDER BY id",(sid,)):
             stock_ledger.post(self.repo.connection, "adjust", row["id"])  # 差異為 0 不寫

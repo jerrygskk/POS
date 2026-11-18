@@ -48,7 +48,8 @@ context.window.PosScan=async()=>hit(1,9);await scan(s,1);
 assert.deepEqual(plain(s.draft.rows.map(r=>[r.variant_id,r.qty,r.stock])),[[1,2,9],[2,1,0]]);
 assert.equal(s.draft.highlightKey,1);
 const d=deferred();context.window.PosScan=()=>d.promise;
-s.scanCode="3";const a=s.onScan(),b=s.onScan();d.resolve(hit(3));await Promise.all([a,b]);
+s.scanCode="3";const a=s.onScan();assert.equal(s.scanCode,"");s.scanCode="3";const b=s.onScan();
+d.resolve(hit(3));await Promise.all([a,b]);
 assert.equal(s.draft.rows.filter(r=>r.variant_id===3).length,1);assert.equal(s.draft.rows[0].qty,2);
 assert.equal(page.computed.totalQty.call(s),5);
 ''')
@@ -60,7 +61,7 @@ assert.equal(s.scanCode,"");assert.equal(s.draft.rows.length,1);
 context.window.PosScan=async()=>{throw Object.assign(new Error("missing"),{status:404})};
 await scan(s,"NO");assert.equal(s.draft.notFound,"NO");assert.equal(s.scanCode,"");
 context.window.PosScan=async()=>{throw Object.assign(new Error("server"),{status:500})};
-await scan(s,"KEEP");assert.equal(s.scanCode,"KEEP");assert.deepEqual(errors,["server"]);
+await scan(s,"KEEP");assert.equal(s.scanCode,"");assert.deepEqual(errors,["條碼 KEEP：server"]);
 ''')
 
     def test_quantity_label_difference_busy_and_removed_row(self):

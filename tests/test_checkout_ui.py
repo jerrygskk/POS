@@ -277,6 +277,31 @@ const s=mkState({scanCode:"SHARED"});
 ''')
         self.assertEqual(out, {"scan": "", "cart": 0})
 
+    def test_fast_second_scan_is_queued_not_merged(self):
+        out = self._run(r'''
+let releaseFirst; const asked = [];
+context.window.PosScan = code => { asked.push(code);
+  return code === "A" ? new Promise(r => { releaseFirst = r; }) : Promise.resolve({data:{variant_id:2, name:"B", price:20}}); };
+const s = mkState({scanCode:"A"});
+(async () => {
+  const first = s.onScan();
+  out.cleared = s.scanCode;
+  s.scanCode = "B"; const second = s.onScan();
+  while (!releaseFirst) await new Promise(r => setTimeout(r, 0));
+  releaseFirst({data:{variant_id:1, name:"A", price:10}}); await first; await second;
+  out.asked = asked; out.ids = s.draft.cart.map(i => i.variant_id); out.scan = s.scanCode; done();
+})();
+''')
+        self.assertEqual(out, {"cleared": "", "asked": ["A", "B"], "ids": [1, 2], "scan": ""})
+
+    def test_not_found_scan_keeps_input_empty(self):
+        out = self._run(r'''
+context.window.PosScan = async () => { throw new Error("找不到此條碼"); };
+const s = mkState({scanCode:"X9"});
+(async () => { await s.onScan(); out.scan = s.scanCode; out.errors = s._errors; done(); })();
+''')
+        self.assertEqual(out, {"scan": "", "errors": ["條碼 X9：找不到此條碼"]})
+
     def test_cart_item_carries_current_stock(self):
         out = self._run(r'''
 const s = mkState();

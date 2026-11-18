@@ -51,6 +51,34 @@ class DayCloseTest(FacadeTestCase):
             self.conn.execute(sql, args)
         self.conn.rollback()
 
+    # ---- 立帳後備份 ----
+    def test_close_writes_backup_and_extra_copy(self):
+        import os
+        extra = os.path.join(os.path.dirname(self.db), "usb")
+        os.makedirs(extra)
+        self.invoke("dayclose.set_backup_dir", {"path": extra})
+        self.assertEqual(self.invoke("dayclose.backup_dir"), {"path": extra})
+        result = self.close(day(), 0)
+        self.assertEqual(result["backup_failed"], [])
+        name = f"pos_close_{day()}.db"
+        self.assertTrue(os.path.isfile(os.path.join(os.path.dirname(self.db), "backups", name)))
+        self.assertTrue(os.path.isfile(os.path.join(extra, name)))
+
+    def test_missing_offsite_folder_is_skipped(self):
+        import os, shutil
+        extra = os.path.join(os.path.dirname(self.db), "usb")
+        os.makedirs(extra)
+        self.invoke("dayclose.set_backup_dir", {"path": extra})
+        shutil.rmtree(extra)   # 隨身碟拔掉
+        result = self.close(day(), 0)
+        self.assertEqual(result["backup_failed"], [])
+        self.assertTrue(self.invoke("dayclose.preview", {"business_date": day()})["closed"])
+        self.assertFalse(os.path.exists(extra))
+
+    def test_set_backup_dir_rejects_missing_folder(self):
+        self.assert_application_error("validation_error", "dayclose.set_backup_dir", {"path": "Z:/不存在的資料夾"})
+        self.assertEqual(self.invoke("dayclose.set_backup_dir", {"path": "  "}), {"path": ""})
+
     # ---- 帳日 ----
     def test_checkout_books_today_until_closed_then_next_day(self):
         self.assertEqual(self.invoke("dayclose.current"), {"business_date": day(), "today": day()})

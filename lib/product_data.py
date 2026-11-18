@@ -39,7 +39,10 @@ def models_by_variant(conn, ids):
     out = {}
     if not ids: return out
     qs = in_clause(ids)
-    for r in conn.execute(f"SELECT vm.variant_id,COALESCE(NULLIF(m.alias,''),m.name) name FROM VariantModel vm JOIN PhoneModel m ON vm.model_id=m.model_id WHERE vm.variant_id IN ({qs}) ORDER BY m.sort,m.model_id", ids):
+    for r in conn.execute(
+            "SELECT vm.variant_id,COALESCE(NULLIF(m.alias,''),m.name) name "
+            "FROM VariantModel vm JOIN PhoneModel m ON vm.model_id=m.model_id "
+            f"WHERE vm.variant_id IN ({qs}) ORDER BY m.sort,m.model_id", ids):
         out.setdefault(r["variant_id"], []).append(r["name"])
     return out
 
@@ -153,7 +156,8 @@ def set_variant_attributes(conn, vid, category_id, attributes):
         for val in values:
             row = find_option(conn, fid, val, original)
             if row is None and kind == "tags":
-                conn.execute("INSERT OR IGNORE INTO AttributeOption(field_id,value,sort) VALUES(?,?,?)", (fid, val, next_sort(conn, "AttributeOption", "field_id=?", (fid,))))
+                conn.execute("INSERT OR IGNORE INTO AttributeOption(field_id,value,sort) VALUES(?,?,?)",
+                             (fid, val, next_sort(conn, "AttributeOption", "field_id=?", (fid,))))
                 row = find_option(conn, fid, val)
             if row is None: raise ValidationError(f"規格欄「{name}」查無選項「{val}」")
             oid = row["option_id"]
@@ -202,7 +206,12 @@ def check_field_name(conn, category_id, name, exclude_field_id=None):
 def attr_rows(conn, ids):
     if not ids: return []
     qs=in_clause(ids)
-    return conn.execute(f"SELECT va.variant_id,f.name field_name,f.field_type,o.value option_value,va.text_value FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id JOIN Variant v ON va.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id LEFT JOIN AttributeOption o ON va.option_id=o.option_id WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,f.sort,f.field_id,o.sort,o.option_id", ids).fetchall()
+    return conn.execute(
+        "SELECT va.variant_id,f.name field_name,f.field_type,o.value option_value,va.text_value "
+        "FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id "
+        "JOIN Variant v ON va.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id "
+        "LEFT JOIN AttributeOption o ON va.option_id=o.option_id "
+        f"WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,f.sort,f.field_id,o.sort,o.option_id", ids).fetchall()
 
 
 def attrs_by_variant(conn, ids):
@@ -229,7 +238,12 @@ def variant_sort_keys(conn, ids):
     keys={vid:[0,0,[],[]] for vid in ids}
     if not ids:return {}
     qs=in_clause(ids)
-    for r in conn.execute(f"SELECT va.variant_id,f.field_type,f.sort fsort,f.field_id,o.sort osort,o.option_id,o.value oval FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id JOIN Variant v ON va.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id LEFT JOIN AttributeOption o ON va.option_id=o.option_id WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,f.sort,f.field_id,o.sort,o.option_id",ids):
+    for r in conn.execute(
+        "SELECT va.variant_id,f.field_type,f.sort fsort,f.field_id,o.sort osort,o.option_id,o.value oval "
+        "FROM VariantAttribute va JOIN AttributeField f ON va.field_id=f.field_id "
+        "JOIN Variant v ON va.variant_id=v.variant_id JOIN Product p ON v.product_id=p.product_id "
+        "LEFT JOIN AttributeOption o ON va.option_id=o.option_id "
+        f"WHERE va.variant_id IN ({qs}) ORDER BY va.variant_id,f.sort,f.field_id,o.sort,o.option_id", ids):
         k=keys[r["variant_id"]]
         if r["field_type"]=="tags":
             if r["oval"]=="抗AR":k[1]=1
@@ -408,14 +422,18 @@ def catalog(conn, include_inactive=False, category_id=None, brand_id=None, model
     if category_id is not None:clauses.append("p.category_id=?");args.append(category_id)
     if brand_id is not None:clauses.append("p.brand_id=?");args.append(brand_id)
     where=" WHERE "+" AND ".join(clauses) if clauses else ""
-    products=conn.execute("SELECT p.*,c.name category_name,b.name brand_name FROM Product p LEFT JOIN Category c ON p.category_id=c.category_id LEFT JOIN Brand b ON p.brand_id=b.brand_id"+where+" ORDER BY c.sort,p.category_id,b.sort,p.name,p.product_id",args).fetchall()
+    products=conn.execute(
+        "SELECT p.*,c.name category_name,b.name brand_name FROM Product p "
+        "LEFT JOIN Category c ON p.category_id=c.category_id LEFT JOIN Brand b ON p.brand_id=b.brand_id"
+        + where + " ORDER BY c.sort,p.category_id,b.sort,p.name,p.product_id", args).fetchall()
     pids=[p["product_id"] for p in products]; rows=[]
     # 待處理篩選需納入停用中的問題子產品(問題筆恆停用)
     if pids:
         qs=in_clause(pids);active="" if (include_inactive or pending) else " AND active=1"
         rows=conn.execute(f"SELECT * FROM Variant WHERE product_id IN ({qs}){active} ORDER BY product_id,variant_id",pids).fetchall()
     if model_id is not None:
-        allowed={r[0] for r in conn.execute("SELECT variant_id FROM VariantModel WHERE model_id=?",(model_id,))};rows=[r for r in rows if r["variant_id"] in allowed]
+        allowed={r[0] for r in conn.execute("SELECT variant_id FROM VariantModel WHERE model_id=?",(model_id,))}
+        rows=[r for r in rows if r["variant_id"] in allowed]
     ids=[r["variant_id"] for r in rows]; attrs=attrs_by_variant(conn,ids);disp=display_attrs(conn,ids);models=models_by_variant(conn,ids);sorts=variant_sort_keys(conn,ids);stocks=stock_map(conn,ids);issues=variant_issues(conn,ids)
     if pending:
         rows=[r for r in rows if issues.get(r["variant_id"])]

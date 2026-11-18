@@ -32,6 +32,7 @@ window.PosPages["page-settings"] = {
       section: "category",
       passwordForm: { old: "", next: "", confirm: "" },
       idleLogoutMin: "",
+      backupDir: "",
       payments: [], newPayment: { name: "", rate: "" },
       selCatId: null, newCatName: "",
       tplFields: [], bigProducts: [],
@@ -154,6 +155,14 @@ window.PosPages["page-settings"] = {
         await PosConfirm.notify(this.idleLogoutMin === "0" ? "已設定為不自動登出。" : `已設定為閒置 ${this.idleLogoutMin} 分鐘自動登出。`);
       });
     },
+    async saveBackupDir() {
+      this.errorScope = "backup";
+      if (!window.PosAuth.isAdmin) { this.showError("需要管理者權限"); return; }
+      await this.guard(async () => {
+        this.backupDir = (await API.setBackupDir(this.backupDir)).path;
+        await PosConfirm.notify(this.backupDir ? `每日開啟程式及立帳後，會備份一份到「${this.backupDir}」。` : "已設定為不使用異地備份。");
+      });
+    },
     // scope 決定訊息出現在哪一段(category／brands／phoneBrands／models),
     // 不指定就歸商品種類那段;沒有歸屬會四個區塊同時亮。
     showError(message, scope) {
@@ -171,6 +180,7 @@ window.PosPages["page-settings"] = {
         this.models = await API.listModels({ all: 1 });
         this.payments = await API.listPayments();
         this.idleLogoutMin = String((await API.idleLogout()).minutes);
+        this.backupDir = (await API.backupDir()).path;
         this._takeSnap();
         if (!this.categories.some(c => c.category_id === this.selCatId))
           this.selCatId = this.categories.length ? this.categories[0].category_id : null;
