@@ -39,7 +39,7 @@ COPY_TABLES = [  # 欄位與來源相同，原樣複製（保留主鍵）
 ]
 CONVERT_TABLES = ["AttributeField"]  # 由來源 AttributeField＋CategoryField 轉換
 SOURCE_ONLY_TABLES = ["CategoryField"]  # 只存在來源，已併入 AttributeField
-SKIP_TABLES = ["Sale", "SaleItem", "StockMovement", "StocktakeSession", "StocktakeItem",
+SKIP_TABLES = ["Sale", "SaleItem", "StockMovement", "StockLoss", "StocktakeSession", "StocktakeItem",
                "ReturnSession", "ReturnItem", "Receipt", "ReceiptItem", "DayClose", "DayClosePayment", "Correction"]
 SEED_TABLES = ["PaymentMethod"]  # 不從來源帶,由種子建預設(來源是 v24,付款方式還在 Setting 裡)
 # Setting 逐鍵處理：schema_version 由本工具寫入最新版號，密碼依種子預設（不複製來源密碼）。

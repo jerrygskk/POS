@@ -3,7 +3,7 @@ window.PosPages["page-stocktake"] = {
   template: "#tpl-stocktake",
   inject: ["showError"],
   data() {
-    return { sessions: [], current: null, detail: null, scanCode: "", marked: [], busy: false,
+    return { sessions: [], current: null, detail: null, scanCode: "", marked: [], busy: false, lossOpen: false,
              employee: window.PosEmployee };
   },
   computed: {

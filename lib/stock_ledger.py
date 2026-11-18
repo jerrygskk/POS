@@ -70,4 +70,7 @@ def post(conn, kind, source_id, qty=None, employee=None):
         if not qty or qty <= 0 or qty > left:
             raise ConflictError(f"返新數量超過未處理件數（剩 {left} 件）")
         return _insert(conn, kind, row["variant_id"], qty, "return_item_id", source_id, "返新進貨", employee)
+    if kind == "loss":
+        row = _one(conn, "SELECT variant_id, qty FROM StockLoss WHERE loss_id=?", (source_id,))
+        return _insert(conn, kind, row["variant_id"], -row["qty"], "loss_id", source_id, "商品報損")
     raise ValueError(f"不支援的庫存異動類型：{kind}")

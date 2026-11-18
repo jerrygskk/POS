@@ -34,6 +34,7 @@ ADMIN_ACTIONS = frozenset({
     "dayclose.backup_dir", "dayclose.set_backup_dir", "sales.void", "sales.set_payment", "corrections.set_employee",
     "sales.export", "sales.export_save", "stocktake.approve", "stocktake.return", "stocktake.pending_count",
     "returns.set_disposition", "returns.approve", "returns.pending_count", "returns.close_item", "returns.reopen_item",
+    "stockloss.create", "stockloss.history",
     "desktop.child_window.open",
 })
 

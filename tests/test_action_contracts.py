@@ -164,6 +164,8 @@ ACTION_CONTRACTS = {
     "stocktake.return": schema([I("session_id", required=True), LI("variant_ids", required=True, constraint="min_length=1")]),
     "stocktake.approve": schema([I("session_id", required=True)]),
     "stocktake.pending_count": schema([]),
+    "stockloss.create": schema([I("variant_id", required=True), I("qty", required=True, constraint=">=1"), S("reason", required=True, constraint="1..60 chars", blank="reject")], notes=("Admin only.",)),
+    "stockloss.history": schema([S("date_from", default="", constraint="empty|YYYY-MM-DD", blank="reject"), S("date_to", default="", constraint="empty|YYYY-MM-DD", blank="reject")], notes=("Admin only.",)),
     "stocktake.set_note": schema([I("session_id", required=True), I("variant_id", required=True), S("note", required=True, nullable=True, blank="accept")]),
     "stocktake.cancel": schema([I("session_id", required=True), I("employee", required=True, constraint="1..6")]),
     "returns.create": schema([I("employee", required=True, constraint="1..6"), S("kind", required=True, constraint="normal|repair", blank="reject")]),
@@ -261,6 +263,8 @@ TARGET_BY_ACTION = {
     "stocktake.pending_count":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "stocktake.set_note":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
     "stocktake.cancel":"lib.stocktake_service.StocktakeFacade._prepare_payload -> _validate",
+    "stockloss.create":"lib.stockloss_service.StockLossFacade._prepare_payload -> _validate",
+    "stockloss.history":"lib.stockloss_service.StockLossFacade._prepare_payload -> _validate",
     **{action:"lib.returns_service.ReturnsFacade._prepare_payload -> _validate" for action in (
         "returns.create","returns.list","returns.history","returns.detail","returns.scan",
         "returns.set_qty","returns.load_sale","returns.pick","returns.clear","returns.set_refund","returns.set_member","returns.set_reason","returns.remove_item","returns.close",
@@ -429,6 +433,7 @@ EXPECTED_DEFAULTS = {
         ("sales.export_save","member_phone"), ("sales.export","member_phone"),
         ("stock.receipts","date_from"), ("stock.receipts","date_to"),
         ("stocktake.history","date_from"), ("stocktake.history","date_to"),
+        ("stockloss.history","date_from"), ("stockloss.history","date_to"),
         ("returns.history","date_from"), ("returns.history","date_to"),
         ("dayclose.list","date_from"), ("dayclose.list","date_to"),
     }, ""),
@@ -613,6 +618,7 @@ class ActionContractTests(FacadeTestCase):
             "sales.void":{"sale_id":self.sale_id,"reason_code":"duplicate","reason_text":"","expected_total":100},
             "sales.set_payment":{"sale_id":self.sale_id,"payment_id": 2,"expected_payment_id":1},
             "corrections.set_employee":{"doc_type":"sale","doc_id":self.sale_id,"employee":2,"expected_employee":1},
+            "stockloss.create":{"variant_id":self.variant_id,"qty":1,"reason":"摔壞"}, "stockloss.history":{},
             "dayclose.current":{}, "dayclose.preview":{"business_date":"2026-08-10"},
             "dayclose.close":{"business_date":"2026-08-10","counted_total":0,"reason":"","employee":1,"expected":{"float_amount":0,"cash_sales":0, "cash_refund": 0}},
             "dayclose.list":{}, "dayclose.set_float":{"amount":3000}, "dayclose.backup_dir":{}, "dayclose.set_backup_dir":{"path":""},
@@ -630,7 +636,7 @@ class ActionContractTests(FacadeTestCase):
         if action in self.facade.printing.ACTIONS:
             return self.facade.printing._prepare_payload(action, payload)
         for facade in (self.facade.settings, self.facade.products, self.facade.stock,
-                       self.facade.sales, self.facade.dayclose, self.facade.corrections, self.facade.stocktake, self.facade.returns, self.facade.members):
+                       self.facade.sales, self.facade.dayclose, self.facade.corrections, self.facade.stocktake, self.facade.stockloss, self.facade.returns, self.facade.members):
             if action in facade.ACTIONS:
                 return facade._prepare_payload(action, payload)
         self.fail(f"unmapped action {action}")
@@ -641,10 +647,10 @@ class ActionContractTests(FacadeTestCase):
         browser_actions = set(re.findall(r'"([^\"]+)"', declared))
         direct = set().union(self.facade.settings.ACTIONS, self.facade.products.ACTIONS,
                              self.facade.stock.ACTIONS, self.facade.sales.ACTIONS,
-                             self.facade.stocktake.ACTIONS, self.facade.returns.ACTIONS,
+                             self.facade.stocktake.ACTIONS, self.facade.stockloss.ACTIONS, self.facade.returns.ACTIONS,
                              self.facade.printing.ACTIONS, self.facade.members.ACTIONS,
                              self.facade.dayclose.ACTIONS, self.facade.corrections.ACTIONS)
-        self.assertEqual(len(ACTION_CONTRACTS), 127)
+        self.assertEqual(len(ACTION_CONTRACTS), 129)
         self.assertEqual(browser_actions, FRONTEND_ACTIONS | DESKTOP_WINDOW_ACTIONS | AUTH_ACTIONS | DESKTOP_UPDATE_ACTIONS)
         self.assertEqual(direct, (FRONTEND_ACTIONS - {"sales.export_save"}) | {"sales.export"})
         self.assertEqual(set(INTERNAL_ACTION_CONTRACTS), {"sales.export"})
@@ -808,6 +814,9 @@ class ActionContractTests(FacadeTestCase):
             self.invoke("stocktake.close", {"session_id": self.session_id})
             if action == "stocktake.create":
                 self.invoke("stocktake.approve", {"session_id": self.session_id})
+        if action == "stockloss.create":
+            # 共用的進行中盤點單含此款式,盤點中不可報損
+            self.invoke("stocktake.cancel", {"session_id": self.session_id, "employee": 1})
         if action in {"returns.set_disposition", "returns.approve"}:
             self.submit_return(self.return_id)
         if action == "categories.delete_field":
@@ -908,7 +917,7 @@ class ActionContractTests(FacadeTestCase):
                     for action,contract in {**ACTION_CONTRACTS, **INTERNAL_ACTION_CONTRACTS}.items()
                     for path,spec in contract["fields"].items()
                     if spec["default"] != "missing"}
-        self.assertEqual(len(declared), 105)
+        self.assertEqual(len(declared), 107)
         self.assertEqual(declared, EXPECTED_DEFAULTS)
         executed = {}
         for (action,path), expected in EXPECTED_DEFAULTS.items():
@@ -948,7 +957,7 @@ class ActionContractTests(FacadeTestCase):
         self.assertNotIn("skipped", executed.values())
         self.assertEqual(
             {strategy: list(executed.values()).count(strategy) for strategy in set(executed.values())},
-            {"materialized_by_validator":25, "exact_validator_omission":80},
+            {"materialized_by_validator":25, "exact_validator_omission":82},
         )
 
         field_id = self.invoke("fields.create", {"name":"預設型態","category_id":self.category_id})["field_id"]

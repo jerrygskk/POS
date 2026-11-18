@@ -17,16 +17,16 @@ window.PosPages["page-records"] = {
   template: "#tpl-records",
   inject: ["showError"],
   data() {
-    return { kinds: [["sales", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"], ["returns", "退貨"], ["dayclose", "立帳"], ["members", "資料設定"]], kind: "sales",
+    return { kinds: [["sales", "收銀"], ["receive", "進貨"], ["stocktake", "盤點"], ["returns", "退貨"], ["stockloss", "報損"], ["dayclose", "立帳"], ["members", "資料設定"]], kind: "sales",
              dc: emptyDayClose(), correct: null,
              ...defaultRange("sales"), payment: "", payments: [],
-             sales: [], summary: null, receipts: [], stocktakes: [], returns: [], returnKind: "normal", expanded: new Set(),
+             sales: [], summary: null, receipts: [], stocktakes: [], returns: [], losses: [], returnKind: "normal", expanded: new Set(),
              memberPhone: "", memberQuery: "", members: [], memberPopup: null, salesQuery: null };
   },
   computed: {
     isAdmin() { return window.PosAuth.isAdmin; },
-    // 立帳只有管理者看得到
-    shownKinds() { return this.kinds.filter(([key]) => key !== "dayclose" || this.isAdmin); },
+    // 立帳與報損只有管理者看得到
+    shownKinds() { return this.kinds.filter(([key]) => !["dayclose", "stockloss"].includes(key) || this.isAdmin); },
     // 短溢＝錢櫃現金總額 − 預備金 − 現金銷售;還沒輸入數字時為 null
     dcDiff() {
       const p = this.dc.preview, text = this.dc.counted.trim();
@@ -68,15 +68,15 @@ window.PosPages["page-records"] = {
       if (this.kind === "sales") return this.sales.map(s => s.sale_id);
       if (this.kind === "receive") return this.receipts.map(r => r.receipt_id);
       if (this.kind === "returns") return this.returns.map(t => t.return_id);
-      if (this.kind === "members" || this.kind === "dayclose") return [];
+      if (["members", "dayclose", "stockloss"].includes(this.kind)) return [];
       return this.stocktakes.map(t => t.session_id);
     },
   },
   watch: {
-    // 只隱藏選單不夠:管理者登出或閒置逾時時若停在立帳,切回收銀紀錄並清掉已載入的立帳資料
+    // 只隱藏選單不夠:管理者登出或閒置逾時時若停在立帳或報損,切回收銀紀錄並清掉已載入的資料
     isAdmin(now) {
-      if (!now) this.correct = null;
-      if (now || this.kind !== "dayclose") return;
+      if (!now) { this.correct = null; this.losses = []; }
+      if (now || !["dayclose", "stockloss"].includes(this.kind)) return;
       this.clearDayClose();
       this.enterKind("sales");
     },
@@ -91,7 +91,7 @@ window.PosPages["page-records"] = {
   methods: {
     async selectKind(kind) {
       if (this.kind === kind) return;
-      if (kind === "dayclose" && !this.isAdmin) { this.showError("需要管理者權限"); return; }
+      if (["dayclose", "stockloss"].includes(kind) && !this.isAdmin) { this.showError("需要管理者權限"); return; }
       window.scrollTo(0, 0);
       await this.enterKind(kind);
     },
@@ -300,6 +300,11 @@ window.PosPages["page-records"] = {
           const records = await API.dayCloseList(range);
           if (stale() || !this.isAdmin || this.kind !== "dayclose") return;
           this.dc.records = records;
+        } else if (this.kind === "stockloss") {
+          this.losses = [];
+          const losses = await API.stockLossHistory(range);
+          if (stale() || !this.isAdmin || this.kind !== "stockloss") return;
+          this.losses = losses;
         } else if (this.kind === "receive") {
           const receipts = await API.listReceipts(range);
           if (!stale()) this.receipts = receipts;

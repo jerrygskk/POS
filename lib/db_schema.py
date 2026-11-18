@@ -117,29 +117,32 @@ CREATE TABLE IF NOT EXISTS VariantModel(
 CREATE TABLE IF NOT EXISTS StockMovement(
   move_id INTEGER PRIMARY KEY AUTOINCREMENT,
   variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
-  qty INTEGER NOT NULL,           -- 進貨+/銷售-/盤點±/退貨加回+/返新進貨+/作廢沖回+
-  kind TEXT NOT NULL CHECK(kind IN ('purchase','sale','adjust','return','repair','void')),
+  qty INTEGER NOT NULL,           -- 進貨+/銷售-/盤點±/退貨加回+/返新進貨+/作廢沖回+/報損-
+  kind TEXT NOT NULL CHECK(kind IN ('purchase','sale','adjust','return','repair','void','loss')),
   -- 來源明細:恰一個非 NULL,且須符合 kind(purchase→進貨明細、sale／void→銷售明細、
-  -- adjust→盤點明細、return/repair→退貨品項)。複合外鍵保證來源與異動同款式。
+  -- adjust→盤點明細、return/repair→退貨品項、loss→報損紀錄)。複合外鍵保證來源與異動同款式。
   receipt_item_id INTEGER,
   sale_item_id INTEGER,
   stocktake_item_id INTEGER,
   return_item_id INTEGER,
+  loss_id INTEGER,
   note TEXT,
   employee INTEGER CHECK(employee BETWEEN 1 AND 6),  -- 只有返新(repair)記操作員工,其他類型看各自單據
   ts TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   CHECK((receipt_item_id IS NOT NULL) + (sale_item_id IS NOT NULL)
-        + (stocktake_item_id IS NOT NULL) + (return_item_id IS NOT NULL) = 1),
+        + (stocktake_item_id IS NOT NULL) + (return_item_id IS NOT NULL) + (loss_id IS NOT NULL) = 1),
   CHECK((kind='purchase' AND receipt_item_id IS NOT NULL AND qty > 0)
      OR (kind='sale' AND sale_item_id IS NOT NULL AND qty < 0)
      OR (kind='void' AND sale_item_id IS NOT NULL AND qty > 0)
      OR (kind='adjust' AND stocktake_item_id IS NOT NULL AND qty <> 0)
-     OR (kind IN ('return','repair') AND return_item_id IS NOT NULL AND qty > 0)),
+     OR (kind IN ('return','repair') AND return_item_id IS NOT NULL AND qty > 0)
+     OR (kind='loss' AND loss_id IS NOT NULL AND qty < 0)),
   CHECK((kind='repair') = (employee IS NOT NULL)),
   FOREIGN KEY(receipt_item_id, variant_id) REFERENCES ReceiptItem(receipt_item_id, variant_id),
   FOREIGN KEY(sale_item_id, variant_id) REFERENCES SaleItem(item_id, variant_id),
   FOREIGN KEY(stocktake_item_id, variant_id) REFERENCES StocktakeItem(id, variant_id),
-  FOREIGN KEY(return_item_id, variant_id) REFERENCES ReturnItem(id, variant_id)
+  FOREIGN KEY(return_item_id, variant_id) REFERENCES ReturnItem(id, variant_id),
+  FOREIGN KEY(loss_id, variant_id) REFERENCES StockLoss(loss_id, variant_id)
 );
 CREATE INDEX IF NOT EXISTS idx_move_variant ON StockMovement(variant_id);
 -- 同一明細只能入帳一次;返新(repair)可分批,不套用。銷售明細可各有一筆銷售與一筆作廢沖回
@@ -149,6 +152,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_move_void_item ON StockMovement(sale_item_
 CREATE UNIQUE INDEX IF NOT EXISTS idx_move_stocktake_item ON StockMovement(stocktake_item_id) WHERE stocktake_item_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_move_return_item ON StockMovement(return_item_id) WHERE kind='return';
 CREATE INDEX IF NOT EXISTS idx_move_repair ON StockMovement(return_item_id) WHERE kind='repair';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_move_loss ON StockMovement(loss_id) WHERE loss_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS StockLoss(            -- 商品報損:只扣庫存,不進立帳;商品名稱與規格保留登記當下內容
+  loss_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  variant_id INTEGER NOT NULL REFERENCES Variant(variant_id),
+  qty INTEGER NOT NULL CHECK(qty > 0),
+  reason TEXT NOT NULL CHECK(length(trim(reason)) BETWEEN 1 AND 60),
+  name TEXT NOT NULL,
+  spec TEXT NOT NULL DEFAULT '',
+  ts TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  UNIQUE(loss_id, variant_id)
+);
 CREATE TABLE IF NOT EXISTS Receipt(             -- 一般進貨單(返新不建進貨單,直接指向退貨品項)
   receipt_id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -468,12 +482,20 @@ CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_replace BEFORE INSERT ON Stock
               OR receipt_item_id=NEW.receipt_item_id
               OR (sale_item_id=NEW.sale_item_id AND kind=NEW.kind)
               OR stocktake_item_id=NEW.stocktake_item_id
-              OR (kind='return' AND NEW.kind='return' AND return_item_id=NEW.return_item_id))
+              OR (kind='return' AND NEW.kind='return' AND return_item_id=NEW.return_item_id)
+              OR loss_id=NEW.loss_id)
   BEGIN SELECT RAISE(ABORT, '庫存異動不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_update BEFORE UPDATE ON StockMovement
   BEGIN SELECT RAISE(ABORT, '庫存異動不可修改或刪除'); END;
 CREATE TRIGGER IF NOT EXISTS trg_stockmovement_no_delete BEFORE DELETE ON StockMovement
   BEGIN SELECT RAISE(ABORT, '庫存異動不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_stockloss_no_replace BEFORE INSERT ON StockLoss
+  WHEN EXISTS(SELECT 1 FROM StockLoss WHERE loss_id=NEW.loss_id)
+  BEGIN SELECT RAISE(ABORT, '報損紀錄不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_stockloss_no_update BEFORE UPDATE ON StockLoss
+  BEGIN SELECT RAISE(ABORT, '報損紀錄不可修改或刪除'); END;
+CREATE TRIGGER IF NOT EXISTS trg_stockloss_no_delete BEFORE DELETE ON StockLoss
+  BEGIN SELECT RAISE(ABORT, '報損紀錄不可修改或刪除'); END;
 -- 鎖帳:帳日已立帳的銷售單,員工代號以外一律不可新增、修改、刪除(只看帳日,不看有沒有庫存異動)。
 -- 連同兩種 REPLACE 撞上已立帳單的主鍵一併擋下
 CREATE TRIGGER IF NOT EXISTS trg_sale_closed_insert BEFORE INSERT ON Sale

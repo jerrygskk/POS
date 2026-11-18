@@ -236,6 +236,7 @@
     <div class="scan-row">
       <employee-picker></employee-picker>
       <button class="primary" @click="openNew">開新盤點單</button>
+      <button v-if="isAdmin" @click="lossOpen=true">商品報損</button>
     </div>
     <table>
       <thead><tr><th>單號</th><th>開始時間</th><th>狀態</th><th>員工</th><th></th></tr></thead>
@@ -281,6 +282,7 @@
       </tr></tbody>
     </table>
   </div>
+  <stock-loss v-if="lossOpen && isAdmin" @close="lossOpen=false"></stock-loss>
 </div>
 </template>
 <template id="tpl-returns">
@@ -621,6 +623,14 @@
             </td></tr>
           </template>
         </tbody>
+      </table>
+      <table v-else-if="kind==='stockloss' && isAdmin" class="records-table">
+        <colgroup><col class="col-w180"><col><col class="col-w56"><col class="col-w240"></colgroup>
+        <thead><tr><th>時間</th><th>商品</th><th class="num">數量</th><th>原因</th></tr></thead>
+        <tbody><tr v-for="l in losses" :key="l.loss_id">
+          <td>{{ minuteText(l.ts) }}</td><td>{{ l.name }} <span class="records-spec">{{ l.spec }}</span></td>
+          <td class="num">{{ l.qty }}</td><td>{{ l.reason }}</td>
+        </tr></tbody>
       </table>
       <table v-if="kind==='members'" class="records-table">
         <colgroup><col><col><col class="col-w130"><col class="col-w130"></colgroup>
@@ -1170,6 +1180,7 @@
 <script src="js/employeepicker.js?v=377"></script>
 <script src="js/membereditor.js?v=377"></script>
 <script src="js/doccorrect.js?v=377"></script>
+<script src="js/stockloss.js?v=377"></script>
 <script src="js/attrfields.js?v=377"></script>
 <script src="js/settings.js?v=377"></script>
 <script src="js/labels.js?v=377"></script>

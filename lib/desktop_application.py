@@ -15,6 +15,7 @@ from lib.dayclose_service import DayCloseFacade, backup_extra_dir
 from lib.db import db_conn
 from lib.correction_service import CorrectionFacade
 from lib.stocktake_service import StocktakeFacade
+from lib.stockloss_service import StockLossFacade
 from lib.returns_service import ReturnsFacade
 from lib.member_service import MemberFacade
 from lib.printing_service import PrintingFacade
@@ -39,6 +40,7 @@ class DesktopFacade:
         self.dayclose = DayCloseFacade(db_path)
         self.corrections = CorrectionFacade(db_path)
         self.stocktake = StocktakeFacade(db_path, session=self.session)
+        self.stockloss = StockLossFacade(db_path)
         self.returns = ReturnsFacade(db_path, session=self.session)
         self.printing = PrintingFacade(db_path)
         self.members = MemberFacade(db_path, session=self.session)
@@ -65,6 +67,8 @@ class DesktopFacade:
             return result
         if action in StocktakeFacade.ACTIONS:
             return self.stocktake.invoke(action, payload)
+        if action in StockLossFacade.ACTIONS:
+            return self.stockloss.invoke(action, payload)
         if action in ReturnsFacade.ACTIONS:
             return self.returns.invoke(action, payload)
         if action in MemberFacade.ACTIONS:
