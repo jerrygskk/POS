@@ -267,7 +267,7 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 - **轉換**：`CategoryField` 併入 `AttributeField`（啟用取兩者皆啟用），保留原主鍵與 `sqlite_sequence`。單一交易寫入、`defer_foreign_keys`，commit 前跑外鍵檢查，再以 `check_variant_attributes` 核對單選單值與欄型別。⚠️ 每張資料表與設定鍵都要歸在「複製」或「不複製」清單，未歸類就停止；`payments` 等舊設定鍵不複製，`PaymentMethod` 由種子建（歸在 `SEED_TABLES`，來源沒有這張表）；`next_store_barcode` 必須帶，否則新條碼會撞號。
 - **對帳**：轉完逐表比對資料列、設定鍵與流水號，經正式 `init_db` 再開一次，最後核對來源雜湊值未變。任一步失敗都刪掉輸出檔（含 `-journal`）。
 - **來源結構凍結**在 `tests/fixtures/schema_v24.sql`，測試用它造 v24 來源。
-- **母版**：v24 原始檔 `docs/standard_db/pos_standard.db`（轉換來源，不要刪）與轉出的 `pos_standard_v1.db`（`docs/` 不入庫，換機器要自行複製）。`DayClose`、`DayClosePayment`、`Correction` 屬營業紀錄，不複製。結構有改就重新轉出：
+- **母版**：v24 原始檔 `docs/standard_db/pos_standard.db`（轉換來源，不要刪）與轉出的 `pos_standard_v1_stockloss.db`（`docs/` 不入庫，換機器要自行複製）。`DayClose`、`DayClosePayment`、`Correction` 屬營業紀錄，不複製。結構有改就重新轉出：
 
 ```
 python tools/make_standard_db.py --source docs/standard_db/pos_standard.db --output docs/standard_db/pos_standard_v1_new.db
@@ -345,8 +345,8 @@ python tools/publish_release.py
 
 | 版本 | 摘要 |
 |------|------|
+| v1.0.0 | **正式版，資料庫版號重新從 1 起算**。①退貨退款、立帳扣現金退款、帶銷售單退貨；退貨單送出後不可抽回。②商品報損（限管理者，只扣庫存、不影響帳務）。③異地備份資料夾。④銷售與退貨明細保留成交當下的品名與規格。⑤連續掃描不黏碼、商品資料防呆。⑥⚠️ 舊版資料庫無法開啟，也沒有升級步驟，換版時要同時換上新母版。 |
 | v0.2.1 | **每日立帳、作廢銷售單與單據更正，schema v28**。①銷售單加帳日，紀錄查詢的日期、合計、匯出改看帳日；v27 資料庫開啟時自動升級。②每日立帳（限管理者），立帳後該帳日的銷售單鎖住，沖帳只能走退貨。③作廢銷售單（限管理者、未立帳、尚無退貨單），原單保留、庫存沖回、不計入合計。④更正付款方式與修正操作者（銷售、進貨、退貨、盤點），每次留更正紀錄。 |
 | v0.2.0 | **會員、退貨返修與資料庫正規化，schema v27**。①會員名單、收銀查詢會員、紀錄查詢顯示會員電話。②收銀實售價欄、折數按鈕，付款方式改轉帳。③退貨返修流程與返新進貨，返修改為退貨單整張種類。④建立進貨單，庫存異動有明確來源；規格欄直接隸屬種類。⑤v27 以前的舊資料庫一律拒開。⑥修正大量收銀、盤點、返修、連點與焦點問題。 |
-| v0.1.4 | **紀錄查詢改版與收銀折扣，schema v21**。①紀錄查詢改橫線表格、項數鈕與明細小表格，可多筆展開，依類別預設日期。②收銀新增會員折扣、小計列與純數字金額欄。③明細加適用機型、補售價併入主程式、訂小解析度標準。④商品資料庫售價併為一欄、操作欄僅管理者顯示、條碼全部列出。 |
 
 本節只留最近三個版本；**被擠掉的逐版記錄全部在 [HISTORY.md](HISTORY.md)**，進版時把被擠掉的那一列搬過去。
