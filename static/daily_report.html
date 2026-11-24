@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>日報表</title>
+<link rel="stylesheet" href="css/pos.css?v=379">
+<link rel="stylesheet" href="css/dialog-theme.css?v=379">
+</head>
+<body>
+<div id="daily-report" v-cloak>
+  <div class="dialog-shell">
+    <div class="dr-toolbar">
+      <span class="dr-db" :title="dbPath">
+        <span class="dr-label">POS 資料庫</span>
+        <b>{{ dbName || '尚未選擇' }}</b>
+        <small v-if="dbFolder">{{ dbFolder }}</small>
+      </span>
+      <button type="button" class="dr-link" @click="chooseDb">選擇資料庫</button>
+      <span class="dr-label">日期</span>
+      <input type="date" v-model="date" @change="changeDate">
+      <span v-if="row" class="dr-status" :class="{open: !row.closed}">{{ row.closed ? '已立帳' : '尚未立帳' }}</span>
+    </div>
+
+    <div class="dialog-content">
+      <div v-if="posError" class="notice-bar">{{ posError }}：營業額與個績無法帶入，手填資料仍可儲存。</div>
+      <!-- 版面照紙本日報表與 Excel 每日頁的格子:灰底＝自動帶入或計算,底線欄位＝手填 -->
+      <div v-if="row" class="dr-paper">
+        <div class="dr-title">{{ month }}<small>月</small>{{ day }}<small>日</small><span>{{ row.weekday }}</span></div>
+
+        <div class="dr-grid dr-row1">
+          <div class="dr-h">營業額</div>
+          <div class="dr-weather">
+            <span><button type="button" ref="weather" :class="{on: form.weather === '晴'}" @click="toggleWeather('晴')" title="晴">晴</button></span>
+            <span><button type="button" :class="{on: form.weather === '雨'}" @click="toggleWeather('雨')" title="雨">雨</button></span>
+          </div>
+          <div class="dr-h">累計營業額</div>
+          <div class="dr-h">開(收)支</div>
+          <div class="dr-h">累計開支</div>
+          <div class="dr-h">當日餘額</div>
+          <div class="dr-v">{{ money(row.revenue) }}</div>
+          <div class="dr-v">{{ money(row.cum_revenue) }}</div>
+          <div class="dr-v">{{ money(view.expense) }}</div>
+          <div class="dr-v">{{ money(view.cum_expense) }}</div>
+          <div class="dr-v">{{ money(view.balance) }}</div>
+        </div>
+
+        <div class="dr-grid dr-row2">
+          <div class="dr-box dr-goods">
+            <div class="dr-box-head">
+              <b>當日貨款</b>
+              <button v-if="canAdd('goods')" type="button" class="dr-add" title="增加一列" @click="addLine('goods')">＋</button>
+              <span class="dr-sum">{{ money(view.goods) }}</span>
+            </div>
+            <div class="dr-goods-lines">
+              <div v-for="(line, i) in form.goods" :key="i" class="dr-line">
+                <input v-model="line.text" maxlength="30" :placeholder="i === 0 ? '廠商' : ''">
+                <input v-model="line.amount" inputmode="numeric" @change="line.amount = tidy(line.amount)" :class="{'dr-bad': invalid(line.amount, 'goods')}">
+              </div>
+            </div>
+          </div>
+          <div class="dr-h">累計貨款</div>
+          <div class="dr-box dr-owed">
+            <div class="dr-box-head">
+              <b>尚欠貨款</b>
+              <button v-if="canAdd('owed')" type="button" class="dr-add" title="增加一列" @click="addLine('owed')">＋</button>
+            </div>
+            <!-- Excel 每列只有一格、沒有公式，照樣做成單欄自由填寫，算法待老闆確認 -->
+            <div v-for="(line, i) in form.owed" :key="i" class="dr-line dr-line-single">
+              <input v-model="line.text" maxlength="30">
+            </div>
+          </div>
+          <div class="dr-side">
+            <div><b>累計現流</b><span>{{ money(view.cum_cash) }}</span></div>
+            <div><b>應付貨款</b><input v-model="form.payable" inputmode="numeric" @change="form.payable = tidy(form.payable)" :class="{'dr-bad': invalid(form.payable, 'payable')}"></div>
+            <div><b>尚餘現流</b><span>{{ money(view.remain) }}</span></div>
+          </div>
+          <div class="dr-v">{{ money(row.cum_goods) }}</div>
+          <div class="dr-extra">
+            <span><em>總貨款</em>{{ money(view.goods_total) }}</span>
+          </div>
+        </div>
+
+        <div class="dr-grid dr-emps">
+          <div class="dr-h dr-emps-title">每日<br>個績</div>
+          <div v-for="(mark, i) in circled" :key="i" class="dr-emp">
+            <span class="dr-mark">{{ mark }}</span>
+            <b>{{ row.emp_active[i] && row.employees ? money(row.employees[i]) : '' }}</b>
+            <small>{{ row.emp_active[i] ? '累計 ' + money(row.cum_employees[i]) : '' }}</small>
+          </div>
+        </div>
+
+        <div class="dr-grid dr-lists">
+          <div v-for="list in lists" :key="list.kind" class="dr-box">
+            <div class="dr-box-head">
+              <b>{{ list.title }}</b>
+              <button v-if="canAdd(list.kind)" type="button" class="dr-add" title="增加一列" @click="addLine(list.kind)">＋</button>
+              <span class="dr-sum">{{ money(sums[list.kind]) }}</span>
+            </div>
+            <div v-for="(line, i) in form[list.kind]" :key="i" class="dr-line">
+              <input v-model="line.text" maxlength="30" :placeholder="i === 0 ? list.textLabel : ''">
+              <input v-model="line.amount" inputmode="numeric" @change="line.amount = tidy(line.amount)" :class="{'dr-bad': invalid(line.amount, list.kind)}">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="dialog-footer">
+      <div v-if="error" class="dialog-error">{{ error }}</div>
+      <div class="dialog-actions">
+        <span class="dialog-hint dialog-actions-spacer">{{ dirty ? '有尚未儲存的修改' : '' }}</span>
+        <button type="button" class="dialog-cancel" :disabled="busy || !row" @click="exportPdf('day')">匯出當日 PDF</button>
+        <button type="button" class="dialog-cancel" :disabled="busy || !row" @click="exportPdf('days')">匯出整月日報表 PDF</button>
+        <button type="button" class="dialog-cancel" :disabled="busy || !row" @click="exportPdf('month')">匯出本月總表 PDF</button>
+        <button type="button" class="dialog-confirm" :disabled="busy || !dirty" @click="save">{{ busy ? '處理中…' : '儲存' }}</button>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="js/vue.global.prod.js?v=379"></script>
+<script src="js/confirm.js?v=379"></script>
+<script src="js/daily_report.js?v=379"></script>
+</body>
+</html>

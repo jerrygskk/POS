@@ -37,3 +37,6 @@ release_note_v*.md
 # 開發用資料庫初始化工具(清交易紀錄、庫存設 1),不入庫
 reset_db.bat
 reset_db.py
+# 日報表工具開發時的手填資料(老闆的帳,不入庫)
+daily_report/daily_report.db
+daily_report/error.log

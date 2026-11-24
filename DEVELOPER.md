@@ -239,6 +239,15 @@ main.py → RuntimePaths.detect() → 版號檢查 → 升級前備份 → init_
 
 設定頁「工具 → 補售價」開子視窗。`variants.price_list`／`price_save` 都在 `ADMIN_ACTIONS`。存檔同一交易，任一筆不合格整批不寫，逐筆走 `update_variant` 使待處理筆重驗一致。「填入選取列」只套用畫面上看得到的已選列。
 
+### 日報表（獨立程式 `daily_report/`）
+
+給老闆用的獨立 exe，電子化紙本日報表與 Excel「日營業額v5.xlsx」。欄位、算法、明細列數一律照該 Excel。
+- **對 POS 只讀**：`pos_reader.read_month` 以 SQLite `mode=ro` 開啟，整月在同一讀取交易內取完即關閉，不 import POS 的寫入路徑。只讀已立帳的帳日（`DayClose` 有資料），營業額＝`DayClosePayment` 合計－`DayClose.cash_refund`；個績取 `Sale`（不含作廢、不扣退款）；沒記員工的舊單不列入個績。
+- **手填**存 exe 旁的 `daily_report.db`（不入庫）：天氣、應付貨款，與四種明細（當日貨款 12、尚欠貨款 6、備註 12、開支 12 列，上限照 Excel）。畫面預設 4 列，按「＋」加到上限。⚠️ 尚欠貨款照 Excel 每列一格、只存文字、不計算；Excel 沒有它與應付貨款的公式，算法待老闆確認，不要自行推測補公式。
+- **算法**（`calc.py`）：累計每月 1 日重來；累計貨款算到前一天、總貨款含當天；備註金額只加總、不扣開支；尚餘現流＝當日餘額；未立帳日營業額當 0 累計，開支照扣。個績只顯示當月到該日為止有過業績的員工（`emp_active`），其餘留白。
+- **畫面** `static/daily_report.html` 照紙本格子排，沿用 `dialog-theme.css` 公版與 `PosConfirm`，依視窗高度自動縮放（最小 70%）。
+- **PDF**（reportlab，只裝在這支；字型用系統微軟正黑體）：日報表 A4 直式一面兩天，單日版面以 A4 橫式座標畫好再縮 1/√2 放進上下半張；固定配對單數日在上（1、2 日一面），整月匯出只印有資料的那幾面。明細空白時只畫 4 列，格子高度跟著列數縮。月總表照 Excel 總表 22 欄。
+
 ### 線上更新
 
 開啟時查 GitHub Releases，有新版詢問，核對後換檔重開；原始碼執行一律回報無更新。
@@ -318,6 +327,12 @@ python -m unittest discover -s tests
 ```powershell
 Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
 python -m PyInstaller --clean --noconfirm POS.spec
+```
+
+日報表（產出 `dist/日報表.exe`，需 `reportlab`）：
+
+```powershell
+python -m PyInstaller --clean --noconfirm daily_report/daily_report.spec
 ```
 
 - 本節是打包命令唯一來源。產出 `dist/POS.exe`，執行前將 `pos.db` 放在同層。
