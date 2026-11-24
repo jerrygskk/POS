@@ -74,6 +74,7 @@
 - **PKG-2**: **打包版雙擊完全沒反應、連 log 都沒有** → onefile 開機先把整包解壓到 C 槽 `%TEMP%`（可達上百 MB），發生在任何程式碼執行之前（bootloader 階段），自家錯誤處理攔不到也留不下紀錄；排查時先確認 C 槽可用空間。
 - **PKG-3**: **清除指令靜默失敗** → 清除步驟用 PowerShell 語法；Git Bash 不識別 CMD 的 `del`/`rmdir`，指令可能靜默失敗。完整打包命令只以 DEVELOPER §4 為準。
 - **PKG-4**: **fresh clone build 失敗（缺 `version_info.txt`）** → 該檔不入庫，先跑一次 `python tools/bump_version.py {現版號}` 產出（DEVELOPER §5）。
+- **PKG-5**: **日報表 exe 開不起來，報「You must have pythonnet installed」，traceback 出現 `%TEMP%\clr.py`** → 程式開頭為了開發時能直接執行而 `sys.path.insert(0, 上一層)`；打包後 `__file__` 在 `%TEMP%\_MEIxxxx`，上一層就是 `%TEMP%`，那裡的同名零散 `.py` 會蓋掉套件。這類 sys.path 調整一律加 `not getattr(sys, "frozen", False)`。
 
 #### LBL：標籤機（NIIMBOT B1，USB 序列）
 

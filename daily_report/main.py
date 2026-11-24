@@ -6,7 +6,9 @@ import sys
 import traceback
 from pathlib import Path
 
-if __package__ in (None, ""):
+# 開發時直接執行本檔要能 import daily_report；打包後不可加：上一層是系統 Temp，
+# 會讓同名的零散 .py(例如 clr.py)蓋掉套件，pywebview 因此開不起來
+if __package__ in (None, "") and not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from daily_report import calc, pdf_export
